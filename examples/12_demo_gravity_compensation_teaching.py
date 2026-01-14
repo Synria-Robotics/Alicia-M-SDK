@@ -22,7 +22,8 @@ import os
 # 添加SDK路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from alicia_m_sdk.api import RobotArm
+import alicia_m_sdk
+from alicia_m_sdk.hardware import ServoDriver
 from alicia_m_sdk.execution import GravityCompensationTeaching, HardwareExecutor
 from alicia_m_sdk.execution.drag_teaching import list_available_motions
 import json
@@ -89,7 +90,12 @@ def main():
     
     # 连接机器人
     print(f"\n[连接] 串口: {args.port}")
-    robot = RobotArm(port=args.port, debug_mode=args.debug)
+    robot = alicia_m_sdk.create_robot(
+        port=args.port,
+        debug_mode=args.debug,
+        control_aim="teach",
+        control_mode="mit_torque"
+    )
     
     if not robot.connect():
         print("[错误] 无法连接到机器人")

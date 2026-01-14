@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) 2025 Synria Robotics Co., Ltd.
 #
 # This program is free software: you can redistribute it and/or modify
@@ -25,23 +26,18 @@ Features:
 - Move to target position
 """
 
-# Copyright (c) 2025 Synria Robotics Co., Ltd.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
-# Author: Synria Robotics Team
-# Website: https://synriarobotics.ai
+import argparse
+import time
+
+import numpy as np
+import robocore as rc
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.transform.conversions import quaternion_to_matrix
+from robocore.utils.backend import to_numpy
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+import alicia_m_sdk
+from alicia_m_sdk.hardware import ServoDriver
 
 
 
@@ -52,8 +48,8 @@ def main(args):
         robot_version=args.robot_version,
         base_link=args.base_link,
         end_link=args.end_link,
-        control_aim=ServoDriver.AIM_TEACH,
-        control_mode=ServoDriver.PATTERN_MIT
+        control_aim="teach",
+        control_mode="mit"
     )
 
     # Set backend

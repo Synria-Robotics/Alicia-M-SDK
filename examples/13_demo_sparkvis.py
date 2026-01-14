@@ -47,8 +47,8 @@ def main(args):
         baudrate=args.baudrate,
         robot_version=args.robot_version,
         gripper_type=args.gripper_type,
-        control_aim=ServoDriver.AIM_TEACH,
-        control_mode=ServoDriver.PATTERN_MIT_POSITION
+        control_aim="teach",
+        control_mode="mit_position"
     )
 
     try:

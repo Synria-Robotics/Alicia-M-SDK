@@ -55,8 +55,8 @@ def main(args):
         robot_version=args.robot_version,
         base_link=args.base_link,
         end_link=args.end_link,
-        control_aim=ServoDriver.AIM_TEACH if args.control_aim == 'teach' else ServoDriver.AIM_OPERATION,
-        control_mode=ServoDriver.PATTERN_MIT if args.use_mit_mode else ServoDriver.PATTERN_PV
+        control_aim=args.control_aim,
+        control_mode="mit" if args.use_mit_mode else "pv"
     )
     rc.set_backend(args.backend, device=args.device)
     robot_model = robot.robot_model

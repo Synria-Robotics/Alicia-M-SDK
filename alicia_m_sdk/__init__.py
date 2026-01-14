@@ -83,19 +83,21 @@ def _get_gripper_type_from_json() -> str:
 
 def create_robot(
     port: str = "",
+    baudrate: int = 1000000,
     gripper_type: str = None,
     robot_version: str = "v1_0",
     debug_mode: bool = False,
     auto_connect: bool = True,
     base_link: str = "base_link",
     end_link: str = "tool0",
-    control_aim: int = None,
-    control_mode: tuple = None,
+    control_aim: str = None,
+    control_mode: str = None,
 ) -> SynriaRobotAPI:
     """
     Create robot instance.
 
     :param port: Serial port
+    :param baudrate: Serial port baudrate (default: 1000000)
     :param gripper_type: Gripper type:
         - explicit value such as "50mm" / "100mm" for user-defined configuration
         - None to auto-select from saved JSON (if available) or default to "100mm"
@@ -104,18 +106,54 @@ def create_robot(
     :param auto_connect: Auto connect to robot
     :param base_link: Base link name in the robot model (default 'base_link')
     :param end_link: End link name in the robot model (default 'tool0')
-    :param control_aim: Control target (ServoDriver.AIM_TEACH, AIM_OPERATION, etc.) - Motor-specific
-    :param control_mode: Control mode (ServoDriver.PATTERN_PV, PATTERN_PVT, etc.) - Motor-specific
+    :param control_aim: Control target string - "teach" or "operation" (Motor-specific)
+    :param control_mode: Control mode string - "pv", "pvt", "v", "mit", "mit_position", "mit_speed", "mit_torque" (Motor-specific)
     :return: SynriaRobotAPI instance
     """
     effective_gripper_type = gripper_type if gripper_type is not None else _get_gripper_type_from_json()
 
+    # Convert control_aim string to constant
+    control_aim_const = None
+    if control_aim is not None:
+        if isinstance(control_aim, str):
+            control_aim_lower = control_aim.lower()
+            if control_aim_lower == 'teach':
+                control_aim_const = ServoDriver.AIM_TEACH
+            elif control_aim_lower == 'operation':
+                control_aim_const = ServoDriver.AIM_OPERATION
+            else:
+                raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: 'teach', 'operation'")
+        else:
+            # Backward compatibility: accept int directly
+            control_aim_const = control_aim
+
+    # Convert control_mode string to constant
+    control_mode_const = None
+    if control_mode is not None:
+        if isinstance(control_mode, str):
+            control_mode_lower = control_mode.lower()
+            mode_map = {
+                'pv': ServoDriver.PATTERN_PV,
+                'pvt': ServoDriver.PATTERN_PVT,
+                'v': ServoDriver.PATTERN_V,
+                'mit': ServoDriver.PATTERN_MIT,
+                'mit_position': ServoDriver.PATTERN_MIT_POSITION,
+                'mit_speed': ServoDriver.PATTERN_MIT_SPEED,
+                'mit_torque': ServoDriver.PATTERN_MIT_TORQUE,
+            }
+            control_mode_const = mode_map.get(control_mode_lower)
+            if control_mode_const is None:
+                raise ValueError(f"Unknown control_mode: {control_mode}. Valid values: {list(mode_map.keys())}")
+        else:
+            # Backward compatibility: accept tuple directly
+            control_mode_const = control_mode
+
     # Create hardware layer
     servo_driver = ServoDriver(
         port=port,
-        baudrate=1000000,  # Default baudrate for M-SDK
+        baudrate=baudrate,
         debug_mode=debug_mode,
-        control_aim=control_aim
+        control_aim=control_aim_const
     )
     
     # Create kinematics layer using RoboCore and synriard
@@ -134,7 +172,7 @@ def create_robot(
     )
     
     # Set control_mode if provided
-    if control_mode is not None:
-        robot.control_mode = control_mode
+    if control_mode_const is not None:
+        robot.control_mode = control_mode_const
 
     return robot

@@ -43,8 +43,8 @@ def main(args):
         robot_version=args.robot_version,
         base_link=args.base_link,
         end_link=args.end_link,
-        control_aim=ServoDriver.AIM_TEACH if args.control_aim == 'teach' else ServoDriver.AIM_OPERATION,
-        control_mode=ServoDriver.PATTERN_PV
+        control_aim=args.control_aim,
+        control_mode="pv"
     )
     
     try:

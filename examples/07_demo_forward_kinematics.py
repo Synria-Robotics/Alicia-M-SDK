@@ -44,8 +44,8 @@ def main(args):
         robot_version=args.robot_version,
         base_link=args.base_link,
         end_link=args.end_link,
-        control_aim=ServoDriver.AIM_TEACH,
-        control_mode=ServoDriver.PATTERN_MIT
+        control_aim="teach",
+        control_mode="mit"
     )
     rc.set_backend('numpy')
 

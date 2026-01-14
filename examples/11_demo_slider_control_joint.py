@@ -348,8 +348,8 @@ def main(args):
         robot_version=args.robot_version,
         gripper_type=args.gripper_type,
         debug_mode=args.debug,
-        control_aim=ServoDriver.AIM_TEACH,
-        control_mode=ServoDriver.PATTERN_PV
+        control_aim="teach",
+        control_mode="pv"
     )
     
     controller = None
