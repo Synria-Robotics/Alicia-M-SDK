@@ -158,10 +158,13 @@ class SynriaRobotAPI:
         :param timeout: Maximum time to wait for response in seconds
         :return: Gripper type string or None if unavailable
         """
-        # Try to get from hardware
-        if not self.servo_driver.acquire_info("gripper_type", wait=True, timeout=timeout):
-            return None
-        return self.data_parser.get_info("gripper_type")
+        # M-SDK (servo motor) doesn't support querying gripper_type from hardware
+        # Return the gripper_type that was passed during initialization
+        # This is stored in servo_driver or can be accessed from robot configuration
+        if hasattr(self.servo_driver, 'gripper_type'):
+            return self.servo_driver.gripper_type
+        # If not available, return None (hardware doesn't support querying)
+        return None
 
     def _robot_type(self) -> str:
         """Detect robot type from serial number."""
@@ -186,17 +189,20 @@ class SynriaRobotAPI:
 
         :return: Dictionary with position, rotation, euler_xyz, quaternion_xyzw, transform, or None if failed
         """
-
         joint_angles = self.get_robot_state("joint")
         if joint_angles is None:
             logger.error("无法获取关节角度")
             return None
 
-        T_fk = forward_kinematics(
-            self.robot_model,
-            joint_angles,
-            return_end=True
-        )
+        try:
+            T_fk = forward_kinematics(
+                self.robot_model,
+                joint_angles,
+                return_end=True
+            )
+        except Exception as e:
+            logger.error(f"Forward kinematics failed: {e}")
+            return None
 
         position_fk = T_fk[:3, 3]
         rotation_fk = T_fk[:3, :3]
@@ -219,7 +225,7 @@ class SynriaRobotAPI:
         :param speed_deg_s: Speed in degrees per second (0-360, required range)
         """
         home_joints = [0.0] * 6
-        self.set_robot_state(target_joints=home_joints, gripper_value=1000, speed_deg_s=speed_deg_s, wait_for_completion=True)
+        self.set_robot_state(target_joints=home_joints, gripper_value=100, speed_deg_s=speed_deg_s, wait_for_completion=True)
 
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
@@ -234,7 +240,7 @@ class SynriaRobotAPI:
         """Set joint angles and/or gripper in a single combined command.
 
         :param target_joints: Optional target joint angles. If None, keeps current
-        :param gripper_value: Optional gripper value (0-1000). If None, keeps current
+        :param gripper_value: Optional gripper value (0-100). If None, keeps current
         :param joint_format: Unit format for joints, 'rad' or 'deg'
         :param speed_deg_s: Speed in degrees per second (0-360, required range)
         :param tolerance: Rad, acceptable abs distance to target for joints
@@ -1069,7 +1075,7 @@ class SynriaRobotAPI:
             if pose is not None:
                 quaternion = pose['quaternion_xyzw']
                 position = pose['position']
-                logger.info(f"位置(xyz /m): {[round(p, 3) for p in position]}, 四元数(qx, qy, qz, qw): {[round(q, 3) for q in quaternion]}")
+                logger.info(f"位置(xyz /m): {[round(p, 5) for p in position]}, 四元数(qx, qy, qz, qw): {[round(q, 3) for q in quaternion]}")
                 print("\n")
         if continuous:
             logger.info("开始连续状态打印，按 Ctrl+C 停止")

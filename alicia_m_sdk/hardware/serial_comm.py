@@ -289,7 +289,7 @@ class SerialComm:
                         self._hex_print("Recv", list(candidate))
                     
                     # 强制打印接收到的数据包
-                    print(f"[RX] 接收数据包: {' '.join(f'{b:02X}' for b in candidate)}")
+                    # print(f"[RX] 接收数据包: {' '.join(f'{b:02X}' for b in candidate)}")
 
                     return list(candidate)
                 else:

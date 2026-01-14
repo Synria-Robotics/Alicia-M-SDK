@@ -49,7 +49,7 @@ def main(args):
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim="teach",
-        control_mode="mit"
+        control_mode="pv"
     )
 
     # Set backend
@@ -170,6 +170,10 @@ def main(args):
         if err_norm is not None:
             print(f"  总误差: {err_norm:.6e}")
         print(f"  计算时间: {elapsed_time * 1000:.4f} ms")
+        beauty_print("关节角度 (弧度):")
+        print(f"  q_ik = {beauty_print_array(q_ik)}")
+        beauty_print("关节角度 (角度):")
+        print(f"  q_ik = {beauty_print_array(np.rad2deg(q_ik))}")
 
         # Provide suggestions
         print("\n  可能的原因:")
@@ -199,14 +203,14 @@ if __name__ == "__main__":
     # Robot connection settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--speed_deg_s', type=int, default=10,  help="关节运动速度 (单位: 度/秒，默认: 10，范围: 5-400度/秒)")
-    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本 (默认: v1_0)")
+    parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本 (默认: v1_0)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型 (默认: 100mm)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称, world 或 base_link等")
-    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称, tool0 或 link6等")
+    parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称, tool0 或 link6等")
 
     # IK Configuration
     parser.add_argument('--end-pose', type=float, nargs=7, 
-                        default=[0.26336, -0.17054, +0.4051, -0.560276, +0.357632, +0.745837, +0.043783],
+                        default=[-0.3, 0., 0.42201, 0.707, 0, 0, -0.707],
                        help='目标位姿 (7个浮点数: px py pz qx qy qz qw)')
     parser.add_argument('--method', type=str, default='dls', 
                        choices=['dls', 'pinv', 'transpose'],
@@ -215,7 +219,7 @@ if __name__ == "__main__":
     parser.add_argument('--pos-tol', type=float, default=1e-3, help='位置容差 (默认: 1e-3)')
     parser.add_argument('--ori-tol', type=float, default=1e-3, help='姿态容差 (默认: 1e-3)')
     parser.add_argument('--num-inits', type=int, default=10,  help='初始猜测数量 (默认: 10)')
-    parser.add_argument('--init-strategy', type=str, default='current',
+    parser.add_argument('--init-strategy', type=str, default='random',
                         choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform', 'current'],
                         help='初始猜测策略 (默认: current=使用当前关节角度)')
     parser.add_argument('--init-scale', type=float, default=1.0,

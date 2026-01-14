@@ -34,7 +34,6 @@ dependencies = [
     "websockets==13.1",
     "pythoncrc",
     "pycrc",
-    "synriard>=1.0.3rc1",  
     "synria-robocore>=2.0.0alpha1",
 ]
 

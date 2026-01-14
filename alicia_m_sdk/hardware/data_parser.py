@@ -159,6 +159,7 @@ class DataParser:
         self._info_event_map = {
             "version": self._version_event,
             "joint": self._joint_event,
+            "joint_gripper": self._joint_event,  # joint_gripper uses the same event as joint
             "gripper": self._gripper_event,
         }
         
@@ -355,6 +356,34 @@ class DataParser:
                 "current_status": self.get_current_status(),
             }
     
+    def get_info(self, info_type: str):
+        """
+        Unified getter for parsed information, for cooperation with high-level APIs.
+        
+        :param info_type: 'joint_gripper' | 'joint' | 'gripper' | 'version'
+        :return: Parsed data for the given type, or None if unavailable
+        """
+        with self._lock:
+            if info_type == "joint_gripper":
+                js = self._joint_states
+                if js.angles is None or js.timestamp is None:
+                    return None
+                return copy.deepcopy(js)
+            elif info_type == "joint":
+                js = self._joint_states
+                if js.angles is None or js.timestamp is None:
+                    return None
+                return list(js.angles)
+            elif info_type == "gripper":
+                js = self._joint_states
+                if js.angles is None or js.timestamp is None:
+                    return None
+                return js.gripper
+            elif info_type == "version":
+                return dict(self._version_info) if self._version_info else None
+            else:
+                raise ValueError(f"Unsupported info type: {info_type}")
+
     def wait_for_info(self, info_type: str, timeout: float = 2.0) -> bool:
         """
         Wait for specified info type to be received and parsed.
@@ -363,6 +392,7 @@ class DataParser:
             info_type: Type of information to wait for. Supported types:
                 - "version": Wait for version info
                 - "joint": Wait for joint state
+                - "joint_gripper": Wait for joint and gripper state (same as "joint")
                 - "gripper": Wait for gripper state
             timeout: Maximum time to wait in seconds
 

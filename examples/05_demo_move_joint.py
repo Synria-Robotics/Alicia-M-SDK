@@ -43,12 +43,12 @@ def main(args):
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim=args.control_aim,
-        control_mode="mit" if args.use_mit_mode else "pv"
+        control_mode=args.control_mode
     )
 
     try:
         # Set target joint positions in degrees
-        target_joints_deg = [-30, 30.0, 30.0, 20.0, -20.0, 10.0]
+        target_joints_deg = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
         robot.set_home(speed_deg_s=args.speed_deg_s)
         time.sleep(1)
         # Use unified joint and gripper target interface
@@ -75,11 +75,11 @@ if __name__ == "__main__":
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
     parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
-    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
+    parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称")
     parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
                         help='Control aim: teach or operation (motor-specific)')
-    parser.add_argument('--use-mit-mode', action='store_true', 
-                        help='Use MIT position mode (motor-specific)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
     parser.add_argument('--speed_deg_s', type=int, default=10, help="关节运动速度 (单位: 度/秒，默认: 10，范围: 10-400度/秒)")
     
     args = parser.parse_args()

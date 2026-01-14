@@ -115,17 +115,13 @@ def create_robot(
     # Convert control_aim string to constant
     control_aim_const = None
     if control_aim is not None:
-        if isinstance(control_aim, str):
-            control_aim_lower = control_aim.lower()
-            if control_aim_lower == 'teach':
-                control_aim_const = ServoDriver.AIM_TEACH
-            elif control_aim_lower == 'operation':
-                control_aim_const = ServoDriver.AIM_OPERATION
-            else:
-                raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: 'teach', 'operation'")
+        control_aim_lower = control_aim.lower()
+        if control_aim_lower == 'teach':
+            control_aim_const = ServoDriver.AIM_TEACH
+        elif control_aim_lower == 'operation':
+            control_aim_const = ServoDriver.AIM_OPERATION
         else:
-            # Backward compatibility: accept int directly
-            control_aim_const = control_aim
+            raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: 'teach', 'operation'")
 
     # Convert control_mode string to constant
     control_mode_const = None
@@ -160,7 +156,8 @@ def create_robot(
     urdf_path = get_model_path(
         "Alicia_M",
         version=robot_version,
-        variant=f"gripper_{effective_gripper_type}"
+        variant=f"gripper_{effective_gripper_type}",
+        model_format="urdf"
     )
     robot_model = RobotModel(str(urdf_path), base_link=base_link, end_link=end_link)
     

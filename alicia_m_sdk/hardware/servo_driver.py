@@ -369,27 +369,32 @@ class ServoDriver:
                 - "torque_on"
                 - "torque_off"
                 - "joint"
+                - "joint_gripper" (same as "joint", returns joint and gripper data together)
             wait: If True, wait for the response to be received and parsed
             timeout: Maximum time to wait in seconds (default 1.0s)
             control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02)。
                         默认使用实例的 default_control_aim。
-                        注意：只有 "joint" 指令需要 control_aim，其他指令为通用指令。
+                        注意：只有 "joint" 和 "joint_gripper" 指令需要 control_aim，其他指令为通用指令。
         """
-        if info_type not in self.INFO_COMMAND_MAP and info_type != "joint":
+        # Map joint_gripper to joint for hardware command
+        actual_info_type = "joint" if info_type == "joint_gripper" else info_type
+        
+        if actual_info_type not in self.INFO_COMMAND_MAP and actual_info_type != "joint":
             raise ValueError(f"Unsupported info type: {info_type}")
 
         # Clear the corresponding event before sending request (if applicable)
+        # Use the original info_type for event mapping (joint_gripper has its own event mapping)
         if info_type in self.data_parser._info_event_map:
             event = self.data_parser._info_event_map[info_type]
             event.clear()
 
         # 动态构建 joint 指令，其他指令使用预定义命令
-        if info_type == "joint":
+        if actual_info_type == "joint":
             # 使用提供的 control_aim 或默认值
             aim = control_aim if control_aim is not None else self.default_control_aim
             command = self._build_joint_request_frame(control_aim=aim)
         else:
-            command = self.INFO_COMMAND_MAP[info_type]
+            command = self.INFO_COMMAND_MAP[actual_info_type]
         
         # 暂停后台线程，避免多线程同时发送指令
         self._pause_update.set()
@@ -406,6 +411,7 @@ class ServoDriver:
             self.data_parser.parse_frame(frame)
             
             if wait:
+                # Use the original info_type for event waiting (joint_gripper has its own event mapping)
                 if info_type in self.data_parser._info_event_map:
                     return self.data_parser.wait_for_info(info_type, timeout)
                 return True
