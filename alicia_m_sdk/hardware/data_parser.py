@@ -663,11 +663,24 @@ class DataParser:
                 joint_values[i] = self._bytes_to_radians(chunk, joint_index=i)
             else:
                 # 夹爪（索引 6）
+                # 新映射逻辑：与 ServoDriver 保持一致
+                # 0% (闭合) -> 32768 (0 rad)
+                # 100% (张开) -> 39688 (2.64 rad)
                 gripper_low = chunk[0]
                 gripper_high = chunk[1]
                 gripper_raw = (gripper_low & 0xFF) | ((gripper_high & 0xFF) << 8)
-                ratio = (self.servo_value_limit - 2048) / 100
-                val = 100 - ((gripper_raw - 2048) / ratio)
+                
+                # 硬件值范围
+                close_val = 32768  # 0% 对应的硬件值
+                open_val = 39688   # 100% 对应的硬件值
+                
+                # 反向映射: 硬件值 -> 0-100%
+                # gripper_value = (gripper_raw - close_val) / (open_val - close_val) * 100
+                if open_val != close_val:
+                    val = (gripper_raw - close_val) / (open_val - close_val) * 100.0
+                else:
+                    val = 0.0
+                
                 gripper_value = round(max(0, min(val, 100)), 2)
         
         # 更新状态

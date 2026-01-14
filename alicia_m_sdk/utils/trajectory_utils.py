@@ -29,7 +29,14 @@ import time
 from typing import Optional, Tuple, List, Callable, Any
 
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.utils.backend import to_numpy
+try:
+    from robocore.utils.backend import to_numpy
+except ImportError:
+    # Fallback if to_numpy is not available
+    def to_numpy(x):
+        if hasattr(x, 'numpy'):
+            return x.numpy()
+        return np.asarray(x)
 from robocore.transform import make_transform, quaternion_to_matrix, rpy_to_matrix, matrix_to_quaternion
 
 
@@ -208,7 +215,7 @@ def record_joint_waypoints_manual(robot) -> Tuple[Optional[np.ndarray], Optional
         beauty_print(f"[记录] 第{count}个点:")
         print(f"  关节角度 (rad): {beauty_print_array(joints)}")
         print(f"  关节角度 (deg): {beauty_print_array(np.rad2deg(joints))}")
-        print(f"  夹爪状态: {gripper:.1f} (0-1000, 0=闭合, 1000=张开)")
+        print(f"  夹爪状态: {gripper:.1f} (0-100, 0=闭合, 1000=张开)")
         return None  # Formatting is done via print
     
     # Use the general recording function
@@ -453,7 +460,7 @@ def load_or_generate_joint_waypoints(robot, robot_model, args) -> Tuple[np.ndarr
             beauty_print(f"Using current joint angles and gripper as first waypoint:")
             print(f"  Current joints (rad): {beauty_print_array(q_start)}")
             print(f"  Current joints (deg): {beauty_print_array(np.rad2deg(q_start))}")
-            print(f"  Current gripper: {g_start:.1f} (0-1000)" if g_start is not None else "  Current gripper: N/A")
+            print(f"  Current gripper: {g_start:.1f} (0-100)" if g_start is not None else "  Current gripper: N/A")
             num_random = args.num_waypoints - 1
         else:
             beauty_print("✗ 无法获取当前关节角度，使用随机生成", type="warning")
@@ -466,10 +473,10 @@ def load_or_generate_joint_waypoints(robot, robot_model, args) -> Tuple[np.ndarr
         waypoint_seed = args.seed + i if args.seed is not None else None
         q = to_numpy(robot_model.random_q(seed=waypoint_seed, scale=args.joint_scale))
         waypoints.append(q)
-        # Random gripper value between 0 and 1000
+        # Random gripper value between 0 and 100
         if waypoint_seed is not None:
             np.random.seed(waypoint_seed)
-        gripper_waypoints.append(float(np.random.uniform(0, 1000)))
+        gripper_waypoints.append(float(np.random.uniform(0, 100)))
     
     return np.array(waypoints), np.array(gripper_waypoints) if gripper_waypoints else None
 
@@ -511,7 +518,7 @@ def display_joint_waypoints(waypoints: np.ndarray, gripper_waypoints: Optional[n
         print(f"  Waypoint {i+1}: {beauty_print_array(wp)} (rad)")
         print(f"              {beauty_print_array(np.rad2deg(wp))} (deg)")
         if gripper_waypoints is not None and i < len(gripper_waypoints):
-            print(f"              夹爪: {gripper_waypoints[i]:.1f} (0-1000)")
+            print(f"              夹爪: {gripper_waypoints[i]:.1f} (0-100)")
 
 
 def display_cartesian_waypoints(waypoints: np.ndarray):

@@ -21,7 +21,7 @@
 Demo: Gripper control
 
 Features:
-- Open/close gripper (0-1000)
+- Open/close gripper (0-100)
 - Control gripper to specific values
 - Optimized wait times for fast operation
 """
@@ -41,31 +41,29 @@ def main(args):
         port=args.port,
         gripper_type=args.gripper_type,
         robot_version=args.robot_version,
-        base_link=args.base_link,
-        end_link=args.end_link,
         control_aim=args.control_aim,
         control_mode="pv"
     )
     
     try:
-        # Get current gripper value (0-1000)
+        # Get current gripper value (0-100)
         gripper_value = robot.get_robot_state("gripper")
         if gripper_value is not None:
-            logger.info(f"Gripper value: {gripper_value:.1f} (0-1000, 0=closed, 1000=open)")
+            logger.info(f"Gripper value: {gripper_value:.1f} (0-100, 0=closed, 100=open)")
         else:
             logger.warning("Failed to read gripper value")
         
         # Test 1: Open gripper fully
         robot.set_robot_state(gripper_value=100, wait_for_completion=True)
-        time.sleep(3)
+        time.sleep(0.5)
         
         # Test 2: Close gripper
         robot.set_robot_state(gripper_value=0, wait_for_completion=True)
-        time.sleep(3)
+        time.sleep(1.5)
         
         # Test 3: Partially open
         robot.set_robot_state(gripper_value=50, wait_for_completion=True)
-        time.sleep(3)
+        time.sleep(1.5)
 
         
     except KeyboardInterrupt:
@@ -86,7 +84,7 @@ if __name__ == '__main__':
     # Serial port settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
-    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
+    parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="Link9", help="末端执行器链路名称")
     parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],

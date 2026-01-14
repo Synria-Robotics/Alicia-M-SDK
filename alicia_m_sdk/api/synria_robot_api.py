@@ -123,7 +123,7 @@ class SynriaRobotAPI:
         :param info_type: Type of information to get. Options:
             - "joint_gripper": Returns JointState (arm joint angles, gripper value, timestamp, run_status_text)
             - "joint": Returns List[float] of arm joint angles (radians) only
-            - "gripper": Returns float gripper value (0-1000) only
+            - "gripper": Returns float gripper value (0-100) only
             - "version": Returns Dict with serial_number, hardware_version, firmware_version
             - "temperature": Returns List[float] of temperatures in Celsius
             - "velocity": Returns List[float] of velocities in degrees per second
@@ -231,7 +231,7 @@ class SynriaRobotAPI:
                         target_joints: Optional[List[float]] = None,
                         gripper_value: Optional[int] = None,
                         joint_format: str = 'rad',
-                        speed_deg_s: int = 300,
+                        speed_deg_s: int = 10,
                         tolerance: float = 0.1,
                         timeout: float = 10.0,
                         wait_for_completion: bool = True,
@@ -275,25 +275,63 @@ class SynriaRobotAPI:
             logger.error("Failed to set robot target")
             return False
 
-        # If no joint target is provided, there is nothing to wait for on joints.
-        if wait_for_completion and target_joints is not None:
+        # Wait for completion if requested
+        if wait_for_completion and (target_joints is not None or gripper_value is not None):
             # Store control_mode temporarily for _wait_for_joint_target
             original_control_mode = self.control_mode
             if effective_control_mode is not None:
                 self.control_mode = effective_control_mode
+            
+            joint_result = True
+            gripper_result = True
+            
             try:
-                result = self._wait_for_joint_target(
-                    target_joints=target_joints,
-                    tolerance_deg=tolerance * 180.0 / np.pi,  # Convert rad to deg
-                    timeout=timeout,
-                    log_prefix="等待关节接近目标"
-                )
+                # Wait for joints if target_joints is provided
+                if target_joints is not None:
+                    joint_result = self._wait_for_joint_target(
+                        target_joints=target_joints,
+                        tolerance_deg=tolerance * 180.0 / np.pi,  # Convert rad to deg
+                        timeout=timeout,
+                        log_prefix="等待关节接近目标"
+                    )
+                
+                # Wait for gripper if gripper_value is provided
+                if gripper_value is not None:
+                    gripper_tolerance = 5.0  # Increase tolerance to 5% for more reliable completion
+                    gripper_timeout = min(4.0, timeout)  # Use max 4 seconds for gripper wait
+                    start_time = time.time()
+                    
+                    # Give hardware some time to start responding
+                    time.sleep(0.05)
+                    
+                    # Check gripper position with timeout
+                    gripper_reached = False
+                    while time.time() - start_time < gripper_timeout:
+                        current_gripper = self.get_robot_state("gripper")
+                        if current_gripper is not None:
+                            if abs(current_gripper - gripper_value) <= gripper_tolerance:
+                                gripper_reached = True
+                                break
+                        time.sleep(0.05)
+                    
+                    # If we didn't verify position but command was sent, still consider success
+                    if not gripper_reached:
+                        final_check = self.get_robot_state("gripper")
+                        if final_check is None:
+                            # State unavailable, but command was sent
+                            gripper_result = True
+                        else:
+                            # Check one more time with tolerance
+                            gripper_result = abs(final_check - gripper_value) <= gripper_tolerance
+                    else:
+                        gripper_result = True
             finally:
                 # Restore original control_mode
                 self.control_mode = original_control_mode
-            return result
+            
+            return joint_result and gripper_result
 
-        # Either waiting was not requested, or only gripper was commanded.
+        # Either waiting was not requested, or no targets were provided.
         return True
 
     # ==================== Gripper Control ====================

@@ -19,14 +19,14 @@ class HardwareExecutor:
     
     def __init__(self, joint_controller: ServoDriver):
         self.joint_controller = joint_controller
-        self.delay = 0.02  # 默认延迟20ms (50Hz)
+        self.delay = 0.002  # 默认延迟2ms (500Hz)
 
     def execute(self, 
                 joint_traj: List[List[float]], 
                 visualize: bool = False,
                 gripper_traj: List[float] = None,
                 interaction: bool = False,
-                speed_rad_s: float = 0.087266,
+                speed_rad_s: float = 0.0875,
                 use_mit_mode: bool = False,
                 playback_hz: float = 50.0,
                 ):
