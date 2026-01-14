@@ -210,7 +210,7 @@ if __name__ == "__main__":
 
     # IK Configuration
     parser.add_argument('--end-pose', type=float, nargs=7, 
-                        default=[-0.3, 0., 0.42201, 0.707, 0, 0, -0.707],
+                        default=[0.1, 0., 0.42201, 0, 0.707,0, 0.707],
                        help='目标位姿 (7个浮点数: px py pz qx qy qz qw)')
     parser.add_argument('--method', type=str, default='dls', 
                        choices=['dls', 'pinv', 'transpose'],

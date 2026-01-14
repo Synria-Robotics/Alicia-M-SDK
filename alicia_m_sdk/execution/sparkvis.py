@@ -69,11 +69,11 @@ class SparkVisBridge:
         self.last_joint_targets = [0.0] * 6
         try:
             # 尝试初始化为当前机器人状态
-            current_joints = self.robot.get_joints()
+            current_joints = self.robot.get_robot_state("joint")
             if current_joints and len(current_joints) >= 6:
                 self.last_joint_targets = list(current_joints[:6])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Log] 初始化关节目标值失败: {e}")
 
         # CSV logging
         self.output_file = output_file
@@ -119,14 +119,14 @@ class SparkVisBridge:
     def read_robot_state(self) -> Optional[Dict[str, float]]:
         """Read current robot joint states and gripper position."""
         try:
-            joints = self.robot.get_joints()  # 6 rad
-            gripper_rad = self.robot.get_gripper()  # rad
-            if joints is None or gripper_rad is None:
+            joints = self.robot.get_robot_state("joint")  # 6 rad
+            gripper_value = self.robot.get_robot_state("gripper")  # 0-100
+            if joints is None or gripper_value is None:
                 return None
             
             # Convert gripper to percentage [0..1] for UI
             try:
-                gripper_pct = max(0.0, min(1.0, float(gripper_rad) / 100.0))
+                gripper_pct = max(0.0, min(1.0, float(gripper_value) / 100.0))
             except Exception:
                 gripper_pct = 0.0
                 
@@ -173,20 +173,17 @@ class SparkVisBridge:
             gripper_val = joint_values.get('gripper', 0.0)
 
             # 使用速度设置发送命令
-            if getattr(self.robot, 'firmware_new', False):
-                # 新固件版本
-                self.robot.set_joint_target(
-                    target_joints=joints_rad,
-                    joint_format='rad',
-                    speeds=self.speed_rad_s,
-                )
-            else:
-                # 旧固件版本使用内插接口
-                self.robot.set_joint_target_interplotation(
-                    target_joints=joints_rad,
-                    joint_format='rad',
-                    speed_factor=1.0,
-                )
+            # 将速度从弧度/秒转换为度/秒，使用最大速度值
+            max_speed_rad_s = max(self.speed_rad_s[:6]) if len(self.speed_rad_s) >= 6 else self.speed_rad_s[0]
+            speed_deg_s = int(np.rad2deg(max_speed_rad_s))
+            
+            # 使用 set_robot_state 方法设置关节目标
+            self.robot.set_robot_state(
+                target_joints=joints_rad,
+                joint_format='rad',
+                # speed_deg_s=speed_deg_s,
+                wait_for_completion=False,
+            )
 
             # 夹爪控制：百分比 [0..1] → 角度 [0..100]
             if 'gripper' in joint_values:
@@ -200,8 +197,8 @@ class SparkVisBridge:
                 self.file_handle.write(row)
                 self.file_handle.flush()
                 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Log] 应用UI关节更新失败: {e}")
 
     async def broadcast_robot_state(self, joint_data: Dict[str, float]):
         """Broadcast robot state to all connected WebSocket clients."""
@@ -216,7 +213,8 @@ class SparkVisBridge:
         for ws in self.websocket_connections.copy():
             try:
                 await ws.send(json.dumps(message))
-            except Exception:
+            except Exception as e:
+                print(f"[Log] 广播机器人状态失败: {e}")
                 disconnected.add(ws)
         self.websocket_connections -= disconnected
 
@@ -284,10 +282,10 @@ class SparkVisBridge:
                             }))
                 except json.JSONDecodeError:
                     pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    print(f"[Log] 处理消息错误: {e}")   
+        except Exception as e:
+            print(f"[Log] 处理消息错误: {e}")
         finally:
             if 'sender_task' in locals():
                 sender_task.cancel()

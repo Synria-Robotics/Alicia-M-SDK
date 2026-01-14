@@ -231,7 +231,7 @@ class SynriaRobotAPI:
                         target_joints: Optional[List[float]] = None,
                         gripper_value: Optional[int] = None,
                         joint_format: str = 'rad',
-                        speed_deg_s: int = 10,
+                        speed_deg_s: int = 300,
                         tolerance: float = 0.1,
                         timeout: float = 10.0,
                         wait_for_completion: bool = True,
