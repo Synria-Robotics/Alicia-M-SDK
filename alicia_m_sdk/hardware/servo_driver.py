@@ -156,7 +156,7 @@ class ServoDriver:
         
         # State update thread related
         self._update_thread = None
-        self.thread_update_interval = 0.5  # Update interval in seconds
+        self.thread_update_interval = 0.001  # Update interval in seconds
         self._stop_thread = threading.Event()
         self._pause_update = threading.Event()  # 用于暂停后台线程
         self._thread_running = False

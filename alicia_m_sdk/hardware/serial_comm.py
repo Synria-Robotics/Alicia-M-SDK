@@ -172,8 +172,8 @@ class SerialComm:
                 data_bytes = bytes(data)
                 bytes_written = self.serial_port.write(data_bytes)
 
-                # 3) 轻微延时后 flush 输出缓冲区
-                time.sleep(0.01)
+                # # 3) 轻微延时后 flush 输出缓冲区
+                # time.sleep(0.001)
                 try:
                     self.serial_port.flush()
                 except Exception:
@@ -217,7 +217,7 @@ class SerialComm:
             if frame:
                 return frame
             # 短暂休眠，避免 CPU 空转
-            time.sleep(0.005)
+            # time.sleep(0.005)
 
         # 3) 超时未收到回复
         if self.debug_mode:
