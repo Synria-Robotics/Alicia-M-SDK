@@ -38,7 +38,7 @@ def main(args):
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim=args.control_aim,
-        control_mode="pv"
+        control_mode=args.control_mode
     )
 
     try:
@@ -74,9 +74,11 @@ if __name__ == '__main__':
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
     parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
-    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
+    parser.add_argument('--end_link', type=str, default="Link6", help="末端执行器链路名称")
     parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
                         help='Control aim: teach or operation (motor-specific)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
     args = parser.parse_args()
 
     main(args)

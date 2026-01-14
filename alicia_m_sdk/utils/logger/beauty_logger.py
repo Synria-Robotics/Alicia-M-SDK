@@ -14,12 +14,12 @@ class LogLevel:
 
 class BeautyLogger:
     """
-    Lightweight logger for Alicia-D-SDK package.
+    Lightweight logger for Alicia-M-SDK package.
     """
 
     def __init__(self, log_dir: str, log_name: str = 'rofunc.log', verbose: bool = True, min_level: int = LogLevel.INFO):
         """
-        Alicia-D-SDK轻量级日志器
+        Alicia-M-SDK轻量级日志器
 
         :param log_dir: 日志文件保存路径
         :param log_name: 日志文件名
@@ -36,7 +36,7 @@ class BeautyLogger:
         
     def _write_log(self, content, type):
         with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(" Alicia-D-SDK:{}] {}\n".format(type.upper(), content))
+            f.write(" Alicia-M-SDK:{}] {}\n".format(type.upper(), content))
 
     def _should_print(self, level: int) -> bool:
         """
@@ -135,16 +135,16 @@ def beauty_print(content, type: str = None):
     if type is None:
         type = "info"
     if type == "warning":
-        print("\033[1;37m [Alicia-D-SDK:WARNING] {}\033[0m".format(content))  # For warning (gray)
+        print("\033[1;37m [Alicia-M-SDK:WARNING] {}\033[0m".format(content))  # For warning (gray)
     elif type == "module":
-        print("\033[1;33m [Alicia-D-SDK:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
+        print("\033[1;33m [Alicia-M-SDK:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
     elif type == "info":
-        print("\033[1;35m [Alicia-D-SDK:INFO] {}\033[0m".format(content))  # For info (light purple)
+        print("\033[1;35m [Alicia-M-SDK:INFO] {}\033[0m".format(content))  # For info (light purple)
     elif type == "debug":
-        print("\033[1;34m [Alicia-D-SDK:DEBUG] {}\033[0m".format(content))  # For debug (light blue)
+        print("\033[1;34m [Alicia-M-SDK:DEBUG] {}\033[0m".format(content))  # For debug (light blue)
     elif type == "error":
-        print("\033[1;31m [Alicia-D-SDK:ERROR] {}\033[0m".format(content))  # For error (red)
+        print("\033[1;31m [Alicia-M-SDK:ERROR] {}\033[0m".format(content))  # For error (red)
     elif type == "success":
-        print("\033[1;32m [Alicia-D-SDK:SUCCESS] {}\033[0m".format(content))  # For success (green)
+        print("\033[1;32m [Alicia-M-SDK:SUCCESS] {}\033[0m".format(content))  # For success (green)
     else:
         raise ValueError("Invalid level")

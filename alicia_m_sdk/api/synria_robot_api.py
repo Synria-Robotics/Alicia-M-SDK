@@ -43,7 +43,7 @@ from ..hardware import ServoDriver
 from ..hardware.data_parser import JointState
 from ..execution import HardwareExecutor, JointInterpolator
 from ..utils.logger import logger
-from robocore.utils.control_utils import compute_steps_and_delay, validate_joint_list, check_and_clip_joint_limits
+from ..utils.control_utils import compute_steps_and_delay, validate_joint_list, check_and_clip_joint_limits
 from ..utils.calculate import calculate_movement_duration
 
 
