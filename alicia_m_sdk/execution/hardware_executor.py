@@ -179,7 +179,7 @@ class CartesianWaypointPlanner:
         
         pos = pose['position'].tolist()
         quat = pose['quaternion_xyzw'].tolist()
-        gripper = self.robot.get_gripper() or 0.0
+        gripper = self.robot.get_robot_state("gripper") or 0.0
         
         return pos + quat + [gripper]
     
@@ -253,7 +253,7 @@ class CartesianWaypointPlanner:
             )
             
             # 设置夹爪（使用统一接口，仅控制夹爪）
-            self.robot.set_robot_target(gripper_value=gripper, wait_for_completion=False)
+            self.robot.set_robot_state(gripper_value=gripper, wait_for_completion=False)
             time.sleep(step_delay)
             
             # 逐步执行模式下等待用户确认

@@ -1,8 +1,24 @@
+#!/usr/bin/env python3
+# Copyright (c) 2025 Synria Robotics Co., Ltd.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Author: Synria Robotics Team
+# Website: https://synriarobotics.ai
+
 """
 Demo: Multi-point Cartesian trajectory planning
-
-Copyright (c) 2025 Synria Robotics Co., Ltd.
-Licensed under GPL v3.0
 
 Features:
 - Multi-point trajectory planning in Cartesian space
@@ -28,23 +44,21 @@ def main(cmd_args):
     # Initialize and connect to the robot
     robot = alicia_m_sdk.create_robot(
         port=cmd_args.port,
-        robot_version=cmd_args.robot_version,
         gripper_type=cmd_args.gripper_type,
-        control_aim=ServoDriver.AIM_TEACH,
+        robot_version=cmd_args.robot_version,
+        base_link=cmd_args.base_link,
+        end_link=cmd_args.end_link,
+        control_aim=ServoDriver.AIM_TEACH if cmd_args.control_aim == 'teach' else ServoDriver.AIM_OPERATION,
         control_mode=ServoDriver.PATTERN_PV
     )
-    
-    if not robot.connect():
-        logger.error("Unable to connect to the robot")
-        return
-    
+
     try:
         # Create Cartesian waypoint controller
         planner = CartesianWaypointPlanner(robot)
         
         # Move to initial position
         logger.info("\n1. Moving to initial position...")
-        robot.set_home()
+        robot.set_home(speed_deg_s=10)
         
         # Record waypoints (manual drag mode)
         waypoints = planner.record_teaching_waypoints()
@@ -85,10 +99,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Point Cartesian Trajectory Demo")
     
     # Robot configuration
-    parser.add_argument('--port', type=str, default="", help="Serial port (e.g., /dev/ttyCH343USB0 or COM3)")
-    parser.add_argument('--robot_version', type=str, default="v1_0",  help="Robot version (default: v1_0)")
-    parser.add_argument('--gripper_type', type=str, default="100mm",  help="Gripper type (default: 100mm)")
-    
+    parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
+    parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
+    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
+    parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
+    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
+    parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (motor-specific)')
     
     # Trajectory planning settings
     parser.add_argument('--move_duration', type=float, default=3.0, help="Move time per waypoint (seconds, default: 3.0)")

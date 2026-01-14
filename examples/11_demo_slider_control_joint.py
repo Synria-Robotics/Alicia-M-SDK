@@ -290,7 +290,7 @@ class JointSliderController:
         """Update the position display labels at 20Hz (reduced from 10Hz for better feedback)."""
         try:
             # Get current joint positions
-            current_joints = self.robot.get_joints()
+            current_joints = self.robot.get_robot_state("joint")
             
             if current_joints is not None:
                 # Convert to degrees

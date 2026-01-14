@@ -25,30 +25,36 @@ Features:
 - Move to target position
 """
 
-import numpy as np
-import argparse
-import time
-import alicia_m_sdk
-import robocore as rc
-from robocore.kinematics.ik import inverse_kinematics
-from robocore.transform.conversions import quaternion_to_matrix
-from robocore.utils.beauty_logger import beauty_print_array, beauty_print
-from robocore.utils.backend import to_numpy
+# Copyright (c) 2025 Synria Robotics Co., Ltd.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Author: Synria Robotics Team
+# Website: https://synriarobotics.ai
+
 
 
 def main(args):
     robot = alicia_m_sdk.create_robot(
         port=args.port,
-        robot_version=args.robot_version,
-        robot_type=args.robot_type,
         gripper_type=args.gripper_type,
+        robot_version=args.robot_version,
         base_link=args.base_link,
-        end_link=args.end_link
+        end_link=args.end_link,
+        control_aim=ServoDriver.AIM_TEACH,
+        control_mode=ServoDriver.PATTERN_MIT
     )
-
-    if not robot.connect():
-        print("✗ 连接失败，请检查串口设置")
-        return
 
     # Set backend
     rc.set_backend(args.backend)
@@ -58,7 +64,7 @@ def main(args):
 
     # Get initial guess
     if args.init_strategy == 'current':
-        q0 = robot.get_joints()
+        q0 = robot.get_robot_state("joint")
         if q0 is None:
             print("✗ 无法获取当前关节角度")
             robot.disconnect()
@@ -147,12 +153,10 @@ def main(args):
         # Execute motion if requested
         if args.execute or args.force_execute:
             print("\n执行移动到目标位置...")
-            # Convert speed_deg_s to speed_rad_s for M-SDK
-            speed_rad_s = args.speed_deg_s * np.pi / 180.0
-            success = robot.set_joint_target(
+            success = robot.set_robot_state(
                 target_joints=q_ik,
                 joint_format='rad',
-                speeds=speed_rad_s,
+                speed_deg_s=args.speed_deg_s,
                 wait_for_completion=True,
                 timeout=10
             )
@@ -199,11 +203,10 @@ if __name__ == "__main__":
     # Robot connection settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--speed_deg_s', type=int, default=10,  help="关节运动速度 (单位: 度/秒，默认: 10，范围: 5-400度/秒)")
-    parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本 (默认: v1_1)")
-    parser.add_argument('--robot_type', type=str, default="follower", help="机械臂类型 (默认: follower)")
+    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本 (默认: v1_0)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型 (默认: 100mm)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称, world 或 base_link等")
-    parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称, link6 或 tool0等")
+    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称, tool0 或 link6等")
 
     # IK Configuration
     parser.add_argument('--end-pose', type=float, nargs=7, 

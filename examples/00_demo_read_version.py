@@ -1,13 +1,24 @@
+#!/usr/bin/env python3
+# Copyright (c) 2025 Synria Robotics Co., Ltd.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Author: Synria Robotics Team
+# Website: https://synriarobotics.ai
+
 """
 Demo: Read robot firmware version
-
-Copyright (c) 2025 Synria Robotics Co., Ltd.
-Licensed under GPL v3.0
-
-Features:
-- Connect to robot and read firmware version
-- Auto-search available serial ports
-- Display version information
 """
 
 import alicia_m_sdk
@@ -17,23 +28,32 @@ from alicia_m_sdk.utils.logger import logger
 def main(args):
     """Read and print robot firmware version.
 
-    :param args: Command line arguments containing port, baudrate, version, and gripper_type
+    :param args: Command line arguments containing port
     """
     # Initialize robot instance
     robot = alicia_m_sdk.create_robot(
         port=args.port,
-        robot_version=args.robot_version,
         gripper_type=args.gripper_type,
-        control_aim=ServoDriver.AIM_TEACH,
-        control_mode=ServoDriver.PATTERN_MIT
+        robot_version=args.robot_version,
+        base_link=args.base_link,
+        end_link=args.end_link,
+        control_aim=ServoDriver.AIM_TEACH if args.control_aim == 'teach' else ServoDriver.AIM_OPERATION,
+        control_mode=ServoDriver.PATTERN_PV
     )
 
     try:
-        # Connect to robot
-        if not robot.connect():
-            logger.error("Connection failed, please check serial port settings")
-            return
-        firmware_version = robot.get_firmware_version()
+        robot_version = robot.get_robot_state("version")
+        if robot_version:
+            logger.info(
+                "Version info: "
+                f"Unique ID = {robot_version.get('serial_number')}, "
+                f"Hardware Version = {robot_version.get('hardware_version')}, "
+                f"Firmware Version = {robot_version.get('firmware_version')}"
+            )
+        
+        gripper_type = robot.get_robot_state("gripper_type")
+        if gripper_type:
+            logger.info(f"Gripper type: {gripper_type}")
 
     except KeyboardInterrupt:
         logger.info("\nOperation interrupted by user")
@@ -50,9 +70,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Read robot firmware version")
 
     # Robot configuration
-    parser.add_argument('--port', type=str, default="", help="Serial port (e.g., /dev/ttyUSB0 or COM3)")
-    parser.add_argument('--robot_version', type=str, default="v1_0",  help="Robot version (default: v1_0)")
-    parser.add_argument('--gripper_type', type=str, default="100mm",  help="Gripper type (default: 100mm)")
+    parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
+    parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
+    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
+    parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
+    parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
+    parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (motor-specific)')
     args = parser.parse_args()
 
     main(args)
