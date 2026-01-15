@@ -18,10 +18,10 @@
 # Website: https://synriarobotics.ai
 
 """
-Benchmark: Read joint angles frequency
+Benchmark: Control command frequency
 
 Features:
-- Benchmark real read frequency (with serial communication wait)
+- Benchmark set_robot_state call frequency (control command sending speed)
 - Measure single call latency (serial communication response time)
 - Statistics: average, min, max, std deviation
 """
@@ -34,7 +34,7 @@ import numpy as np
 import statistics
 
 def main(args):
-    """Benchmark joint reading frequency with real serial communication.
+    """Benchmark control command frequency.
     
     :param args: Command line arguments
     """
@@ -52,7 +52,7 @@ def main(args):
     
     try:
         print(f"\n{'='*60}")
-        print(f"Read Frequency Benchmark (Real Serial Communication)")
+        print(f"Control Frequency Benchmark")
         print(f"{'='*60}")
         print(f"Duration: {args.duration}s")
         print(f"Control Mode: {args.control_mode}")
@@ -60,24 +60,32 @@ def main(args):
         print(f"Baudrate: {args.baudrate}")
         print(f"{'='*60}\n")
         
-        # Pause background update thread to force real serial communication
-        print("Pausing background update thread to test real read frequency...")
-        robot.servo_driver._pause_update.set()
-        time.sleep(0.1)  # Wait for current update to finish
+        # Get current joint angles as target (to avoid large movements)
+        print("Getting current joint state...")
+        current_joints = robot.get_robot_state("joint")
+        if current_joints is None:
+            print("Warning: Could not get current joint state, using zeros")
+            target_joints = [0.0] * 6
+        else:
+            target_joints = list(current_joints)
+            print(f"Target joints: {[f'{j:.3f}' for j in target_joints]} rad")
         
-        print("Starting benchmark...")
-        print("(Each call will wait for serial response)")
+        print("\nStarting benchmark...")
+        print("(This will send control commands continuously)")
         
         # Statistics collection
         call_times = []
         success_count = 0
         fail_count = 0
         
-        # Warm-up: send a few requests to stabilize
+        # Warm-up: send a few commands to stabilize
         print("Warming up...")
-        for _ in range(3):
+        for _ in range(5):
             try:
-                robot.get_robot_state("joint", timeout=1.0)
+                robot.set_robot_state(
+                    target_joints=target_joints,
+                    wait_for_completion=False
+                )
             except:
                 pass
         time.sleep(0.1)
@@ -92,12 +100,17 @@ def main(args):
             call_start = time.perf_counter()
             
             try:
-                joints = robot.get_robot_state("joint", timeout=1.0)
+                success = robot.set_robot_state(
+                    target_joints=target_joints,
+                    wait_for_completion=False,  # Critical: don't wait for joint to reach target
+                    speed_deg_s=args.speed_deg_s
+                )
+                
                 call_end = time.perf_counter()
                 call_duration = call_end - call_start
                 call_times.append(call_duration * 1000)  # Convert to ms
                 
-                if joints is not None:
+                if success:
                     success_count += 1
                 else:
                     fail_count += 1
@@ -112,9 +125,6 @@ def main(args):
         
         actual_duration = time.perf_counter() - start_time
         total_calls = len(call_times)
-        
-        # Restore background thread
-        robot.servo_driver._pause_update.clear()
         
         # Calculate statistics
         if total_calls > 0:
@@ -143,8 +153,8 @@ def main(args):
             print(f"Results ({actual_duration:.2f}s, {total_calls} calls)")
             print(f"{'='*60}")
             
-            print(f"\n📊 Read Frequency Statistics:")
-            print(f"  Actual Read Frequency:     {actual_freq:10.2f} Hz")
+            print(f"\n📊 Control Frequency Statistics:")
+            print(f"  Actual Control Frequency:  {actual_freq:10.2f} Hz")
             print(f"  Average Frequency:         {avg_freq:10.2f} Hz")
             print(f"  Maximum Frequency:         {max_freq:10.2f} Hz")
             print(f"  Minimum Frequency:         {min_freq:10.2f} Hz")
@@ -179,55 +189,46 @@ def main(args):
             
             print(f"\n{'='*60}")
             print(f"💡 Notes:")
-            print(f"  - This benchmark tests REAL serial communication (background thread paused)")
-            print(f"  - Each call waits for serial response (one-request-one-response mechanism)")
+            print(f"  - Actual frequency is limited by serial communication response time")
             print(f"  - Theoretical max frequency = 1000 / average_latency_ms Hz")
             print(f"  - If latency is high, check:")
             print(f"    * Serial port baudrate (current: {args.baudrate})")
             print(f"    * USB cable quality")
             print(f"    * System load")
+            print(f"    * Other processes using the serial port")
             print(f"{'='*60}\n")
         else:
             print("Error: No calls completed!")
             
     except KeyboardInterrupt:
         print("\n✗ Benchmark interrupted")
-        # Restore background thread if it was paused
-        if hasattr(robot, 'servo_driver') and hasattr(robot.servo_driver, '_pause_update'):
-            robot.servo_driver._pause_update.clear()
     
     except Exception as e:
         print(f"✗ Error: {e}")
         import traceback
         traceback.print_exc()
-        # Restore background thread if it was paused
-        if hasattr(robot, 'servo_driver') and hasattr(robot.servo_driver, '_pause_update'):
-            robot.servo_driver._pause_update.clear()
     
     finally:
-        # Ensure background thread is restored
-        if hasattr(robot, 'servo_driver') and hasattr(robot.servo_driver, '_pause_update'):
-            robot.servo_driver._pause_update.clear()
         robot.disconnect()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Benchmark robot joint reading frequency (real serial communication)",
+        description="Benchmark robot control command frequency",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Basic benchmark (5 seconds, default settings)
-  python 14_benchmark_read_joints.py
+  python 15_benchmark_control_frequency.py
 
   # Extended benchmark (10 seconds)
-  python 14_benchmark_read_joints.py --duration 10
+  python 15_benchmark_control_frequency.py --duration 10
+
+  # Test with different control mode
+  python 15_benchmark_control_frequency.py --control-mode mit_position
 
   # Verbose output (show errors)
-  python 14_benchmark_read_joints.py --verbose
-
-  # Specify serial port and baudrate
-  python 14_benchmark_read_joints.py --port /dev/ttyUSB0 --baudrate 1000000
+  python 15_benchmark_control_frequency.py --verbose
         """
     )
     
@@ -252,6 +253,8 @@ Examples:
     parser.add_argument('--control-mode', type=str, default='pv', 
                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+    parser.add_argument('--speed-deg-s', type=int, default=300,
+                       help="关节速度 (度/秒, 默认: 300)")
     
     # Benchmark settings
     parser.add_argument('--duration', type=float, default=5.0, 
