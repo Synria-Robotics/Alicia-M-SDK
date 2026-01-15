@@ -45,7 +45,7 @@ def main(args):
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim="teach",
-        control_mode="mit"
+        control_mode="pv"
     )
     rc.set_backend('numpy')
 

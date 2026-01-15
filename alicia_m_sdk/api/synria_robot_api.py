@@ -225,7 +225,7 @@ class SynriaRobotAPI:
         :param speed_deg_s: Speed in degrees per second (0-360, required range)
         """
         home_joints = [0.0] * 6
-        self.set_robot_state(target_joints=home_joints, gripper_value=100, speed_deg_s=speed_deg_s, wait_for_completion=True)
+        self.set_robot_state(target_joints=home_joints, gripper_value=None, speed_deg_s=speed_deg_s, wait_for_completion=True)
 
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
