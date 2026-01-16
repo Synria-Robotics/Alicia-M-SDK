@@ -249,12 +249,11 @@ Examples:
     # Control settings
     parser.add_argument('--control-aim', type=str, default='teach', 
                        choices=['teach', 'operation'],
-                       help='Control aim: teach or operation (motor-specific)')
+                       help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     parser.add_argument('--control-mode', type=str, default='pv', 
                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
-    parser.add_argument('--speed-deg-s', type=int, default=300,
-                       help="关节速度 (度/秒, 默认: 300)")
+    parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
     
     # Benchmark settings
     parser.add_argument('--duration', type=float, default=5.0, 

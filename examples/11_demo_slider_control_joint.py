@@ -348,8 +348,8 @@ def main(args):
         robot_version=args.robot_version,
         gripper_type=args.gripper_type,
         debug_mode=args.debug,
-        control_aim="teach",
-        control_mode="pv"
+        control_aim=args.control_aim,
+        control_mode=args.control_mode
     )
     
     controller = None
@@ -397,6 +397,10 @@ if __name__ == "__main__":
                         help="机器人版本 (默认: v1_1)")
     parser.add_argument('--gripper_type', type=str, default="100mm",  
                         help="夹爪型号 (默认: 100mm)")
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
     parser.add_argument('--debug', action='store_true',
                         help="启用调试模式")
     

@@ -248,7 +248,7 @@ Examples:
     # Control settings
     parser.add_argument('--control-aim', type=str, default='teach', 
                        choices=['teach', 'operation'],
-                       help='Control aim: teach or operation (motor-specific)')
+                       help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     parser.add_argument('--control-mode', type=str, default='pv', 
                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')

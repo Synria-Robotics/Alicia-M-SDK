@@ -47,7 +47,7 @@ class SparkVisBridge:
             port: WebSocket server port
             output_file: CSV output file path (optional)
             enable_robot_sync: Enable robot->UI state broadcasting
-            robot_sync_rate_hz: Robot state broadcast frequency in Hz (default: 200Hz)
+            robot_sync_rate_hz: Robot state broadcast frequency in Hz (default: 500Hz)
             log_source: Data logging source ('ui', 'robot', or 'both')
             
         """
@@ -188,7 +188,7 @@ class SparkVisBridge:
                 self.robot.servo_driver.set_joint_and_gripper(
                     joint_angles=joints_rad,
                     gripper_value=gripper_angle,
-                    speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 2.5,  # 默认 2.5 deg/s ≈ 0.0436 rad/s
+                    speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 500,  # 默认 500 deg/s
                 )
             else:
                 # 仅关节控制
@@ -196,7 +196,7 @@ class SparkVisBridge:
                 self.robot.set_robot_state(
                     target_joints=joints_rad,        # 关节目标位置(弧度)
                     joint_format='rad',              # 位置单位: 弧度
-                    speed_deg_s=100,                 # 运动速度: 度/秒
+                    speed_deg_s=500,                 # 运动速度: 度/秒
                     wait_for_completion=False,
                 )
 
@@ -307,7 +307,7 @@ class SparkVisBridge:
             self.websocket_connections.discard(websocket)
 
     def start_server(self):
-        """Start the WebSocket server (200Hz sync rate)."""
+        """Start the WebSocket server (500Hz sync rate)."""
         print(f"🚀 WebSocket: ws://{self.host}:{self.port} ({self.robot_sync_rate_hz}Hz)")
 
         async def server():

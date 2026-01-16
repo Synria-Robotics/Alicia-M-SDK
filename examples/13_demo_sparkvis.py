@@ -104,7 +104,7 @@ if __name__ == '__main__':
     parser.add_argument('--log-source', type=str, default='ui', choices=['ui','robot','both'], help='记录UI指令/机器人状态/二者')
     # Robot sync settings
     parser.add_argument('--enable-robot-sync', action='store_true', help='启用 机器人→UI 状态同步')
-    parser.add_argument('--robot-sync-rate', type=float, default=200.0, help='机器人状态广播频率 Hz (默认200Hz，建议范围50-500Hz)')
+    parser.add_argument('--robot-sync-rate', type=float, default=500.0, help='机器人状态广播频率 Hz (默认500Hz，建议范围50-500Hz)')
     
     args = parser.parse_args()
     main(args)

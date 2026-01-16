@@ -193,7 +193,9 @@ if __name__ == '__main__':
     
     # Motor-specific control settings
     parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific)')
+                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
     parser.add_argument('--use-mit-mode', action='store_true', 
                         help='Use MIT position mode for high-frequency playback (motor-specific)')
     parser.add_argument('--playback-hz', type=float, default=200.0,
@@ -224,7 +226,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=666, help='Random seed')
     
     # Execution
-    parser.add_argument('--speed-deg-s', type=int, default=30, help="关节运动速度 (度/秒)")
+    parser.add_argument('--speed_deg_s', type=int, default=20, help="关节运动速度 (单位: 度/秒，默认: 20，范围: 10-400度/秒)")
     parser.add_argument('--timeout', type=float, default=10.0, help='Timeout per command (seconds)')
     
     # Other

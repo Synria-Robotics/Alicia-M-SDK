@@ -364,7 +364,7 @@ class JointTrajectoryExecutor(_BaseTrajectoryExecutor):
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 20,
+        speed_deg_s: int = 500,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -372,7 +372,7 @@ class JointTrajectoryExecutor(_BaseTrajectoryExecutor):
         wait_for_completion: bool = True,
         use_timing: bool = False,
         use_mit_mode: bool = False,
-        playback_hz: float = 200.0
+        playback_hz: float = 500.0
     ):
         """Initialize joint trajectory executor.
         
@@ -445,7 +445,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 100,
+        speed_deg_s: int = 500,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -453,7 +453,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
         wait_for_completion: bool = False,
         use_timing: bool = True,
         use_mit_mode: bool = False,
-        playback_hz: float = 200.0
+        playback_hz: float = 500.0
     ):
         """Initialize Cartesian trajectory executor.
         
