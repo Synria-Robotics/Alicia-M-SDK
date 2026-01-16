@@ -575,8 +575,9 @@ class ServoDriver:
     def set_joint_and_gripper(self, 
                               joint_angles: Optional[List[float]] = None,
                               gripper_value: Optional[float] = None,
-                              speed_deg_s: Union[float, List[float]] = 57.3,
-                              torque_nm: Union[float, List[float]] = 0.0,
+                              speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                              torque_nm: Union[float, List[float], np.ndarray] = 0.0,
+                              gripper_speed_deg_s: Optional[float] = None,
                               control_aim: int = None,
                               control_mode: tuple = None) -> bool:
         """
@@ -586,9 +587,10 @@ class ServoDriver:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
             gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
             speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-10, +10] rad/s).
-                        可以是单个值(所有关节相同)或列表(每关节独立)
+                        可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
-                      可以是单个值(所有关节相同)或列表(每关节独立)
+                      可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
+            gripper_speed_deg_s: 夹爪速度 (度/秒). 范围 [-573, +573] deg/s. None使用默认值57.3 deg/s
             control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂). None使用实例默认值
             control_mode: 控制模式元组. None使用实例默认值
                 - PATTERN_PV:  必须提供 joint_angles + speed_deg_s
@@ -646,6 +648,7 @@ class ServoDriver:
             gripper_value=gripper_value,
             speed_deg_s=speed_deg_s,
             torque_nm=torque_nm,
+            gripper_speed_deg_s=gripper_speed_deg_s,
             control_aim=control_aim,
             control_mode=control_mode
         )
@@ -669,8 +672,9 @@ class ServoDriver:
     def _build_send_joint_frame(self, 
                            joint_angles: Optional[List[float]] = None, 
                            gripper_value: Optional[float] = None, 
-                           speed_deg_s: Union[float, List[float]] = 57.3,
-                           torque_nm: Union[float, List[float]] = 0.0,
+                                speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                                torque_nm: Union[float, List[float], np.ndarray] = 0.0,
+                                gripper_speed_deg_s: Optional[float] = None,
                            control_aim: int = None,
                            control_mode: tuple = None) -> List[int]:
         """
@@ -756,15 +760,21 @@ class ServoDriver:
                 effective_joints = joint_angles
 
         # Handle speed (deg/s)
-        gripper_speed_val = 57.3  # 默认夹爪速度 (deg/s, 约1.0 rad/s)
-        if isinstance(speed_deg_s, (list, tuple)) or hasattr(speed_deg_s, '__len__'):
+        # If gripper_speed_deg_s is provided, use it; otherwise use default or extract from speed_deg_s list
+        if gripper_speed_deg_s is not None:
+            gripper_speed_val = gripper_speed_deg_s
+        else:
+            gripper_speed_val = 57.3  # 默认夹爪速度 (deg/s, 约1.0 rad/s)
+
+        if isinstance(speed_deg_s, (list, tuple, np.ndarray)) or (hasattr(speed_deg_s, '__len__') and not isinstance(speed_deg_s, str)):
             # Convert to list if it's a numpy array or other sequence
             try:
                 speed_array = list(speed_deg_s)
             except TypeError:
                 speed_array = [speed_deg_s]
             
-            if len(speed_array) == 7:
+            # If gripper_speed_deg_s is not provided and speed_array has 7 elements, use the 7th for gripper
+            if gripper_speed_deg_s is None and len(speed_array) == 7:
                 speed_list = speed_array[:6]
                 gripper_speed_val = speed_array[6]
             elif len(speed_array) != self.joint_count:
@@ -774,7 +784,9 @@ class ServoDriver:
                 speed_list = speed_array
         else:
             speed_list = [speed_deg_s] * self.joint_count
-            gripper_speed_val = speed_deg_s
+            # Only use speed_deg_s for gripper if gripper_speed_deg_s is not provided
+            if gripper_speed_deg_s is None:
+                gripper_speed_val = speed_deg_s
 
         # Handle torque (N·m) - only used in PVT mode
         gripper_torque_val = 0.0  # 默认夹爪扭矩 (N·m)

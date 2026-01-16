@@ -242,19 +242,27 @@ class SynriaRobotAPI:
 
     # ==================== Robot Control ====================
 
-    def set_home(self, speed_deg_s: int = 20):
+    def set_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
         """Move robot to home position and wait until near zero.
 
-        :param speed_deg_s: Speed in degrees per second (0-360, required range)
+        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
+        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
         """
         home_joints = [0.0] * 6
-        self.set_robot_state(target_joints=home_joints, gripper_value=None, speed_deg_s=speed_deg_s, wait_for_completion=True)
+        self.set_robot_state(
+            target_joints=home_joints, 
+            gripper_value=None, 
+            speed_deg_s=speed_deg_s,
+            gripper_speed_deg_s=gripper_speed_deg_s,
+            wait_for_completion=True
+        )
 
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
                         gripper_value: Optional[int] = None,
                         joint_format: str = 'deg',
-                        speed_deg_s: int = 20,
+                        speed_deg_s: Union[int, float, List[float], np.ndarray] = 20,
+                        gripper_speed_deg_s: Optional[float] = 57.3,
                         tolerance: float = 0.1,
                         timeout: float = 10.0,
                         wait_for_completion: bool = True,
@@ -265,7 +273,8 @@ class SynriaRobotAPI:
         :param target_joints: Optional target joint angles. If None, keeps current
         :param gripper_value: Optional gripper value (0-100). If None, keeps current
         :param joint_format: Unit format for joints, 'rad' or 'deg'
-        :param speed_deg_s: Speed in degrees per second (0-360, required range)
+        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
+        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
         :param tolerance: Rad, acceptable abs distance to target for joints
         :param timeout: Seconds, maximum wait time
         :param wait_for_completion: If True, wait until target reached
@@ -289,6 +298,7 @@ class SynriaRobotAPI:
             joint_angles=target_joints,
             gripper_value=gripper_value,
             speed_deg_s=speed_deg_s,
+            gripper_speed_deg_s=gripper_speed_deg_s,
             control_aim=effective_control_aim,
             control_mode=effective_control_mode
         )
@@ -422,7 +432,8 @@ class SynriaRobotAPI:
                         max_iters: int = 100,
                         multi_start: int = 0,
                         use_random_init: bool = False,
-                        speed_deg_s: int = 100,
+                        speed_deg_s: Union[int, float, List[float], np.ndarray] = 10,
+                        gripper_speed_deg_s: Optional[float] = 57.3,
                         execute: bool = True) -> Dict:
         """Move end-effector to target pose using inverse kinematics.
 
@@ -434,7 +445,8 @@ class SynriaRobotAPI:
         :param max_iters: Maximum number of iterations
         :param multi_start: Number of multi-start attempts, 0 to disable
         :param use_random_init: Use random initial guess instead of current pose
-        :param speed_deg_s: Motion speed in degrees per second
+        :param speed_deg_s: Motion speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s)
+        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
         :param execute: Execute motion if True
         :return: Dictionary with success, q, iters, pos_err, ori_err, message
         """
@@ -494,6 +506,7 @@ class SynriaRobotAPI:
                     target_joints=ik_result['q'],
                     joint_format='rad',
                     speed_deg_s=speed_deg_s,
+                    gripper_speed_deg_s=gripper_speed_deg_s,
                     wait_for_completion=True
                 )
                 ik_result['motion_executed'] = result
