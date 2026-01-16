@@ -195,35 +195,6 @@ class SerialComm:
                 logger.error(f"Exception sending data: {str(e)}")
                 return False
 
-    def send_and_wait_response(self, data: List[int], timeout: float = 2.0) -> Optional[List[int]]:
-        """
-        发送数据并等待单片机回复（一问一答机制）
-
-        Args:
-            data: 要发送的字节数据列
-            timeout: 等待回复的超时时间（秒），默认0.5秒
-
-        Returns:
-            Optional[List[int]]: 接收到的回复数据帧，超时则返回 None
-        """
-        # 1) 发送数据
-        if not self.send_data(data):
-            return None
-
-        # 2) 等待回复
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            frame = self.read_frame()
-            if frame:
-                return frame
-            # 短暂休眠，避免 CPU 空转
-            # time.sleep(0.005)
-
-        # 3) 超时未收到回复
-        if self.debug_mode:
-            logger.warning(f"Timeout waiting for response after {timeout}s")
-        return None
-
 
     #-------------------------------------------------数据接收-----------------------------------------------------#
     def read_frame(self) -> Optional[List[int]]:

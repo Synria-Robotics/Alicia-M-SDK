@@ -22,10 +22,10 @@
 # Website: https://synriarobotics.ai
 
 """
-Demo: Robot Go Home (Zero Position)
+Demo: Robot Return to Home (Zero Position)
 
 Features:
-- Send go home command continuously
+- Send return to home command continuously
 - Wait for confirmation response
 - Automatic homing process
 """
@@ -47,8 +47,8 @@ def calculate_checksum(data):
     return crc & 0xFF
 
 
-def build_go_home_command():
-    """Build go home (zero position) command
+def build_return_to_home_command():
+    """Build return to home (zero position) command
     
     Command structure:
     [0xAA] [0x03] [0x02] [0x02] [0x01] [0x07] [CRC] [0xFF]
@@ -69,11 +69,11 @@ def build_go_home_command():
     return frame
 
 
-def is_go_home_confirmation(frame):
-    """Check if received frame is go home confirmation
+def is_return_to_home_confirmation(frame):
+    """Check if received frame is return to home confirmation
     
     Expected response:
-    [0xAA] [0x03] [0x83] [0x01] [0x01] [CRC] [0xFF]
+    [0xAA] [0x03] [0x82] [0x01] [0x01] [CRC] [0xFF]
     
     :param frame: Received frame
     :return: True if it's the confirmation frame
@@ -99,8 +99,8 @@ def is_go_home_confirmation(frame):
     
     return calculated_checksum == received_checksum
 
-def robot_go_home(robot, max_attempts=100, send_interval=0.1):
-    """Send robot to home (zero) position
+def robot_return_to_home(robot, max_attempts=100, send_interval=0.1):
+    """Return robot to home (zero) position
     
     :param robot: Robot instance
     :param max_attempts: Maximum number of send attempts
@@ -109,8 +109,8 @@ def robot_go_home(robot, max_attempts=100, send_interval=0.1):
     """
     logger.info("开始执行机械臂归零操作")
     
-    # Build go home command
-    home_command = build_go_home_command()
+    # Build return to home command
+    home_command = build_return_to_home_command()
     logger.info(f"归零指令: {' '.join(f'{b:02X}' for b in home_command)}")
     
     # Get serial communication interface
@@ -131,7 +131,7 @@ def robot_go_home(robot, max_attempts=100, send_interval=0.1):
         while attempt < max_attempts:
             attempt += 1
             
-            # Send go home command
+            # Send return to home command
             success = serial_comm.send_data(home_command)
             if not success:
                 logger.warning(f"发送指令失败 (尝试 {attempt}/{max_attempts})")
@@ -153,7 +153,7 @@ def robot_go_home(robot, max_attempts=100, send_interval=0.1):
                     logger.info(f"[调试] 接收到数据包: {' '.join(f'{b:02X}' for b in frame)}")
                     
                     # Check if it's the confirmation frame
-                    if is_go_home_confirmation(frame):
+                    if is_return_to_home_confirmation(frame):
                         logger.info("✓ 机械臂归零成功！")
                         logger.info(f"确认数据包: {' '.join(f'{b:02X}' for b in frame)}")
                         return True
@@ -203,8 +203,8 @@ def main(args):
         
         print()
         
-        # Perform go home by sending command to STM32
-        success = robot_go_home(
+        # Perform return to home by sending command to STM32
+        success = robot_return_to_home(
             robot,
             max_attempts=args.max_attempts,
             send_interval=args.send_interval
@@ -235,16 +235,16 @@ def main(args):
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description="Robot Go Home (Zero Position) Demo")
+    parser = argparse.ArgumentParser(description="Robot Return to Home (Zero Position) Demo")
     
     # Serial port settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
     parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific)')
+                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     
-    # Go home parameters
+    # Return to home parameters
     parser.add_argument('--max-attempts', type=int, default=100, 
                         help="最大发送次数 (默认: 100)")
     parser.add_argument('--send-interval', type=float, default=0.1, 

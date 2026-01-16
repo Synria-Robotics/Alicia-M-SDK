@@ -35,7 +35,7 @@ class SparkVisBridge:
         port: int = 8765,
         output_file: Optional[str] = None,
         enable_robot_sync: bool = True,
-        robot_sync_rate_hz: float = 200.0,  # 提升到200Hz
+        robot_sync_rate_hz: float = 500.0,  # 提升到500Hz
         log_source: str = "ui",  # ui | robot | both
         speed_rad_s: Optional[List[float]] = None  # 关节速度设置（弧度/秒）
     ):
@@ -49,17 +49,17 @@ class SparkVisBridge:
             enable_robot_sync: Enable robot->UI state broadcasting
             robot_sync_rate_hz: Robot state broadcast frequency in Hz (default: 200Hz)
             log_source: Data logging source ('ui', 'robot', or 'both')
-            speed_rad_s: Joint speed in radians per second (default: [0.0436, 0.0436, 0.0314, 0.0314, 0.0262, 0.0262, 0.0262])
+            
         """
         self.robot = robot
         self.host = host
         self.port = port
         self.enable_robot_sync = enable_robot_sync
+        self.robot_sync_rate_hz = robot_sync_rate_hz
         self.robot_sync_interval = 1.0 / max(1e-3, robot_sync_rate_hz)
         self.log_source = log_source.lower()
         
-        # 关节速度设置（弧度/秒）- 6个关节 + 1个夹爪
-        self.speed_rad_s = speed_rad_s or [0.0436, 0.0436, 0.0314, 0.0314, 0.0262, 0.0262, 0.0262]
+        
 
         # WebSocket clients
         self.websocket_connections = set()
@@ -143,15 +143,18 @@ class SparkVisBridge:
             return None
 
     def apply_ui_joint_update(self, joint_values: Dict[str, float]):
-        """Apply joint updates received from UI to robot."""
+        """Apply joint updates received from UI to robot (optimized for 500Hz)."""
         try:
             import numpy as np
 
-            # 辅助函数：兼容 Joint1 和 joint1 两种键名
+            # 辅助函数：兼容 Joint1 和 joint1 两种键名 (优化: 缓存键名查找)
             def get_val(key_suffix, default=0.0):
-                # 尝试 Joint1, joint1, J1, j1
-                keys = [f'Joint{key_suffix}', f'joint{key_suffix}', f'J{key_suffix}', f'j{key_suffix}']
-                for k in keys:
+                # 优先检查最常见的格式
+                key_joint = f'Joint{key_suffix}'
+                if key_joint in joint_values:
+                    return float(joint_values[key_joint])
+                # 备选格式
+                for k in [f'joint{key_suffix}', f'J{key_suffix}', f'j{key_suffix}']:
                     if k in joint_values:
                         return float(joint_values[k])
                 return default
@@ -172,30 +175,41 @@ class SparkVisBridge:
             
             gripper_val = joint_values.get('gripper', 0.0)
 
-            # 使用速度设置发送命令
-            # 将速度从弧度/秒转换为度/秒，使用最大速度值
-            max_speed_rad_s = max(self.speed_rad_s[:6]) if len(self.speed_rad_s) >= 6 else self.speed_rad_s[0]
-            speed_deg_s = int(np.rad2deg(max_speed_rad_s))
+            # 🚀 关键优化: 使用 set_joint_and_gripper_combined() 
+            # 这个方法内部已经针对高频控制优化，将关节和夹爪控制合并为一个串口命令
+            # 避免了两次串口通信的开销
             
-            # 使用 set_robot_state 方法设置关节目标
-            self.robot.set_robot_state(
-                target_joints=joints_rad,
-                joint_format='rad',
-                # speed_deg_s=speed_deg_s,
-                wait_for_completion=False,
-            )
-
-            # 夹爪控制：百分比 [0..1] → 角度 [0..100]
+            # 如果夹爪值在消息中，使用合并命令
             if 'gripper' in joint_values:
-                pct = max(0.0, min(1.0, float(joint_values['gripper'])))
+                pct = max(0.0, min(1.0, float(gripper_val)))
                 gripper_angle = pct * 100.0
-                self.robot.set_gripper_target(value=gripper_angle, wait_for_completion=False)
+                
+                # 合并关节和夹爪命令（单次串口通信）
+                self.robot.servo_driver.set_joint_and_gripper(
+                    joint_angles=joints_rad,
+                    gripper_value=gripper_angle,
+                    speed_rad_s=self.speed_rad_s[0] if self.speed_rad_s else 0.0436,
+                )
+            else:
+                # 仅关节控制
+                self.robot.set_robot_state(
+                    target_joints=joints_rad,
+                    joint_format='rad',
+                    speed_deg_s=100,
+                    wait_for_completion=False,
+                )
 
-            # 记录 UI 命令到 CSV
+            # 记录 UI 命令到 CSV (优化: 减少 flush 频率)
             if self.file_handle and self.log_source in ("ui", "both"):
                 row = f"{self._now_str()},{','.join(map(str, joints_rad))},{gripper_val}\n"
                 self.file_handle.write(row)
-                self.file_handle.flush()
+                # 优化: 每100次才 flush 一次，减少 I/O 开销
+                if not hasattr(self, '_csv_write_count'):
+                    self._csv_write_count = 0
+                self._csv_write_count += 1
+                if self._csv_write_count >= 100:
+                    self.file_handle.flush()
+                    self._csv_write_count = 0
                 
         except Exception as e:
             print(f"[Log] 应用UI关节更新失败: {e}")
@@ -293,7 +307,7 @@ class SparkVisBridge:
 
     def start_server(self):
         """Start the WebSocket server (200Hz sync rate)."""
-        print(f"🚀 WebSocket: ws://{self.host}:{self.port} (200Hz)")
+        print(f"🚀 WebSocket: ws://{self.host}:{self.port} ({self.robot_sync_rate_hz}Hz)")
 
         async def server():
             async with websockets.serve(self.websocket_handler, self.host, self.port):

@@ -35,9 +35,9 @@ class JointSliderController:
         self.control_thread = None
         self.shutdown_event = threading.Event()  # 添加关闭事件
         
-        # Control parameters - 200Hz control frequency
-        self.control_frequency = 200  # Hz (提升到200Hz)
-        self.control_interval = 1.0 / self.control_frequency  # 0.005 seconds
+        # Control parameters - 500Hz control frequency
+        self.control_frequency = 500  # Hz (提升到500Hz)
+        self.control_interval = 1.0 / self.control_frequency  # 0.002 seconds
         self.speed = [1.5, 1.75, 1.75, 1.5, 1.5, 1.5, 1.5]  # 速度设置 (弧度/秒)
         
         # Joint limits (degrees)
@@ -393,8 +393,8 @@ if __name__ == "__main__":
                         help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--baudrate', type=int, default=1000000,  
                         help="波特率 (默认: 1000000)")
-    parser.add_argument('--robot_version', type=str, default="v1_0",  
-                        help="机器人版本 (默认: v1_0)")
+    parser.add_argument('--robot_version', type=str, default="v1_1",  
+                        help="机器人版本 (默认: v1_1)")
     parser.add_argument('--gripper_type', type=str, default="100mm",  
                         help="夹爪型号 (默认: 100mm)")
     parser.add_argument('--debug', action='store_true',

@@ -100,6 +100,19 @@ class SynriaRobotAPI:
                 # Start background update thread for continuous state updates
                 self.servo_driver.start_update_thread()
                 
+                # Give background thread a moment to start (avoid race condition)
+                time.sleep(0.1)
+                
+                # Auto-detect arm type (teach vs operation) and update control_aim
+                detected_aim = self.servo_driver.auto_detect_control_aim(timeout=1.0)
+                if detected_aim != self.servo_driver.default_control_aim:
+                    # Update control_aim if detection found a different valid type
+                    old_aim_name = "Teaching Arm" if self.servo_driver.default_control_aim == ServoDriver.AIM_TEACH else "Operating Arm"
+                    new_aim_name = "Teaching Arm" if detected_aim == ServoDriver.AIM_TEACH else "Operating Arm"
+                    logger.info(f"[Auto-Detect] Switched control_aim: {old_aim_name} (0x{self.servo_driver.default_control_aim:02X}) → {new_aim_name} (0x{detected_aim:02X})")
+                    self.servo_driver.default_control_aim = detected_aim
+                    self.control_aim = detected_aim
+                
                 # Initialize state
                 self.get_robot_state("joint_gripper")
                 self._robot_type()
@@ -142,12 +155,16 @@ class SynriaRobotAPI:
         if info_type == "gripper_type":
             return self._get_gripper_type_with_cache(timeout)
 
-        # Joint and gripper are acquired together from hardware using the "joint" command
+        # Joint and gripper data are continuously updated by background thread
+        # Just read from cache (no need to send query command)
         if info_type in ("joint_gripper", "joint", "gripper"):
-            if not self.servo_driver.acquire_info("joint_gripper", wait=True, timeout=timeout):
-                logger.error(f"Failed to get joint/gripper data within timeout period")
-                return None
-            return self.data_parser.get_info(info_type)
+            # Give background thread a chance to update if data is stale
+            result = self.data_parser.get_info(info_type)
+            if result is None:
+                # Cache not ready yet, wait briefly for background thread
+                time.sleep(0.05)
+                result = self.data_parser.get_info(info_type)
+            return result
 
         # Other info types map directly to hardware commands
         if not self.servo_driver.acquire_info(info_type, wait=True, timeout=timeout):
@@ -265,14 +282,13 @@ class SynriaRobotAPI:
         effective_control_aim = control_aim if control_aim is not None else self.control_aim
         effective_control_mode = control_mode if control_mode is not None else self.control_mode
         
-        # Convert speed_deg_s to speed_rad_s for ServoDriver
-        speed_rad_s = speed_deg_s * np.pi / 180.0
+        # 速度参数直接传递,无需转换 (现在全SDK统一使用deg/s)
 
         # Use unified method with control mode parameters
         success = self.servo_driver.set_joint_and_gripper(
             joint_angles=target_joints,
             gripper_value=gripper_value,
-            speed_rad_s=speed_rad_s,
+            speed_deg_s=speed_deg_s,
             control_aim=effective_control_aim,
             control_mode=effective_control_mode
         )
@@ -557,13 +573,12 @@ class SynriaRobotAPI:
     
     def get_firmware_version(self, timeout=5.0, send_interval=0.2):
         """Query robot firmware version.
-        使用一问一答机制：发送指令后等待单片机回复。
+        使用事件等待机制：发送指令后等待后台线程解析回复。
 
         :param timeout: Total time in seconds to keep trying
         :param send_interval: Time in seconds between each attempt
         :return: Firmware version string, or None if query fails
         """
-        command = [0xAA, 0x01, 0x7E, 0x01, 0xFE, 0x79, 0xFF]
         start_time = time.time()
         
         # Check if the firmware version is already in the json file
@@ -577,35 +592,27 @@ class SynriaRobotAPI:
         if firmware_version:
             return firmware_version
 
-        # 如果后台线程正在运行，先暂停它
-        was_thread_running = self.servo_driver.is_update_thread_running()
-        if was_thread_running:
-            self.servo_driver._pause_update.set()
-
+        # Use acquire_info with wait=True to let background thread handle the response
         try:
             while (time.time() - start_time) < timeout:
                 try:
-                    # 使用一问一答机制：发送指令并等待回复
-                    frame = self.servo_driver.serial_comm.send_and_wait_response(command, timeout=1.0)
-                    if frame:
-                        # 解析接收到的数据帧
-                        self.data_parser.parse_frame(frame)
+                    # Use acquire_info which will send command and wait for event
+                    success = self.servo_driver.acquire_info("version", wait=True, timeout=send_interval)
                     
-                    version = self.data_parser.get_firmware_version()
-                    if version and version != "未知版本":
-                        # Save it into a json file
-                        with open(os.path.join(os.path.dirname(__file__), "firmware_version.json"), "w") as f:
-                            json.dump({"firmware_version": version}, f)
-                        return version  # Success, return the version immediately
+                    if success:
+                        version = self.data_parser.get_firmware_version()
+                        if version and version != "未知版本":
+                            # Save it into a json file
+                            with open(os.path.join(os.path.dirname(__file__), "firmware_version.json"), "w") as f:
+                                json.dump({"firmware_version": version}, f)
+                            return version  # Success, return the version immediately
 
                 except Exception as e:
                     logger.error(f"An error occurred during a read attempt: {e}")
 
                 time.sleep(send_interval)
-        finally:
-            # 恢复后台线程
-            if was_thread_running:
-                self.servo_driver._pause_update.clear()
+        except Exception as e:
+            logger.error(f"Failed to get firmware version: {e}")
 
         return None
     

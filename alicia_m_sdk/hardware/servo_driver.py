@@ -122,7 +122,7 @@ class ServoDriver:
         self.auto_init_mit = auto_init_mit  # 是否自动初始化MIT模式
         # 设置默认控制目标为操作臂（AIM_OPERATION）
         self.default_control_aim = control_aim if control_aim is not None else self.AIM_OPERATION
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use RLock to allow re-entry within same thread
 
 
         # Create serial communication module and data parser
@@ -156,10 +156,11 @@ class ServoDriver:
         
         # State update thread related
         self._update_thread = None
-        self.thread_update_interval = 0.001  # Update interval in seconds
+        self.thread_update_interval = 0.010  # Update interval in seconds (10ms = 100Hz max query rate)
         self._stop_thread = threading.Event()
         self._pause_update = threading.Event()  # 用于暂停后台线程
         self._thread_running = False
+        self._last_user_command_time = time.perf_counter()  # Initialize with current time (not 0.0)
         
         # MIT模式初始化状态标志
         # 默认假设用户已手动运行 00_config_mit_params.py 配置过MIT参数
@@ -223,6 +224,69 @@ class ServoDriver:
         result = self.serial_comm.connect()
         # 不再自动启动后台线程，由上层 API 在查询固件版本后手动启动
         return result
+    
+    def auto_detect_control_aim(self, timeout: float = 1.0) -> int:
+        """
+        自动检测机械臂类型(示教臂或操作臂)
+        
+        尝试使用当前的 default_control_aim 查询关节数据。
+        如果收到的是全0数据(无效),则自动切换到另一种模式重试。
+        
+        :param timeout: 每次尝试的超时时间(秒)
+        :return: 检测到的有效 control_aim (AIM_TEACH 或 AIM_OPERATION)
+        """
+        if self.debug_mode:
+            logger.info(f"[Auto-Detect] Starting arm type detection (current: 0x{self.default_control_aim:02X})")
+        
+        # 先尝试当前设置的 control_aim
+        aims_to_try = [self.default_control_aim]
+        
+        # 添加备选项
+        if self.default_control_aim == self.AIM_OPERATION:
+            aims_to_try.append(self.AIM_TEACH)
+        else:
+            aims_to_try.append(self.AIM_OPERATION)
+        
+        for aim in aims_to_try:
+            if self.debug_mode:
+                aim_name = "Teaching Arm" if aim == self.AIM_TEACH else "Operating Arm"
+                logger.info(f"[Auto-Detect] Testing control_aim=0x{aim:02X} ({aim_name})")
+            
+            # 发送查询指令
+            success = self.acquire_info("joint", wait=True, timeout=timeout, control_aim=aim)
+            
+            if not success:
+                if self.debug_mode:
+                    logger.warning(f"[Auto-Detect] Failed to query with control_aim=0x{aim:02X}")
+                continue
+            
+            # 检查返回的数据是否有效
+            joint_state = self.data_parser.get_joint_state()
+            if joint_state and joint_state.angles:
+                # 检查是否为全0数据(无效)或有效数据
+                max_angle = max(abs(a) for a in joint_state.angles)
+                
+                # 全0数据判断: 所有角度的绝对值都小于0.1弧度(约5.7度)且非常接近0
+                is_all_zero = max_angle < 0.001  # 0.001弧度 ≈ 0.057度
+                
+                # 异常数据判断: 如果角度接近-12.5弧度(-716.2度),也认为是无效数据
+                is_invalid = any(abs(a + 12.5) < 0.1 for a in joint_state.angles)
+                
+                if not is_all_zero and not is_invalid:
+                    # 找到有效数据
+                    if self.debug_mode:
+                        angles_deg = [round(a * 57.29578, 1) for a in joint_state.angles]
+                        aim_name = "Teaching Arm" if aim == self.AIM_TEACH else "Operating Arm"
+                        logger.info(f"[Auto-Detect] ✓ Valid data detected with control_aim=0x{aim:02X} ({aim_name})")
+                        logger.info(f"[Auto-Detect]   Current angles: {angles_deg}°")
+                    return aim
+                else:
+                    if self.debug_mode:
+                        logger.warning(f"[Auto-Detect] Received invalid data (all zeros or extreme values), trying next...")
+        
+        # 如果都失败了,返回默认值
+        logger.warning(f"[Auto-Detect] Failed to detect valid arm type, keeping default: 0x{self.default_control_aim:02X}")
+        return self.default_control_aim
     
     def initialize_mit_mode(self, repeat_times: int = 2) -> bool:
         """
@@ -324,57 +388,96 @@ class ServoDriver:
         }
     
     def _update_loop(self):
-        """Main loop of state update thread"""
+        """Main loop of state update thread (active query mode with smart coordination)
+        
+        Note: Alicia-M uses active query protocol - robot only responds to requests.
+        Background thread periodically sends query commands to update joint state,
+        but intelligently backs off when user is sending high-frequency control commands.
+        """
         
         while not self._stop_thread.is_set():
-            time.sleep(self.thread_update_interval)
-            
-            # 检查是否暂停，如果暂停则跳过本次循环
-            if self._pause_update.is_set():
-                continue
-            
             try:
-                # Active request mode: Send joint query command and wait for response
-                # 使用动态构建的请求帧（根据 default_control_aim）
+                # Smart coordination: Check if user is sending commands frequently
+                time_since_last_user_cmd = time.perf_counter() - self._last_user_command_time
+                
+                # If user sent command very recently (< 50ms), skip this query to avoid collision
+                if time_since_last_user_cmd < 0.05:
+                    time.sleep(self.thread_update_interval)
+                    continue
+                
+                # Send joint query command
                 query_cmd = self._build_joint_request_frame(control_aim=self.default_control_aim)
                 
-                # 使用一问一答机制：发送指令并等待回复
-                frame = self.serial_comm.send_and_wait_response(query_cmd, timeout=1.0)
+                # Send command with lock protection
+                with self._lock:
+                    success = self.serial_comm.send_data(query_cmd)
                 
-                if frame == 9999999:
-                    logger.error("Severe serial communication error detected, robot arm may be disconnected")
-                    break
-                if frame:
-                    self.data_parser.parse_frame(frame)
-                else:
+                if not success:
                     if self.debug_mode:
-                        logger.warning("No response received for joint query command")
-        
+                        logger.warning("Failed to send joint query command")
+                    time.sleep(self.thread_update_interval)
+                    continue
+                
+                # Read response frames (with timeout)
+                frames_read = 0
+                max_frames_per_iteration = 3  # Limit frames to read per query
+                timeout_start = time.perf_counter()
+                read_timeout = 0.05  # 50ms timeout for reading response
+                
+                while frames_read < max_frames_per_iteration and not self._stop_thread.is_set():
+                    # Check timeout
+                    if time.perf_counter() - timeout_start > read_timeout:
+                        break
+                    
+                    with self._lock:
+                        frame = self.serial_comm.read_frame()
+                    
+                    if frame is None:
+                        # No more frames available, small delay and retry
+                        time.sleep(0.001)
+                        continue
+                    
+                    # Handle severe communication error
+                    if frame == 9999999:
+                        try:
+                            logger.error("Severe serial communication error detected, robot arm may be disconnected")
+                        except Exception:
+                            pass
+                        break
+                    
+                    if frame:
+                        self.data_parser.parse_frame(frame)
+                        frames_read += 1
+                        break  # Got response, move to next query
+                
+                # Sleep to control query frequency (avoid flooding)
+                time.sleep(self.thread_update_interval)
+                    
             except Exception as e:
-                logger.error(f"State update thread exception: {str(e)}")
-                break
+                # Log error but continue loop for resilience
+                try:
+                    logger.error(f"State update thread exception: {str(e)}")
+                except Exception:
+                    pass
+                # Sleep briefly before retrying to avoid rapid error loops
+                time.sleep(self.thread_update_interval)
+        
         self._thread_running = False
 
 
     #信息获取接口
-    def acquire_info(self, info_type: str, wait: bool = False, timeout: float = 1.0, control_aim: int = None) -> bool:
+    def acquire_info(self, info_type: str, wait: bool = False, timeout: float = 2.0, retry_interval: float = 0.2, control_aim: int = None) -> bool:
         """
         General information acquisition interface, selecting different commands by type.
-        使用一问一答机制：发送指令后等待单片机回复。
-        
-        Args:
-            info_type: Type of information to acquire. Supported types:
-                - "version"
-                - "zero_cali"
-                - "torque_on"
-                - "torque_off"
-                - "joint"
-                - "joint_gripper" (same as "joint", returns joint and gripper data together)
-            wait: If True, wait for the response to be received and parsed
-            timeout: Maximum time to wait in seconds (default 1.0s)
-            control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02)。
+
+        :param info_type: Type of information to acquire (version, zero_cali, torque_on, torque_off, joint, etc.)
+        :param wait: If True, wait for the response to be received and parsed
+        :param timeout: Maximum time to wait in seconds (only used if wait=True)
+        :param retry_interval: Time interval between retry attempts in seconds (default 0.2s)
+        :param control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02)。
                         默认使用实例的 default_control_aim。
                         注意：只有 "joint" 和 "joint_gripper" 指令需要 control_aim，其他指令为通用指令。
+        :return: True if successful
         """
         # Map joint_gripper to joint for hardware command
         actual_info_type = "joint" if info_type == "joint_gripper" else info_type
@@ -383,7 +486,6 @@ class ServoDriver:
             raise ValueError(f"Unsupported info type: {info_type}")
 
         # Clear the corresponding event before sending request (if applicable)
-        # Use the original info_type for event mapping (joint_gripper has its own event mapping)
         if info_type in self.data_parser._info_event_map:
             event = self.data_parser._info_event_map[info_type]
             event.clear()
@@ -396,30 +498,39 @@ class ServoDriver:
         else:
             command = self.INFO_COMMAND_MAP[actual_info_type]
         
-        # 暂停后台线程，避免多线程同时发送指令
-        self._pause_update.set()
-        try:
-            # 使用一问一答机制：发送指令并等待回复
-            frame = self.serial_comm.send_and_wait_response(command, timeout=timeout)
-            
-            if frame is None:
-                if self.debug_mode:
-                    logger.warning(f"No response received for {info_type} command")
-                return False
-            
-            # 解析接收到的数据帧
-            self.data_parser.parse_frame(frame)
-            
-            if wait:
-                # Use the original info_type for event waiting (joint_gripper has its own event mapping)
-                if info_type in self.data_parser._info_event_map:
-                    return self.data_parser.wait_for_info(info_type, timeout)
-                return True
-            
-            return True
-        finally:
-            # 恢复后台线程
-            self._pause_update.clear()
+        # If not waiting, just send once
+        if not wait:
+            success = self.serial_comm.send_data(command)
+            return success
+
+        # If waiting and has an event, implement retry logic
+        if info_type in self.data_parser._info_event_map:
+            event = self.data_parser._info_event_map[info_type]
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                # Send command
+                success = self.serial_comm.send_data(command)
+                if not success:
+                    logger.warning(f"Failed to send {info_type} command, retrying...")
+                    time.sleep(retry_interval)
+                    continue
+
+                # Wait for response with a short timeout (retry_interval)
+                remaining_time = timeout - (time.time() - start_time)
+                wait_time = min(retry_interval, remaining_time)
+
+                if event.wait(wait_time):
+                    # Successfully received response
+                    return True
+
+            # Timeout exceeded
+            logger.warning(f"Failed to get {info_type} within timeout period after multiple retries")
+            return False
+        else:
+            # For commands without events, just send once
+            success = self.serial_comm.send_data(command)
+            return success
             
     def _build_joint_request_frame(self, control_aim: int = None) -> List[int]:
         """
@@ -464,29 +575,26 @@ class ServoDriver:
     def set_joint_and_gripper(self, 
                               joint_angles: Optional[List[float]] = None,
                               gripper_value: Optional[float] = None,
-                              speed_rad_s: Union[float, List[float]] = 1.0,
+                              speed_deg_s: Union[float, List[float]] = 57.3,
                               torque_nm: Union[float, List[float]] = 0.0,
                               control_aim: int = None,
                               control_mode: tuple = None) -> bool:
         """
-        Unified method to set joints, gripper, or both in a single combined frame.
+        统一的关节和夹爪目标设置接口 - 支持所有控制模式
         
         Args:
-            joint_angles: Optional angle list (radians) for 6 joints. 
-                          If None, keeps current joints (or zeros if state unavailable).
-            gripper_value: Optional gripper value (0-100). 
-                           If None, keeps current gripper (or 50.0 if state unavailable).
-            speed_rad_s: Speed in radians per second. 范围 [-10.0, +10.0] rad/s.
-                         Can be a single float (applied to all joints) or a list of 6/7 floats.
-            torque_nm: Torque in Newton-meters. 范围 [-12.0, +12.0] N·m.
-                       Can be a single float (applied to all joints) or a list of 6/7 floats.
-            control_aim: 控制目标 (AIM_TEACH, AIM_OPERATION, AIM_HEAD, AIM_LOIN, AIM_LEG, AIM_UNDERPAN)
-                         默认为 AIM_OPERATION (操作臂)
-            control_mode: 控制模式，不同模式的参数要求:
-                - PATTERN_PV:  必须提供 joint_angles + speed_rad_s
-                - PATTERN_PVT: 必须提供 joint_angles + speed_rad_s + torque_nm
-                - PATTERN_V:   必须提供 speed_rad_s
-                - PATTERN_MIT: 可选提供 joint_angles / speed_rad_s / torque_nm 中的任意一个或多个
+            joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
+            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
+            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-10, +10] rad/s).
+                        可以是单个值(所有关节相同)或列表(每关节独立)
+            torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
+                      可以是单个值(所有关节相同)或列表(每关节独立)
+            control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂). None使用实例默认值
+            control_mode: 控制模式元组. None使用实例默认值
+                - PATTERN_PV:  必须提供 joint_angles + speed_deg_s
+                - PATTERN_PVT: 必须提供 joint_angles + speed_deg_s + torque_nm
+                - PATTERN_V:   必须提供 speed_deg_s
+                - PATTERN_MIT: 可选提供 joint_angles / speed_deg_s / torque_nm 中的任意一个或多个
         """
         # 默认值
         if control_aim is None:
@@ -527,8 +635,8 @@ class ServoDriver:
                 return False
 
         # Basic validation for single float speed
-        if isinstance(speed_rad_s, (int, float)):
-            # Relaxed check to allow negative values for the new mapping [-10, 10]
+        if isinstance(speed_deg_s, (int, float)):
+            # Relaxed check to allow negative values for the new mapping [-573, 573]
             pass
         
         # print(f"[DEBUG] Building control frame with joint_angles={joint_angles}, gripper={gripper_value}, control_aim=0x{control_aim:02X}, control_mode={control_mode}")
@@ -536,7 +644,7 @@ class ServoDriver:
         frame = self._build_send_joint_frame(
             joint_angles=joint_angles,
             gripper_value=gripper_value,
-            speed_rad_s=speed_rad_s,
+            speed_deg_s=speed_deg_s,
             torque_nm=torque_nm,
             control_aim=control_aim,
             control_mode=control_mode
@@ -545,51 +653,39 @@ class ServoDriver:
         # 强制打印发送的控制数据包
         print(f"[TX] 发送控制数据包: {' '.join(f'{b:02X}' for b in frame)}")
 
-        # 暂停后台线程，避免多线程同时发送指令
-        self._pause_update.set()
-        try:
-            # 使用一问一答机制：发送指令并等待回复，超时时间1.0秒
-            response = self.serial_comm.send_and_wait_response(frame, timeout=1.0)
-            
-            # if self.debug_mode:
-            #     self.serial_comm._hex_print("Send combined control", frame)
-            
-            if response:
-                # 解析接收到的回复数据帧
-                self.data_parser.parse_frame(response)
-                return True
-            else:
-                if self.debug_mode:
-                    logger.warning("No response received for joint control command")
-                return False
-        finally:
-            # 恢复后台线程
-            self._pause_update.clear()
+        # Record user command time (for background thread coordination)
+        self._last_user_command_time = time.perf_counter()
+        
+        # Send control command (background thread will handle any response)
+        success = self.serial_comm.send_data(frame)
+        
+        if self.debug_mode and not success:
+            logger.warning("Failed to send joint control command")
+        
+        return success
     
     
     def _build_send_joint_frame(self, 
                            joint_angles: Optional[List[float]] = None, 
                            gripper_value: Optional[float] = None, 
-                           speed_rad_s: Union[float, List[float]] = 1.0,
+                           speed_deg_s: Union[float, List[float]] = 57.3,
                            torque_nm: Union[float, List[float]] = 0.0,
                            control_aim: int = None,
                            control_mode: tuple = None) -> List[int]:
         """
-        Build combined joint + gripper + speed control frame with configurable aim and mode.
+        构建关节+夹爪+速度控制帧 (支持多种控制模式)
         
         协议格式:
         [帧头 0xAA] [指令码 0x06] [功能码] [数据长度] [前缀1] [前缀2] [数据...] [校验位] [帧尾 0xFF]
         
         Args:
-            joint_angles: Optional angle list (radians) for 6 joints. 
-                          If None, keeps current joints (or zeros if state unavailable).
-            gripper_value: Optional gripper value (0-100). 
-                           If None, keeps current gripper (or 50.0 if state unavailable).
-            speed_rad_s: Speed in radians per second. 范围 [-10.0, +10.0] rad/s.
-                         Can be a single float (applied to all joints) or a list of 6/7 floats.
-            torque_nm: Torque in Newton-meters. 范围 [-12.0, +12.0] N·m.
-                       Can be a single float (applied to all joints) or a list of 6/7 floats.
-                       Only used in PVT mode.
+            joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
+            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
+            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-10, +10] rad/s).
+                        可以是单个值(所有关节相同)或列表(每关节独立)
+            torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
+                      可以是单个值(所有关节相同)或列表(每关节独立)
+                      仅在PVT模式使用
             control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02, AIM_HEAD=0x04, 
                          AIM_LOIN=0x08, AIM_LEG=0x10, AIM_UNDERPAN=0x20)
                          默认使用实例的 default_control_aim (默认为 AIM_OPERATION)
@@ -658,26 +754,26 @@ class ServoDriver:
             else:
                 effective_joints = joint_angles
 
-        # Handle speed (rad/s)
-        gripper_speed_val = 1.0  # 默认夹爪速度 (rad/s)
-        if isinstance(speed_rad_s, (list, tuple)) or hasattr(speed_rad_s, '__len__'):
+        # Handle speed (deg/s)
+        gripper_speed_val = 57.3  # 默认夹爪速度 (deg/s, 约1.0 rad/s)
+        if isinstance(speed_deg_s, (list, tuple)) or hasattr(speed_deg_s, '__len__'):
             # Convert to list if it's a numpy array or other sequence
             try:
-                speed_array = list(speed_rad_s)
+                speed_array = list(speed_deg_s)
             except TypeError:
-                speed_array = [speed_rad_s]
+                speed_array = [speed_deg_s]
             
             if len(speed_array) == 7:
                 speed_list = speed_array[:6]
                 gripper_speed_val = speed_array[6]
             elif len(speed_array) != self.joint_count:
                 logger.warning(f"Speed list length {len(speed_array)} != joint count {self.joint_count}, using first value or default")
-                speed_list = [speed_array[0]] * self.joint_count if speed_array else [1.0] * self.joint_count
+                speed_list = [speed_array[0]] * self.joint_count if speed_array else [57.3] * self.joint_count
             else:
                 speed_list = speed_array
         else:
-            speed_list = [speed_rad_s] * self.joint_count
-            gripper_speed_val = speed_rad_s
+            speed_list = [speed_deg_s] * self.joint_count
+            gripper_speed_val = speed_deg_s
 
         # Handle torque (N·m) - only used in PVT mode
         gripper_torque_val = 0.0  # 默认夹爪扭矩 (N·m)
@@ -836,16 +932,16 @@ class ServoDriver:
     def _build_joint_frame(self, 
                            joint_angles: Optional[List[float]] = None, 
                            gripper_value: Optional[float] = None, 
-                           speed_rad_s: Union[float, List[float]] = 1.0) -> List[int]:
+                           speed_deg_s: Union[float, List[float]] = 57.3) -> List[int]:
         """
         [已废弃] 兼容旧版本的函数别名，请使用 _build_send_joint_frame
         
-        注意: 速度参数现在使用弧度/秒 (rad/s)，范围 [-10.0, +10.0]
+        注意: 速度参数现在使用度/秒 (deg/s)，范围 [-573, +573]
         """
         return self._build_send_joint_frame(
             joint_angles=joint_angles,
             gripper_value=gripper_value,
-            speed_rad_s=speed_rad_s,
+            speed_deg_s=speed_deg_s,
             torque_nm=0.0,
             control_aim=self.AIM_TEACH,
             control_mode=self.PATTERN_PV
@@ -948,37 +1044,45 @@ class ServoDriver:
 
     #--------------------------------------------start-速度指令的转换--------------------------------
     
-    def _value_to_hardware_value_speed(self, speed_rad_s: float, direction: float = 1.0) -> int:
+    def _value_to_hardware_value_speed(self, speed_deg_s: float, direction: float = 1.0) -> int:
         """
-        将速度从 [-10.0, +10.0] 弧度/秒 线性映射到 12位 [0, 4095]。
+        将速度从度/秒转换为12位硬件值 [0, 4095]
+        
+        转换流程:
+        1. 度/秒 -> 弧度/秒 (deg * π/180)
+        2. 弧度/秒映射到12位: [-10.0, +10.0] rad/s -> [0, 4095]
         
         遵循右手定则：
         - 大拇指指向电机输出轴方向
         - 四指弯曲方向（逆时针）= 正速度方向
         
         映射关系:
-        - -10.0 rad/s -> 0
-        -   0.0 rad/s -> 2048 (中间值)
-        - +10.0 rad/s -> 4095
+        - -573 deg/s (-10.0 rad/s) -> 0
+        -    0 deg/s (  0.0 rad/s) -> 2048 (中间值)
+        - +573 deg/s (+10.0 rad/s) -> 4095
         
-        :param speed_rad_s: 目标速度值 (弧度/秒)，有效范围 [-10.0, +10.0]
+        :param speed_deg_s: 目标速度值 (度/秒)，有效范围 [-573, +573] deg/s
         :param direction: 电机方向系数 (1.0 或 -1.0)，用于适配电机安装方向
         :return: 原始 12位整数速度值 (0-4095)
         """
         # 确保输入是Python float类型，避免numpy数组导致的布尔值歧义
-        speed_rad_s = float(speed_rad_s)
+        speed_deg_s = float(speed_deg_s)
         direction = float(direction)
+        
+        # 步骤1: 度/秒 -> 弧度/秒
+        speed_rad_s = speed_deg_s * self.DEG_TO_RAD
         
         # 应用方向系数
         speed_rad_s = speed_rad_s * direction
         
-        x_min = -10.0
-        x_max = 10.0
+        # 步骤2: 映射到硬件范围
+        x_min = -10.0  # rad/s
+        x_max = 10.0   # rad/s
         bits = 12
 
         # 超出范围时进行裁剪
         if speed_rad_s < x_min or speed_rad_s > x_max:
-            logger.warning(f"Speed out of range: {speed_rad_s:.3f} rad/s (valid [{x_min}, {x_max}]), will be clipped")
+            logger.warning(f"Speed out of range: {speed_deg_s:.1f} deg/s ({speed_rad_s:.3f} rad/s), valid range: [-573, +573] deg/s ([-10, +10] rad/s), will be clipped")
             speed_rad_s = max(x_min, min(x_max, speed_rad_s))
 
         return self._float_to_uint(speed_rad_s, x_min, x_max, bits)

@@ -238,7 +238,7 @@ if __name__ == '__main__':
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
     parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific)')
+                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     
     # Mode switch parameters
     parser.add_argument('--max-attempts', type=int, default=100, 

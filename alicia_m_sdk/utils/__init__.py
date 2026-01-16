@@ -22,4 +22,13 @@ from .logger import *
 from .calculate import *
 from .fps_utils import precise_sleep
 from .trajectory_utils import *
+from .unit_conversion import (
+    deg_to_rad, 
+    rad_to_deg,
+    speed_deg_to_rad,
+    speed_rad_to_deg,
+    convert_and_validate_speed,
+    DEG_TO_RAD,
+    RAD_TO_DEG
+)
 
