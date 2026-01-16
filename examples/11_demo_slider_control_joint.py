@@ -20,15 +20,17 @@ import time
 import numpy as np
 import signal
 import sys
+import os
 
 
 class JointSliderController:
     """GUI controller for robot joint control using sliders."""
     
-    def __init__(self, robot):
+    def __init__(self, robot, speed_deg_s=200):
         """Initialize the slider controller.
         
         :param robot: Robot API instance
+        :param speed_deg_s: Joint speed in degrees per second
         """
         self.robot = robot
         self.running = False
@@ -36,9 +38,12 @@ class JointSliderController:
         self.shutdown_event = threading.Event()  # 添加关闭事件
         
         # Control parameters - 500Hz control frequency
-        self.control_frequency = 500  # Hz (提升到500Hz)
-        self.control_interval = 1.0 / self.control_frequency  # 0.002 seconds
-        self.speed = [1.5, 1.75, 1.75, 1.5, 1.5, 1.5, 1.5]  # 速度设置 (弧度/秒)
+        self.control_frequency = 200  # Hz (降低到200Hz以确保稳定)
+        self.control_interval = 1.0 / self.control_frequency  # 0.005 seconds
+        
+        # Speed parameter (in deg/s for all 6 joints)
+        self.speed_deg_s = speed_deg_s
+    
         
         # Joint limits (degrees)
         self.joint_min = [-150.0,-170.0, -170.0, -80.0, -80.0, -80.0]  # 6个关节的最小值
@@ -57,10 +62,16 @@ class JointSliderController:
         
     def _create_gui(self):
         """Create the GUI with sliders."""
-        self.root = tk.Tk()
-        self.root.title("机械臂关节滑动条控制 - Joint Slider Control")
-        self.root.geometry("800x600")
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        try:
+            self.root = tk.Tk()
+            self.root.title("机械臂关节滑动条控制 - Joint Slider Control")
+            self.root.geometry("800x600")
+            self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        except Exception as e:
+            print(f"✗ 创建GUI窗口失败: {e}")
+            print("提示: 请确保在有图形界面的环境中运行此程序")
+            print("     或使用 ssh -X 连接以启用X11转发")
+            raise
         
         # Main frame
         main_frame = ttk.Frame(self.root, padding="10")
@@ -73,7 +84,7 @@ class JointSliderController:
         
         # Control frequency info
         freq_label = ttk.Label(main_frame, 
-                               text=f"控制频率: {self.control_frequency} Hz | 速度: {self.speed[0]}rad/s",
+                               text=f"控制频率: {self.control_frequency} Hz | 速度: {self.speed_deg_s}°/s",
                                font=('Arial', 10))
         freq_label.pack(pady=5)
         
@@ -225,21 +236,20 @@ class JointSliderController:
                 # Get current target values from sliders
                 target = self.target_joints.copy()
                 
-                # Speed is already in rad/s
-                speed_rad_s = self.speed
+                # Speed is in deg/s
+                speed_deg_s = self.speed_deg_s
                 
                 # Send control command (non-blocking)
                 self.robot.servo_driver.set_joint_and_gripper(
                     joint_angles=[np.deg2rad(a) for a in target[:6]],
                     gripper_value=target[6],
-                    speed_rad_s=speed_rad_s,
-                    control_aim=ServoDriver.AIM_TEACH,
+                    speed_deg_s=speed_deg_s,
+                    control_aim=ServoDriver.AIM_OPERATION,  # 使用OPERATION模式而非TEACH模式
                     control_mode=ServoDriver.PATTERN_PV
                 )
                 
             except Exception as e:
-                # 减少错误打印频率，避免影响控制性能
-                pass
+                print(f"控制循环错误: {e}")
                 
             # Calculate sleep time to maintain control frequency
             elapsed = time.time() - loop_start
@@ -267,8 +277,8 @@ class JointSliderController:
             # Set all sliders to zero
             self._reset_sliders()
             
-            # Speed is already in rad/s
-            speed_rad_s = self.speed
+            # Speed is in deg/s
+            speed_deg_s = self.speed_deg_s
             
             # If control is running, it will automatically send the zero position
             if not self.running:
@@ -276,7 +286,7 @@ class JointSliderController:
                 self.robot.servo_driver.set_joint_and_gripper(
                     joint_angles=[0.0] * 6,
                     gripper_value=50.0,
-                    speed_rad_s=speed_rad_s,
+                    speed_deg_s=speed_deg_s,
                     control_aim=ServoDriver.AIM_OPERATION,
                     control_mode=ServoDriver.PATTERN_PV
                 )
@@ -305,11 +315,16 @@ class JointSliderController:
             self.target_label.config(text=f"目标位置: {target_str}")
             
         except Exception as e:
-            self.position_label.config(text=f"当前位置: 错误")
+            # 静默处理错误，避免干扰GUI
+            self.position_label.config(text="当前位置: 读取错误")
             
         # Schedule next update (20Hz for display - faster feedback)
-        if hasattr(self, 'root') and self.root:
-            self.root.after(50, self._update_position_display)
+        try:
+            if hasattr(self, 'root') and self.root and self.root.winfo_exists():
+                self.root.after(50, self._update_position_display)
+        except tk.TclError:
+            # 窗口已关闭，停止更新
+            pass
             
     def _on_closing(self):
         """Handle window close event."""
@@ -324,7 +339,13 @@ class JointSliderController:
         
     def run(self):
         """Start the GUI main loop."""
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Tkinter主循环异常: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 def main(args):
@@ -374,13 +395,30 @@ def main(args):
         print("✓ 机器人连接成功")
         
         # Create and run the slider controller
-        controller = JointSliderController(robot)
-        controller.run()
+        try:
+            controller = JointSliderController(robot, speed_deg_s=args.speed_deg_s)
+            controller.run()
+        except tk.TclError as e:
+            print(f"\n✗ GUI显示错误: {e}")
+            print("\n可能的解决方案:")
+            print("1. 如果通过SSH连接，请使用: ssh -X user@host")
+            print("2. 或在本地有图形界面的机器上运行此程序")
+            print("3. 或使用VNC/远程桌面连接")
+            raise
 
     except KeyboardInterrupt:
         print("\n✗ 用户中断")
+    except tk.TclError as e:
+        print(f"\n✗ GUI错误: {e}")
+        print("\n这是一个需要图形界面的程序。")
+        print("请确保:")
+        print("  1. 在本地有图形界面的环境中运行")
+        print("  2. 或使用 ssh -X 启用X11转发")
+        print("  3. 或使用 VNC/远程桌面")
     except Exception as e:
         print(f"✗ 错误: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         robot.disconnect()
 
@@ -401,6 +439,7 @@ if __name__ == "__main__":
                         help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
                         help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+    parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
     parser.add_argument('--debug', action='store_true',
                         help="启用调试模式")
     

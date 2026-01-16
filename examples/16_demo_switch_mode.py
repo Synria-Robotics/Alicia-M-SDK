@@ -43,16 +43,18 @@ def calculate_checksum(data):
     return crc & 0xFF
 
 
-def build_mode_switch_command():
-    """Build mode switch command from MIT to PV mode
+def build_mode_switch_command(target_mode='pv'):
+    """Build mode switch command
     
-    Command structure:
-    [0xAA] [0x11] [0x82] [0x07] [0x01] [0x07] [0x0B] [0x02] [0x00] [0x00] [0x00] [CRC] [0xFF]
+    PV mode byte: 0x02
+    MIT mode byte: 0x01
     
+    :param target_mode: 'pv' or 'mit'
     :return: Complete command frame as list of integers
     """
+    mode_byte = 0x02 if target_mode == 'pv' else 0x01
     # Build frame without checksum and footer
-    frame = [0xAA, 0x11, 0x82, 0x07, 0x01, 0x07, 0x0B, 0x02, 0x00, 0x00, 0x00]
+    frame = [0xAA, 0x11, 0x82, 0x07, 0x01, 0x07, 0x0B, mode_byte, 0x00, 0x00, 0x00]
     
     # Calculate checksum for bytes from index 1 to end (excluding header and footer)
     payload = frame[1:]
@@ -96,31 +98,30 @@ def is_mode_switch_confirmation(frame):
     return calculated_checksum == received_checksum
 
 
-def switch_mode_mit_to_pv(robot, max_attempts=100, send_interval=0.1):
-    """Switch control mode from MIT to PV
+def switch_control_mode(robot, target_mode='pv', max_attempts=100, send_interval=0.1):
+    """Switch control mode (MIT <-> PV)
     
     :param robot: Robot instance
+    :param target_mode: 'pv' or 'mit'
     :param max_attempts: Maximum number of send attempts
     :param send_interval: Time interval between sends (seconds)
     :return: True if successful, False if timeout
     """
-    logger.info("开始切换控制模式：MIT -> PV")
+    mode_name = "PV" if target_mode == 'pv' else "MIT"
+    logger.info(f"开始切换控制模式 -> {mode_name}")
     
     # Build mode switch command
-    switch_command = build_mode_switch_command()
+    switch_command = build_mode_switch_command(target_mode)
     logger.info(f"模式切换指令: {' '.join(f'{b:02X}' for b in switch_command)}")
     
     # Get serial communication interface
     serial_comm = robot.servo_driver.serial_comm
-    data_parser = robot.servo_driver.data_parser
     
     # Pause background update thread to avoid interference
-    logger.info("暂停后台更新线程...")
     was_thread_running = robot.servo_driver.is_update_thread_running()
     if was_thread_running:
         robot.servo_driver._pause_update.set()
         time.sleep(0.2)  # Give thread time to pause
-        logger.info(f"后台线程已暂停 (状态: {robot.servo_driver._pause_update.is_set()})")
     
     try:
         attempt = 0
@@ -134,97 +135,76 @@ def switch_mode_mit_to_pv(robot, max_attempts=100, send_interval=0.1):
                 time.sleep(send_interval)
                 continue
             
-            if attempt % 10 == 1:  # Print every 10 attempts
-                logger.info(f"正在发送模式切换指令... (尝试 {attempt}/{max_attempts})")
-            
             # Check for response
             start_check = time.time()
             check_timeout = send_interval * 0.8  # Check for 80% of interval
             
             while time.time() - start_check < check_timeout:
                 frame = serial_comm.read_frame()
-                
-                if frame:
-                    # Debug: print received frame
-                    logger.info(f"[调试] 接收到数据包: {' '.join(f'{b:02X}' for b in frame)}")
-                    
-                    # Check if it's the confirmation frame
-                    if is_mode_switch_confirmation(frame):
-                        logger.info("✓ 模式切换成功！")
-                        logger.info(f"确认数据包: {' '.join(f'{b:02X}' for b in frame)}")
-                        return True
-                    else:
-                        # Print why it didn't match
-                        if len(frame) >= 8:
-                            expected = [0xAA, 0x11, 0x82, 0x04, 0x01, 0x07, 0x8B, 0x01]
-                            logger.info(f"[调试] 期望前8字节: {' '.join(f'{b:02X}' for b in expected)}")
-                            logger.info(f"[调试] 实际前8字节: {' '.join(f'{b:02X}' for b in frame[:8])}")
-                
-                time.sleep(0.01)  # Small delay between checks
+                if frame and is_mode_switch_confirmation(frame):
+                    logger.info(f"✓ {mode_name} 模式切换成功！")
+                    return True
+                time.sleep(0.01)
             
             # Wait before next send
-            time.sleep(send_interval - (time.time() - start_check))
+            time.sleep(max(0, send_interval - (time.time() - start_check)))
         
-        logger.error(f"✗ 模式切换超时 (已尝试 {max_attempts} 次)")
+        logger.error(f"✗ {mode_name} 模式切换超时")
         return False
     
     finally:
         # Resume background thread if it was running
         if was_thread_running:
-            logger.info("恢复后台更新线程...")
             robot.servo_driver._pause_update.clear()
-            time.sleep(0.1)  # Give thread time to resume
-            logger.info(f"后台线程已恢复 (暂停标志: {robot.servo_driver._pause_update.is_set()})")
-            logger.info(f"后台线程运行状态: {robot.servo_driver.is_update_thread_running()}")
+            time.sleep(0.1)
 
 
 def main(args):
-    """Main function for mode switching demo.
+    """Main function for interactive mode switching.
     
     :param args: Command line arguments
     """
-    # Initialize serial connection (no specific mode needed)
-    logger.info("初始化串口连接...")
+    # Initialize serial connection
+    logger.info("正在连接机器人...")
     robot = alicia_m_sdk.create_robot(
         port=args.port,
         gripper_type=args.gripper_type,
         robot_version=args.robot_version,
         control_aim=args.control_aim,
-        control_mode='pv'  # Use any mode just to establish serial connection
+        control_mode='pv'
     )
     
     try:
-        logger.info("开始模式切换流程：MIT -> PV")
-        logger.info("=" * 50)
+        if not robot.connect():
+            logger.error("✗ 无法连接到机器人，请检查端口设置")
+            return False
+            
+        logger.info("✓ 机器人已连接")
+        print("\n" + "=" * 50)
+        print("模式切换交互终端")
+        print("  - 输入 'P' : 切换到 PV 模式")
+        print("  - 输入 'M' : 切换到 MIT 模式")
+        print("  - 输入 'Q' : 退出程序")
+        print("=" * 50)
         
-        print()
+        while True:
+            choice = input("\n请输入指令 [P/M/Q]: ").strip().upper()
+            
+            if choice == 'P':
+                switch_control_mode(robot, target_mode='pv')
+            elif choice == 'M':
+                switch_control_mode(robot, target_mode='mit')
+            elif choice == 'Q':
+                logger.info("正在退出...")
+                break
+            else:
+                print("无效指令,请输入 P, M 或 Q")
         
-        # Perform mode switch by sending command to STM32
-        success = switch_mode_mit_to_pv(
-            robot,
-            max_attempts=args.max_attempts,
-            send_interval=args.send_interval
-        )
-        
-        if success:
-            logger.info("=" * 50)
-            logger.info("模式切换完成！机械臂现在处于 PV 控制模式")
-            logger.info("=" * 50)
-        else:
-            logger.error("模式切换失败！")
-        
-        return success
+        return True
         
     except KeyboardInterrupt:
         logger.warning("\n✗ 用户中断操作")
         return False
-    
-    except Exception as e:
-        logger.error(f"发生异常: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-    
     finally:
         robot.disconnect()
 

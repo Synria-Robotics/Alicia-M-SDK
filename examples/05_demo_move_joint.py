@@ -62,7 +62,9 @@ def main(args):
             target_joints=target_joints_deg,
             joint_format='deg',
             speed_deg_s=args.speed_deg_s,
-            wait_for_completion=True
+            # speed_deg_s=[20, 20, 5, 20, 20, 20],
+            wait_for_completion=True,
+            timeout=100
         )
         time.sleep(1)
         robot.set_home(speed_deg_s=args.speed_deg_s)
