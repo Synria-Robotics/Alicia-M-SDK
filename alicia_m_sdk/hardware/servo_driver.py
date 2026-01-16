@@ -169,14 +169,14 @@ class ServoDriver:
         
         self.disconnect()
 
-    def set_speed(self, speed_rad_s: float) -> bool:
+    def set_speed(self, speed_deg_s: float) -> bool:
         """Set robot motion speed (placeholder for now).
         
-        :param speed_rad_s: Speed in radians per second
+        :param speed_deg_s: Speed in degrees per second
         :return: True
         """
         # Currently just a placeholder or store it if needed
-        # self.current_speed = speed_rad_s
+        # self.current_speed = speed_deg_s
         return True
     
     def wait_for_valid_state(self, timeout: float = 1.5) -> bool:
@@ -650,8 +650,9 @@ class ServoDriver:
             control_mode=control_mode
         )
 
-        # 强制打印发送的控制数据包
-        print(f"[TX] 发送控制数据包: {' '.join(f'{b:02X}' for b in frame)}")
+        # 仅在调试模式下打印发送的控制数据包（避免高频控制时的性能开销）
+        if self.debug_mode:
+            print(f"[TX] 发送控制数据包: {' '.join(f'{b:02X}' for b in frame)}")
 
         # Record user command time (for background thread coordination)
         self._last_user_command_time = time.perf_counter()

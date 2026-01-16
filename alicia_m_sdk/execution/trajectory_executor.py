@@ -40,7 +40,7 @@ class _BaseTrajectoryExecutor:
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 20,
+        speed_deg_s: int = 100,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -445,7 +445,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 20,
+        speed_deg_s: int = 100,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,

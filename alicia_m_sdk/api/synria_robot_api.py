@@ -422,7 +422,7 @@ class SynriaRobotAPI:
                         max_iters: int = 100,
                         multi_start: int = 0,
                         use_random_init: bool = False,
-                        speed_deg_s: int = 10,
+                        speed_deg_s: int = 100,
                         execute: bool = True) -> Dict:
         """Move end-effector to target pose using inverse kinematics.
 
@@ -551,7 +551,7 @@ class SynriaRobotAPI:
         )
         
         # Convert speed_factor to speed_deg_s
-        # Default speed_rad_s is typically around 0.087266 rad/s (5 deg/s)
+        # Default speed is typically around 5-10 deg/s
         default_speed_deg_s = 10
         speed_deg_s = int(default_speed_deg_s * speed_factor)
         
@@ -1017,14 +1017,14 @@ class SynriaRobotAPI:
         """
         return self.servo_driver.set_acceleration(acceleration)
 
-    def set_speed(self, speed_rad_s: float) -> bool:
+    def set_speed(self, speed_deg_s: float) -> bool:
         """Set robot motion speed.
 
-        :param speed_rad_s: Speed in radians per second
+        :param speed_deg_s: Speed in degrees per second
         :return: True if successful
         """
-        self.speed_rad_s = speed_rad_s
-        return self.servo_driver.set_speed(speed_rad_s)
+        self.speed_deg_s = speed_deg_s
+        return self.servo_driver.set_speed(speed_deg_s)
     
     
     def torque_control(self, command: str) -> bool:
@@ -1213,7 +1213,7 @@ class SynriaRobotAPI:
                 self.servo_driver.set_joint_and_gripper(
                     joint_angles=target_joints,
                     gripper_value=None,  # 保持当前夹爪状态
-                    speed_rad_s=self.speed_rad_s if hasattr(self, 'speed_rad_s') else 1.0,
+                    speed_deg_s=self.speed_deg_s if hasattr(self, 'speed_deg_s') else 57.3,
                     torque_nm=0.0,
                     control_aim=self.control_aim,
                     control_mode=self.control_mode

@@ -801,7 +801,7 @@ class GravityCompensationTeaching:
         self.servo_driver._send_joint_frame_internal(
             joint_angles=None,
             gripper_value=None,
-            speed_rad_s=0.0,
+            speed_deg_s=0.0,
             torque_nm=zero_torques,
             control_aim=self.servo_driver.AIM_OPERATION,
             control_mode=self.servo_driver.PATTERN_MIT_TORQUE
@@ -833,7 +833,7 @@ class GravityCompensationTeaching:
                 self.servo_driver._send_joint_frame_internal(
                     joint_angles=None,
                     gripper_value=None,
-                    speed_rad_s=0.0,
+                    speed_deg_s=0.0,
                     torque_nm=scaled_torques,
                     control_aim=self.servo_driver.AIM_OPERATION,
                     control_mode=self.servo_driver.PATTERN_MIT_TORQUE

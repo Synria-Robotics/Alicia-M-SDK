@@ -37,12 +37,12 @@ class SparkVisBridge:
         enable_robot_sync: bool = True,
         robot_sync_rate_hz: float = 500.0,  # 提升到500Hz
         log_source: str = "ui",  # ui | robot | both
-        speed_rad_s: Optional[List[float]] = None  # 关节速度设置（弧度/秒）
+        speed_deg_s: Optional[List[float]] = None  # 关节速度设置（度/秒）
     ):
         """Initialize SparkVis bridge.
         
         Args:
-            robot: Alicia-D robot instance
+            robot: Alicia-M robot instance
             host: WebSocket server host
             port: WebSocket server port
             output_file: CSV output file path (optional)
@@ -58,7 +58,7 @@ class SparkVisBridge:
         self.robot_sync_rate_hz = robot_sync_rate_hz
         self.robot_sync_interval = 1.0 / max(1e-3, robot_sync_rate_hz)
         self.log_source = log_source.lower()
-        
+        self.speed_deg_s = speed_deg_s  # 保存速度设置
         
 
         # WebSocket clients
@@ -188,14 +188,15 @@ class SparkVisBridge:
                 self.robot.servo_driver.set_joint_and_gripper(
                     joint_angles=joints_rad,
                     gripper_value=gripper_angle,
-                    speed_rad_s=self.speed_rad_s[0] if self.speed_rad_s else 0.0436,
+                    speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 2.5,  # 默认 2.5 deg/s ≈ 0.0436 rad/s
                 )
             else:
                 # 仅关节控制
+                # 注意: target_joints 是位置(rad)，speed_deg_s 是速度(deg/s)，两者单位独立
                 self.robot.set_robot_state(
-                    target_joints=joints_rad,
-                    joint_format='rad',
-                    speed_deg_s=100,
+                    target_joints=joints_rad,        # 关节目标位置(弧度)
+                    joint_format='rad',              # 位置单位: 弧度
+                    speed_deg_s=100,                 # 运动速度: 度/秒
                     wait_for_completion=False,
                 )
 
