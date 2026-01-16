@@ -419,9 +419,8 @@ class SerialComm:
         return True
 
     def _hex_print(self, title: str, data: List[int]):
-        # hex_buf = ' '.join(f"{b:02X}" for b in data)
-        # logger.info(f"{title}: {hex_buf}")
-        pass
+        hex_buf = ' '.join(f"{b:02X}" for b in data)
+        print(f"[{title}] {hex_buf}")
 
 
 

@@ -69,7 +69,7 @@ class SynriaRobotAPI:
         self.robot_type = None
 
         # Access control_aim from servo_driver (motor-specific)
-        self.control_aim = getattr(servo_driver, 'default_control_aim', ServoDriver.AIM_TEACH)
+        self.control_aim = getattr(servo_driver, 'default_control_aim', ServoDriver.AIM_OPERATION)
         # Set default control_mode to PATTERN_PV (position+velocity mode)
         # Note: ServoDriver defaults to PATTERN_PV if control_mode is None
         self.control_mode = ServoDriver.PATTERN_PV
@@ -89,11 +89,17 @@ class SynriaRobotAPI:
     def connect(self) -> bool:
         """Connect to robot and detect firmware version."""
         if self.is_connected():
+            # Ensure update thread is running if already connected
+            if not self.servo_driver.is_update_thread_running():
+                self.servo_driver.start_update_thread()
             return True
 
         result = self.servo_driver.connect()
         if result:
             try:
+                # Start background update thread for continuous state updates
+                self.servo_driver.start_update_thread()
+                
                 # Initialize state
                 self.get_robot_state("joint_gripper")
                 self._robot_type()
@@ -219,7 +225,7 @@ class SynriaRobotAPI:
 
     # ==================== Robot Control ====================
 
-    def set_home(self, speed_deg_s: int = 10):
+    def set_home(self, speed_deg_s: int = 20):
         """Move robot to home position and wait until near zero.
 
         :param speed_deg_s: Speed in degrees per second (0-360, required range)
@@ -230,8 +236,8 @@ class SynriaRobotAPI:
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
                         gripper_value: Optional[int] = None,
-                        joint_format: str = 'rad',
-                        speed_deg_s: int = 10,
+                        joint_format: str = 'deg',
+                        speed_deg_s: int = 20,
                         tolerance: float = 0.1,
                         timeout: float = 10.0,
                         wait_for_completion: bool = True,
@@ -1192,7 +1198,7 @@ class SynriaRobotAPI:
             logger.info(f"{log_prefix}... (容差: ±{tolerance_deg}°, 超时: {timeout}s)")
         
         last_send_time = 0
-        send_interval = 0.02  # MIT模式发送频率: 50Hz
+        send_interval = 0.005  # MIT模式发送频率: 200Hz
 
         while time.time() - start_time < timeout:
             # MIT模式需要持续发送目标位置
