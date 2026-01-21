@@ -77,8 +77,8 @@ def demo_teaching_arm():
     
     # 创建示教臂实例
     driver = ServoDriver(
-        port="", 
-        baudrate=1000000, 
+        port="COM7", 
+        baudrate=460800, 
         control_aim=ServoDriver.AIM_TEACH,  # 指定为示教臂
         debug_mode=True
     )

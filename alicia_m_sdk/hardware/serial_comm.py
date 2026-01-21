@@ -170,6 +170,8 @@ class SerialComm:
 
                 # 2) 将整数列表转换为字节串并写入串口
                 data_bytes = bytes(data)
+                hex_str = ' '.join([f'{byte:02X}' for byte in data_bytes])
+                # print(f"串口发送的十六进制数据：{hex_str}")
                 bytes_written = self.serial_port.write(data_bytes)
 
                 # # 3) 轻微延时后 flush 输出缓冲区
@@ -259,6 +261,9 @@ class SerialComm:
                     if self.debug_mode:
                         self._hex_print("Recv", list(candidate))
                     
+                    hex_str = ' '.join([f'{byte:02X}' for byte in self._rx_buffer])
+                    # print(f"串口接收的的十六进制数据：{hex_str}")
+
                     # 强制打印接收到的数据包
                     # print(f"[RX] 接收数据包: {' '.join(f'{b:02X}' for b in candidate)}")
 

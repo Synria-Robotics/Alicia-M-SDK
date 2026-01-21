@@ -38,7 +38,40 @@ from alicia_m_sdk.hardware import ServoDriver
 # Import from RoboCore for kinematics and modeling
 from robocore.modeling import RobotModel
 from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-from synriard import get_model_path
+# from synriard import get_model_path
+def get_model_path(
+    model_name: str = "Alicia_M",  # 匹配原调用的"Alicia_M"
+    version: str = None,           # 接收版本参数（原调用传了robot_version）
+    variant: str = None,           # 接收夹具类型参数（原调用传了gripper_xxx）
+    model_format: str = "urdf"     # 接收模型格式参数（原调用传了"urdf"
+):
+    """
+    完全兼容原 synriard.get_model_path 的调用逻辑
+    根据传入的参数拼接出正确的URDF模型文件路径
+    """
+    import os
+    # 核心：MODEL_BASE_DIR 是存放模型文件夹的路径，不是具体文件路径！
+    MODEL_BASE_DIR = r"D:\github\Alicia-M-SDK\Gravity_Dynamic"  # 原始字符串，无转义
+    
+    # 拼接模型文件名（适配原调用的参数逻辑）
+    # 示例：Alicia_M_v1_1_gripper_100mm.urdf
+    if version and variant:
+        # 按原命名规则拼接文件名
+        urdf_filename = f"{model_name}_{version}_{variant}.{model_format}"
+    else:
+        # 兜底：使用你指定的默认文件
+        urdf_filename = "Alicia_M_v1_1_gripper_100mm.urdf"
+    
+    # 完整的URDF文件路径
+    urdf_full_path = os.path.join(MODEL_BASE_DIR, urdf_filename)
+    
+    # 检查文件是否存在（只提示，不创建文件）
+    if not os.path.exists(urdf_full_path):
+        print(f"警告：模型文件不存在 → {urdf_full_path}")
+        print("请确认URDF文件路径是否正确，或放入模型文件到该目录")
+    
+    # 返回最终的URDF文件路径（和原函数行为一致）
+    return urdf_full_path
 import json
 from pathlib import Path
 
@@ -83,7 +116,7 @@ def _get_gripper_type_from_json() -> str:
 
 def create_robot(
     port: str = "",
-    baudrate: int = 1000000,
+    baudrate: int = 460800,
     gripper_type: str = None,
     robot_version: str = "v1_0",
     debug_mode: bool = False,
