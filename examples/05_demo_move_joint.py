@@ -48,27 +48,26 @@ def main(args):
     )
 
     try:
-        while True:
-            # 检查后台线程状态
-            thread_status = robot.servo_driver.get_update_thread_status()
-            print(f"\n后台线程状态: {thread_status}")
-            print(f"暂停标志状态: {robot.servo_driver._pause_update.is_set()}\n")
-            
-            # Set target joint positions in degrees
-            target_joints_deg = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
-            robot.set_home(speed_deg_s=args.speed_deg_s)
-            time.sleep(1)
-            # Use unified joint and gripper target interface
-            robot.set_robot_state(
-                target_joints=target_joints_deg,
-                joint_format='deg',
-                speed_deg_s=args.speed_deg_s,
-                # speed_deg_s=[20, 20, 5, 20, 20, 20],
-                wait_for_completion=True,
-                timeout=100
-            )
-            time.sleep(1)
-            robot.set_home(speed_deg_s=args.speed_deg_s)
+        # 检查后台线程状态
+        thread_status = robot.servo_driver.get_update_thread_status()
+        print(f"\n后台线程状态: {thread_status}")
+        print(f"暂停标志状态: {robot.servo_driver._pause_update.is_set()}\n")
+        
+        # Set target joint positions in degrees
+        target_joints_deg = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
+        robot.set_home(speed_deg_s=args.speed_deg_s)
+        time.sleep(1)
+        # Use unified joint and gripper target interface
+        robot.set_robot_state(
+            target_joints=target_joints_deg,
+            joint_format='deg',
+            speed_deg_s=args.speed_deg_s,
+            # speed_deg_s=[20, 20, 5, 20, 20, 20],
+            wait_for_completion=True,
+            timeout=100
+        )
+        time.sleep(1)
+        robot.set_home(speed_deg_s=args.speed_deg_s)
 
     except KeyboardInterrupt:
         print("\n✗ Processing interrupted")
@@ -80,7 +79,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="机械臂运动控制示例")
     
-    parser.add_argument('--port', type=str, default="COM7", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
+    parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
     parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
