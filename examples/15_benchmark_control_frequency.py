@@ -29,7 +29,7 @@ Features:
 import time
 import argparse
 import alicia_m_sdk
-from alicia_m_sdk.hardware import ServoDriver
+from alicia_m_sdk.hardware import ServoDriver, CommandPriority
 import numpy as np
 import statistics
 
@@ -62,16 +62,58 @@ def main(args):
         
         # Get current joint angles as target (to avoid large movements)
         print("Getting current joint state...")
-        current_joints = robot.get_robot_state("joint")
-        if current_joints is None:
-            print("Warning: Could not get current joint state, using zeros")
-            target_joints = [0.0] * 6
-        else:
-            target_joints = list(current_joints)
-            print(f"Target joints: {[f'{j:.3f}' for j in target_joints]} rad")
+        
+        # Try multiple times to get valid state
+        max_retries = 5
+        current_joints = None
+        for retry in range(max_retries):
+            current_joints = robot.get_robot_state("joint")
+            
+            # Check if data is valid (not all zeros, not -12.5 rad which means raw value 0)
+            if current_joints is not None:
+                max_angle = max(abs(j) for j in current_joints)
+                # -12.5 rad ≈ -716 degrees is invalid (raw value 0)
+                # Valid joint angles should be within ±6.28 rad (±360 degrees)
+                is_invalid = any(abs(j + 12.5) < 0.01 for j in current_joints) or max_angle < 0.001 or max_angle > 6.28
+                
+                if not is_invalid:
+                    print(f"✓ Valid joint state received (retry {retry + 1}/{max_retries})")
+                    break
+                else:
+                    print(f"✗ Invalid joint state (retry {retry + 1}/{max_retries}): all zeros or extreme values")
+                    current_joints = None
+            else:
+                print(f"✗ Failed to get joint state (retry {retry + 1}/{max_retries})")
+            
+            time.sleep(0.2)
+        
+        if current_joints is None or any(abs(j) > 6.28 for j in current_joints):
+            print("\n" + "="*60)
+            print("ERROR: Cannot get valid joint state from robot!")
+            print("="*60)
+            print("\nPossible causes:")
+            print("1. Robot is not powered on or not responding")
+            print("2. Wrong control_aim setting (try --control-aim operation)")
+            print("3. Serial communication issue")
+            print("4. Robot firmware not responding to queries")
+            print("\nTroubleshooting steps:")
+            print("1. Check if robot is powered and connected")
+            print("2. Try: python examples/03_demo_read_state.py")
+            print("3. Try switching control_aim: --control-aim operation")
+            print("4. Check serial port permissions")
+            print("="*60 + "\n")
+            return
+        
+        # Show current position for reference
+        print(f"Current position: {[f'{j:.3f}' for j in current_joints]} rad")
+        print(f"Current position: {[f'{j*57.2958:.1f}' for j in current_joints]} deg")
+        print(f"\nTarget: HOME position (all joints at 0°)")
         
         print("\nStarting benchmark...")
-        print("(This will send control commands continuously)")
+        if args.measure_queue_speed:
+            print("(Measuring QUEUE submission speed - commands are queued, not sent immediately)")
+        else:
+            print("(Measuring ACTUAL SERIAL ROUND-TRIP time - send command and wait for response)")
         
         # Statistics collection
         call_times = []
@@ -82,10 +124,32 @@ def main(args):
         print("Warming up...")
         for _ in range(5):
             try:
-                robot.set_robot_state(
-                    target_joints=target_joints,
-                    wait_for_completion=False
-                )
+                if args.measure_queue_speed:
+                    robot.set_robot_state(
+                        target_joints=[0.0] * 6,
+                        wait_for_completion=False
+                    )
+                else:
+                    # For real serial test, use CommunicationManager with wait=True
+                    if robot.servo_driver.use_comm_manager and robot.servo_driver.comm_manager:
+                        frame = robot.servo_driver._build_send_joint_frame(
+                            joint_angles=[0.0] * 6,
+                            gripper_value=None,
+                            speed_deg_s=args.speed_deg_s
+                        )
+                        robot.servo_driver.comm_manager.send_command(
+                            data=frame,
+                            priority=CommandPriority.CONTROL,
+                            wait=True,
+                            timeout=0.1
+                        )
+                    else:
+                        frame = robot.servo_driver._build_send_joint_frame(
+                            joint_angles=[0.0] * 6,
+                            gripper_value=None,
+                            speed_deg_s=args.speed_deg_s
+                        )
+                        robot.servo_driver.serial_comm.send_data(frame)
             except:
                 pass
         time.sleep(0.1)
@@ -100,11 +164,38 @@ def main(args):
             call_start = time.perf_counter()
             
             try:
-                success = robot.set_robot_state(
-                    target_joints=target_joints,
-                    wait_for_completion=False,  # Critical: don't wait for joint to reach target
-                    speed_deg_s=args.speed_deg_s
-                )
+                if args.measure_queue_speed:
+                    # Measure queue submission speed (fast but not real serial speed)
+                    success = robot.set_robot_state(
+                        target_joints=[0.0] * 6,
+                        wait_for_completion=False,  # Don't wait for joint to reach target
+                        speed_deg_s=args.speed_deg_s
+                    )
+                else:
+                    # Measure actual serial communication ROUND-TRIP time
+                    # This includes: send command -> wait for response -> parse response
+                    # Use CommunicationManager with wait=True to measure realistic latency
+                    if robot.servo_driver.use_comm_manager and robot.servo_driver.comm_manager:
+                        frame = robot.servo_driver._build_send_joint_frame(
+                            joint_angles=[0.0] * 6,
+                            gripper_value=None,
+                            speed_deg_s=args.speed_deg_s
+                        )
+                        response = robot.servo_driver.comm_manager.send_command(
+                            data=frame,
+                            priority=CommandPriority.CONTROL,
+                            wait=True,  # Wait for response - this measures real round-trip time
+                            timeout=0.1
+                        )
+                        success = response is not None
+                    else:
+                        # Legacy mode: direct serial send (no response wait)
+                        frame = robot.servo_driver._build_send_joint_frame(
+                            joint_angles=[0.0] * 6,
+                            gripper_value=None,
+                            speed_deg_s=args.speed_deg_s
+                        )
+                        success = robot.servo_driver.serial_comm.send_data(frame)
                 
                 call_end = time.perf_counter()
                 call_duration = call_end - call_start
@@ -189,8 +280,18 @@ def main(args):
             
             print(f"\n{'='*60}")
             print(f"💡 Notes:")
+            if args.measure_queue_speed:
+                print(f"  ⚠️  WARNING: This measured QUEUE SUBMISSION speed, not real serial speed!")
+                print(f"  - Commands are queued and processed asynchronously by CommunicationManager")
+                print(f"  - This shows how fast your code can submit commands to the queue")
+                print(f"  - For REAL serial communication speed, run without --measure-queue-speed")
+                print(f"  - Actual serial throughput is much lower (~500-2000 Hz)")
+            else:
+                print(f"  ✓ This measured ACTUAL SERIAL ROUND-TRIP time")
+                print(f"  - Each command was sent and we waited for response before sending next")
+                print(f"  - This is the realistic control frequency your robot can achieve")
+                print(f"  - Round-trip includes: send command -> MCU process -> send response -> receive")
             print(f"  - This benchmark measures COMMAND SENDING frequency, not robot execution frequency")
-            print(f"  - With wait_for_completion=False, we only measure how fast commands can be sent")
             print(f"  - Actual robot execution speed is limited by:")
             print(f"    * Motor response time and dynamics")
             print(f"  - Serial communication latency:")
@@ -224,8 +325,11 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic benchmark (5 seconds, default settings)
+  # Basic benchmark (5 seconds, measures REAL serial communication speed)
   python 15_benchmark_control_frequency.py
+
+  # Measure queue submission speed (for comparison)
+  python 15_benchmark_control_frequency.py --measure-queue-speed
 
   # Extended benchmark (10 seconds)
   python 15_benchmark_control_frequency.py --duration 10
@@ -253,17 +357,19 @@ Examples:
                        help="串口波特率 (默认: 1000000)")
     
     # Control settings
-    parser.add_argument('--control-aim', type=str, default='teach', 
+    parser.add_argument('--control-aim', type=str, default='operation', 
                        choices=['teach', 'operation'],
-                       help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+                       help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', 
                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                       help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+                       help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
     parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
     
     # Benchmark settings
     parser.add_argument('--duration', type=float, default=5.0, 
                        help="Benchmark duration in seconds (default: 5.0)")
+    parser.add_argument('--measure-queue-speed', action='store_true',
+                       help="Measure queue submission speed instead of real serial speed (much faster but not realistic)")
     parser.add_argument('--verbose', action='store_true',
                        help="Show verbose output including errors")
     

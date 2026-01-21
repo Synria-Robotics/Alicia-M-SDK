@@ -19,9 +19,12 @@
 # Export hardware layer public interfaces
 from .servo_driver import ServoDriver
 from .data_parser import DataParser, JointState
+from .comm_manager import CommunicationManager, CommandPriority
 
 __all__ = [
     "ServoDriver",
     "DataParser",
     "JointState",
+    "CommunicationManager",
+    "CommandPriority",
 ]

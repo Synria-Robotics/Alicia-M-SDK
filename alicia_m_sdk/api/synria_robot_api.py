@@ -242,8 +242,8 @@ class SynriaRobotAPI:
 
     # ==================== Robot Control ====================
 
-    def set_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
-        """Move robot to home position and wait until near zero.
+    def go_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
+        """Move robot to home position (all joints at 0 degrees) and wait until completion.
 
         :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
         :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
@@ -256,6 +256,22 @@ class SynriaRobotAPI:
             gripper_speed_deg_s=gripper_speed_deg_s,
             wait_for_completion=True
         )
+    
+    def set_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
+        """DEPRECATED: Use go_home() instead. This method will be removed in future versions.
+        
+        Move robot to home position (all joints at 0 degrees) and wait until completion.
+
+        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
+        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
+        """
+        import warnings
+        warnings.warn(
+            "set_home() is deprecated and will be removed in future versions. Use go_home() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self.go_home(speed_deg_s=speed_deg_s, gripper_speed_deg_s=gripper_speed_deg_s)
 
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
@@ -281,11 +297,37 @@ class SynriaRobotAPI:
         :param control_aim: Control target (ServoDriver.AIM_TEACH, AIM_OPERATION, etc.). If None, uses instance default
         :param control_mode: Control mode (ServoDriver.PATTERN_PV, PATTERN_MIT_POSITION, etc.). If None, uses instance default
         :return: True if successful, False otherwise
+        
+        Note: Due to hardware protocol constraints, joint and gripper data must be sent together.
+        When target_joints is None, the current joint positions from the background query will be used.
+        If no valid joint data is available, zeros (HOME position) will be used as fallback.
         """
         # Convert joint format if needed
         if target_joints is not None:
             if joint_format == 'deg':
                 target_joints = [a * np.pi / 180.0 for a in target_joints]
+        else:
+            # 当 target_joints 为 None 时，尝试使用当前关节位置
+            # 这样可以避免意外将机械臂移动到其他位置
+            current_state = self.servo_driver.data_parser.get_joint_state()
+            if current_state and current_state.angles:
+                angles = current_state.angles
+                # 验证数据有效性
+                is_valid = True
+                # 检查1：全零是无效的（未初始化的默认值）
+                if all(abs(a) < 0.001 for a in angles):
+                    is_valid = False
+                # 检查2：接近 -12.5 rad 是无效的（原始值0转换后的结果）
+                if all(abs(a - (-12.5)) < 0.1 for a in angles):
+                    is_valid = False
+                
+                if is_valid:
+                    target_joints = angles
+                    logger.debug(f"Using current joint positions: {[f'{a*57.2958:.1f}°' for a in angles]}")
+                else:
+                    logger.warning("No valid joint data available, gripper-only command will use current position from hardware")
+                    # 让底层使用 [0.0]*6 作为默认值，这会发送 HOME 位置
+                    # 用户需要知道这个行为！
 
         # Use provided control_aim/control_mode or instance defaults
         effective_control_aim = control_aim if control_aim is not None else self.control_aim

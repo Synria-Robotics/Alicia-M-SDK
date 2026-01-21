@@ -57,11 +57,11 @@ def main(args):
             print("✗ 连接失败，请检查串口设置")
             return
 
-        # Optional: Set home position for safety
+        # Optional: Move to home position for safety
         try:
-            robot.set_home()
+            robot.go_home()
         except Exception as e:
-            print(f"✗ 设置home位置失败: {e}")
+            print(f"✗ 移动到home位置失败: {e}")
 
         # Create and start SparkVis bridge
         bridge = SparkVisBridge(

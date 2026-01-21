@@ -45,8 +45,9 @@ robot = create_robot()
   检查机械臂是否连接
 
 #### 运动控制：
-- `set_home(speed_factor=1.0, tolerance=0.03, timeout=10.0)`  
-  移动机械臂到初始位置，等待到达后返回
+- `go_home(speed_deg_s=20, gripper_speed_deg_s=57.3)`  
+  移动机械臂到初始位置（HOME位置，所有关节角度为0）
+  - 注意：`set_home()` 已弃用，请使用 `go_home()` 代替
 
 - `set_joint_target(target_joints, joint_format='rad', tolerance=0.03, timeout=None, wait_for_completion=True, speeds=None, torques=None)`  
   移动机械臂到目标关节角度（支持新固件直接控制）
@@ -211,8 +212,8 @@ robot = create_robot(port="", baudrate=1000000)
 # 连接机器人
 robot.connect()
 
-# 移动到初始位置
-robot.set_home()
+# 移动到初始位置（HOME位置）
+robot.go_home()
 
 # 关节空间运动（弧度）
 target_joints = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]

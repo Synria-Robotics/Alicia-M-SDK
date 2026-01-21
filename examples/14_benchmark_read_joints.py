@@ -246,12 +246,12 @@ Examples:
                        help="串口波特率 (默认: 1000000)")
     
     # Control settings
-    parser.add_argument('--control-aim', type=str, default='teach', 
+    parser.add_argument('--control-aim', type=str, default='operation', 
                        choices=['teach', 'operation'],
-                       help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+                       help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', 
                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                       help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+                       help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
     
     # Benchmark settings
     parser.add_argument('--duration', type=float, default=5.0, 

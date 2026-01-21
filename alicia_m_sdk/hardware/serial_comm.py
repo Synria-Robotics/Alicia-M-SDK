@@ -393,6 +393,180 @@ class SerialComm:
         hex_buf = ' '.join(f"{b:02X}" for b in data)
         print(f"[{title}] {hex_buf}")
 
+    # ==================== 高频同步通信接口 ====================
+    
+    def send_and_receive_sync(self, data: List[int], timeout: float = 0.003) -> Tuple[bool, Optional[List[int]], float]:
+        """
+        同步发送数据并等待响应 (高频控制专用)
+        
+        此方法实现了发送-等待-接收的同步机制，确保每次发送后等待MCU响应完成，
+        避免数据"撞车"问题。适用于需要高同步率的高频控制场景。
+        
+        Args:
+            data: 要发送的字节数据列表
+            timeout: 等待响应的超时时间 (秒), 默认3ms
+            
+        Returns:
+            Tuple[bool, Optional[List[int]], float]:
+                - 发送是否成功
+                - 响应帧 (如果收到) 或 None
+                - 往返延迟 (毫秒)
+        
+        Example:
+            >>> success, response, latency = serial_comm.send_and_receive_sync(frame, timeout=0.003)
+            >>> if success and response:
+            ...     print(f"同步成功, 延迟: {latency:.2f}ms")
+        """
+        with self._lock:
+            try:
+                # 1) 检查连接状态
+                if not self.serial_port or not self.serial_port.is_open:
+                    if not self.connect():
+                        return False, None, 0.0
+                
+                # 2) 清空接收缓冲区 (丢弃之前未读取的残留数据)
+                self.serial_port.reset_input_buffer()
+                
+                # 3) 记录发送时间
+                send_start = time.perf_counter()
+                
+                # 4) 发送数据
+                data_bytes = bytes(data)
+                bytes_written = self.serial_port.write(data_bytes)
+                
+                # 5) 立即刷新输出缓冲
+                try:
+                    self.serial_port.flush()
+                except Exception:
+                    pass
+                
+                if bytes_written != len(data):
+                    return False, None, 0.0
+                
+                # 6) 等待响应 (高效自旋等待)
+                response = self._wait_for_response_fast(timeout)
+                
+                # 7) 计算往返延迟
+                latency_ms = (time.perf_counter() - send_start) * 1000
+                
+                if self.debug_mode:
+                    self._hex_print("Send", data)
+                    if response:
+                        self._hex_print("Recv", response)
+                
+                return True, response, latency_ms
+                
+            except Exception as e:
+                logger.error(f"Exception in send_and_receive_sync: {str(e)}")
+                return False, None, 0.0
+    
+    def _wait_for_response_fast(self, timeout: float = 0.003) -> Optional[List[int]]:
+        """
+        高效等待响应帧 (自旋等待实现)
+        
+        使用自旋等待而非 sleep，实现更精确的超时控制和更低的延迟。
+        
+        Args:
+            timeout: 超时时间 (秒)
+            
+        Returns:
+            响应帧列表 或 None (超时)
+        """
+        if not self.serial_port or not self.serial_port.is_open:
+            return None
+        
+        start_time = time.perf_counter()
+        buffer = []
+        frame_started = False
+        expected_length = 0
+        
+        while (time.perf_counter() - start_time) < timeout:
+            # 检查是否有数据可读
+            waiting = self.serial_port.in_waiting
+            if waiting > 0:
+                # 读取所有可用数据
+                raw_data = self.serial_port.read(waiting)
+                
+                for byte in raw_data:
+                    if not frame_started:
+                        # 寻找帧头 0xAA
+                        if byte == 0xAA:
+                            buffer = [byte]
+                            frame_started = True
+                    else:
+                        buffer.append(byte)
+                        
+                        # 第4个字节(index 3)是数据长度
+                        if len(buffer) == 4:
+                            # 帧长度 = 数据长度 + 固定6字节 (AA + Cmd + Func + Len + CRC + FF)
+                            expected_length = buffer[3] + DEFAULT_LENGTH
+                        
+                        # 检查是否收到完整帧
+                        if expected_length > 0 and len(buffer) >= expected_length:
+                            # 检查帧尾
+                            if buffer[-1] == 0xFF:
+                                return buffer
+                            else:
+                                # 帧尾错误，重新开始寻找
+                                frame_started = False
+                                buffer = []
+                                expected_length = 0
+            # 不使用 sleep，直接自旋 (最低延迟)
+        
+        return None  # 超时
+    
+    def set_low_latency_mode(self, enable: bool = True):
+        """
+        设置低延迟模式
+        
+        在高频通信场景下，可以通过此方法优化串口参数以降低延迟。
+        
+        Args:
+            enable: 是否启用低延迟模式
+        """
+        if not self.serial_port or not self.serial_port.is_open:
+            return
+        
+        try:
+            if enable:
+                # 设置更小的超时时间
+                # 注意: write_timeout 不能设置太短，否则高频写入会导致 Write timeout 错误
+                # read timeout 可以很短 (1ms)，但 write timeout 需要预留更多时间 (10ms)
+                self.serial_port.timeout = 0.001
+                self.serial_port.write_timeout = 0.01  # 10ms，避免高频写入时超时
+                
+                # 禁用硬件流控 (如果还没有)
+                self.serial_port.rtscts = False
+                self.serial_port.dsrdtr = False
+                self.serial_port.xonxoff = False
+                
+                # Linux: 尝试设置低延迟模式
+                import platform
+                if platform.system() == "Linux":
+                    try:
+                        import fcntl
+                        import struct
+                        # TIOCGSERIAL / TIOCSSERIAL 常量
+                        TIOCGSERIAL = 0x541E
+                        TIOCSSERIAL = 0x541F
+                        # 尝试设置 low_latency 标志
+                        # 注意：这可能需要 root 权限
+                    except Exception:
+                        pass  # 忽略错误，使用默认设置
+                
+                if self.debug_mode:
+                    logger.info("Low latency mode enabled")
+            else:
+                # 恢复默认超时
+                self.serial_port.timeout = self.timeout
+                self.serial_port.write_timeout = self.timeout
+                
+                if self.debug_mode:
+                    logger.info("Low latency mode disabled")
+                    
+        except Exception as e:
+            logger.warning(f"Failed to set low latency mode: {e}")
+
 
 
 

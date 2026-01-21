@@ -97,7 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称 (默认: tool0)")
-    parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
                         help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')

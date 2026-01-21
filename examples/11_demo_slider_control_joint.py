@@ -35,7 +35,7 @@ class JointSliderController:
         self.robot = robot
         self.running = False
         self.control_thread = None
-        self.shutdown_event = threading.Event()  # 添加关闭事件
+        self.shutdown_event = threading.Event()  # 关闭事件（默认未设置）
         
         # Control parameters - 500Hz control frequency
         self.control_frequency = 200  # Hz (降低到200Hz以确保稳定)
@@ -226,9 +226,14 @@ class JointSliderController:
         if self.control_thread and self.control_thread.is_alive():
             self.control_thread.join(timeout=0.5)  # 缩短等待时间
             self.control_thread = None
+        
+        # 重置关闭事件，以便下次可以再次启动
+        self.shutdown_event.clear()
             
     def _control_loop(self):
         """Main control loop running at 200Hz."""
+        print("✓ 控制循环已启动")
+        
         while self.running and not self.shutdown_event.is_set():
             loop_start = time.time()
             
@@ -239,17 +244,24 @@ class JointSliderController:
                 # Speed is in deg/s
                 speed_deg_s = self.speed_deg_s
                 
-                # Send control command (non-blocking)
-                self.robot.servo_driver.set_joint_and_gripper(
-                    joint_angles=[np.deg2rad(a) for a in target[:6]],
+                # 使用 set_robot_state 方法发送控制命令
+                # 注意：wait_for_completion=False 表示不等待到达目标位置，实现高频控制
+                # 注意：target 已经是度数，所以使用 joint_format='deg'
+                success = self.robot.set_robot_state(
+                    target_joints=target[:6],  # 直接传入度数
                     gripper_value=target[6],
-                    speed_deg_s=speed_deg_s,
-                    control_aim=ServoDriver.AIM_OPERATION,  # 使用OPERATION模式而非TEACH模式
-                    control_mode=ServoDriver.PATTERN_PV
+                    joint_format='deg',  # 明确指定输入是角度
+                    wait_for_completion=False,
+                    speed_deg_s=speed_deg_s
                 )
                 
+                if not success:
+                    print(f"⚠ 控制命令发送失败")
+                
             except Exception as e:
-                print(f"控制循环错误: {e}")
+                print(f"✗ 控制循环错误: {e}")
+                import traceback
+                traceback.print_exc()
                 
             # Calculate sleep time to maintain control frequency
             elapsed = time.time() - loop_start
@@ -257,7 +269,11 @@ class JointSliderController:
             
             if sleep_time > 0:
                 # 使用 Event 的 wait 方法，这样可以立即响应关闭信号
-                self.shutdown_event.wait(sleep_time)
+                if self.shutdown_event.wait(sleep_time):
+                    # 如果 wait 返回 True，说明事件被设置，应该退出
+                    break
+        
+        print("✓ 控制循环已停止")
                 
     def _reset_sliders(self):
         """Reset all sliders to zero position."""
@@ -277,24 +293,18 @@ class JointSliderController:
             # Set all sliders to zero
             self._reset_sliders()
             
-            # Speed is in deg/s
-            speed_deg_s = self.speed_deg_s
-            
             # If control is running, it will automatically send the zero position
             if not self.running:
-                # Send zero position command
-                self.robot.servo_driver.set_joint_and_gripper(
-                    joint_angles=[0.0] * 6,
-                    gripper_value=50.0,
-                    speed_deg_s=speed_deg_s,
-                    control_aim=ServoDriver.AIM_OPERATION,
-                    control_mode=ServoDriver.PATTERN_PV
-                )
+                # Send zero position command using go_home method
+                self.robot.go_home(speed_deg_s=self.speed_deg_s)
             
             self.status_label.config(text="状态: 正在回零位...", foreground='blue')
             
         except Exception as e:
             self.status_label.config(text=f"状态: 错误 - {e}", foreground='red')
+            print(f"✗ 回零位错误: {e}")
+            import traceback
+            traceback.print_exc()
             
     def _update_position_display(self):
         """Update the position display labels at 20Hz (reduced from 10Hz for better feedback)."""
@@ -436,9 +446,9 @@ if __name__ == "__main__":
     parser.add_argument('--gripper_type', type=str, default="100mm",  
                         help="夹爪型号 (默认: 100mm)")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+                        help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
     parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
     parser.add_argument('--debug', action='store_true',
                         help="启用调试模式")

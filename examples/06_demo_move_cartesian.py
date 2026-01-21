@@ -58,7 +58,7 @@ def main(cmd_args):
         
         # Move to initial position
         logger.info("\n1. Moving to initial position...")
-        robot.set_home(speed_deg_s=cmd_args.speed_deg_s)
+        robot.go_home(speed_deg_s=cmd_args.speed_deg_s)
         
         # Record waypoints (manual drag mode)
         waypoints = planner.record_teaching_waypoints()
@@ -104,10 +104,10 @@ if __name__ == "__main__":
     parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
-    parser.add_argument('--control-aim', type=str, default='teach', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
+                        help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque')
+                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
     parser.add_argument('--speed_deg_s', type=int, default=20, help="关节运动速度 (单位: 度/秒，默认: 20，范围: 10-400度/秒)")
     
     # Trajectory planning settings

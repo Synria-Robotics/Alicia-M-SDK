@@ -7,6 +7,7 @@ import numpy as np
 
 from alicia_m_sdk.hardware.serial_comm import SerialComm
 from alicia_m_sdk.hardware.data_parser import DataParser, JointState
+from alicia_m_sdk.hardware.comm_manager import CommunicationManager, CommandPriority
 from alicia_m_sdk.utils.logger import logger
 
 
@@ -101,7 +102,7 @@ class ServoDriver:
         "FF 7F FF 07 FF 07 3D 0A 33 33 "  # Motor 7 (Gripper)
         "44 FF"
     )
-    def __init__(self, port, baudrate=1000000, debug_mode=False, firmware_version=None, robot_type=None, gripper_type="100mm", auto_init_mit=False, control_aim=None, **kwargs):
+    def __init__(self, port, baudrate=1000000, debug_mode=False, firmware_version=None, robot_type=None, gripper_type="100mm", auto_init_mit=False, control_aim=None, use_comm_manager=True, **kwargs):
         """
         接受额外的关键字参数以保持向后兼容（例如 firmware_version）。
         真实实现的初始化逻辑放在下面（或保留原有代码）。
@@ -111,6 +112,9 @@ class ServoDriver:
                           设置为True则在首次使用MIT模式时自动发送初始化指令（会使电机回零点）。
             control_aim: 默认控制目标。默认为 AIM_OPERATION (0x02 操作臂)。
                         可选: AIM_TEACH (0x01 示教臂), AIM_OPERATION (0x02 操作臂)等
+            use_comm_manager: 是否使用单线程通信管理器（推荐True）。
+                            True: 使用 CommunicationManager 消除串口竞争
+                            False: 使用传统多线程模式（向后兼容）
         """
         self.port = port
         self.baudrate = baudrate
@@ -123,7 +127,9 @@ class ServoDriver:
         # 设置默认控制目标为操作臂（AIM_OPERATION）
         self.default_control_aim = control_aim if control_aim is not None else self.AIM_OPERATION
         self._lock = threading.RLock()  # Use RLock to allow re-entry within same thread
-
+        
+        # 是否使用通信管理器
+        self.use_comm_manager = use_comm_manager
 
         # Create serial communication module and data parser
         self.serial_comm = SerialComm(lock=self._lock, port=port, baudrate=baudrate, debug_mode=debug_mode)
@@ -150,11 +156,21 @@ class ServoDriver:
         joint_directions = [mapping[1] for mapping in self.joint_to_servo_map]
         self.data_parser = DataParser(lock=self._lock, debug_mode=debug_mode, joint_directions=joint_directions)
         
+        # 创建通信管理器（单线程串口通信）
+        self.comm_manager: Optional[CommunicationManager] = None
+        if self.use_comm_manager:
+            self.comm_manager = CommunicationManager(
+                serial_comm=self.serial_comm,
+                data_parser=self.data_parser,
+                response_timeout=0.05,
+                debug_mode=debug_mode
+            )
+        
         # Number of servos
         self.servo_count = 6
         self.joint_count = 6
         
-        # State update thread related
+        # State update thread related (仅在非 comm_manager 模式下使用)
         self._update_thread = None
         self.thread_update_interval = 0.010  # Update interval in seconds (10ms = 100Hz max query rate)
         self._stop_thread = threading.Event()
@@ -310,7 +326,19 @@ class ServoDriver:
                 logger.info(f"Initializing MIT control mode (sending {repeat_times} times)...")
             
             for i in range(repeat_times):
-                self.serial_comm.serial_port.write(self.MIT_INIT_COMMAND)
+                # 根据模式发送 MIT 初始化指令
+                if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
+                    # 使用通信管理器发送（高优先级关键命令）
+                    self.comm_manager.send_command(
+                        data=list(self.MIT_INIT_COMMAND),
+                        priority=CommandPriority.CRITICAL,
+                        wait=True,
+                        timeout=0.1
+                    )
+                else:
+                    # 传统模式：直接写入
+                    self.serial_comm.serial_port.write(self.MIT_INIT_COMMAND)
+                
                 if self.debug_mode:
                     logger.debug(f"  MIT init command sent ({i+1}/{repeat_times})")
                 time.sleep(0.02)  # 20ms间隔
@@ -338,54 +366,96 @@ class ServoDriver:
         # self._mit_mode_initialized = False  # 注释掉，避免重复初始化
     
     def start_update_thread(self):
-        """Start state update thread"""
-        if self._update_thread is not None and self._thread_running:
-            logger.info("State update thread is already running")
-            return
-        
-        # Reset stop flag
-        self._stop_thread.clear()
-        self._thread_running = True
-        
-        # Create and start thread
-        self._update_thread = threading.Thread(target=self._update_loop, daemon=True)
-        self._update_thread.start()
+        """Start state update thread / communication manager"""
+        if self.use_comm_manager and self.comm_manager:
+            # 使用单线程通信管理器模式
+            if self.comm_manager.is_running():
+                logger.info("CommunicationManager is already running")
+                return
+            
+            # 启动通信管理器
+            if self.comm_manager.start():
+                # 启用自动后台查询
+                self.comm_manager.enable_auto_query(
+                    query_builder=lambda: self._build_joint_request_frame(control_aim=self.default_control_aim),
+                    interval=self.thread_update_interval
+                )
+                logger.info("CommunicationManager started with auto query enabled")
+            else:
+                logger.error("Failed to start CommunicationManager")
+        else:
+            # 使用传统多线程模式
+            if self._update_thread is not None and self._thread_running:
+                logger.info("State update thread is already running")
+                return
+            
+            # Reset stop flag
+            self._stop_thread.clear()
+            self._thread_running = True
+            
+            # Create and start thread
+            self._update_thread = threading.Thread(target=self._update_loop, daemon=True)
+            self._update_thread.start()
     
     def stop_update_thread(self):
-        """Stop state update thread"""
-        if self._update_thread is None or not self._thread_running:
-            return
-        
-        # Set stop flag
-        self._stop_thread.set()
-        self._thread_running = False
-        
-        # Wait for thread to finish
-        if self._update_thread.is_alive():
-            self._update_thread.join(timeout=2.0)
-        
-        self._update_thread = None
+        """Stop state update thread / communication manager"""
+        if self.use_comm_manager and self.comm_manager:
+            # 停止通信管理器
+            self.comm_manager.stop()
+        else:
+            # 停止传统多线程
+            if self._update_thread is None or not self._thread_running:
+                return
+            
+            # Set stop flag
+            self._stop_thread.set()
+            self._thread_running = False
+            
+            # Wait for thread to finish
+            if self._update_thread.is_alive():
+                self._update_thread.join(timeout=2.0)
+            
+            self._update_thread = None
     
     def is_update_thread_running(self) -> bool:
         """
-        Check whether state update thread is running
+        Check whether state update thread / communication manager is running
         """
-        return self._thread_running and self._update_thread is not None and self._update_thread.is_alive()
+        if self.use_comm_manager and self.comm_manager:
+            return self.comm_manager.is_running()
+        else:
+            return self._thread_running and self._update_thread is not None and self._update_thread.is_alive()
     
     def get_update_thread_status(self) -> Dict:
         """
-        Get detailed status of the state update thread
+        Get detailed status of the state update thread / communication manager
         
         Returns:
             Dict: Dictionary containing thread status
         """
-        return {
-            "running": self.is_update_thread_running(),
-            "enabled": self._thread_running,
-            "thread_exists": self._update_thread is not None,
-            "thread_alive": self._update_thread.is_alive() if self._update_thread else False,
-            "stop_flag_set": self._stop_thread.is_set()
-        }
+        if self.use_comm_manager and self.comm_manager:
+            # 返回通信管理器状态
+            stats = self.comm_manager.get_stats()
+            return {
+                "running": stats.get("running", False),
+                "enabled": stats.get("running", False),
+                "mode": "comm_manager",
+                "commands_sent": stats.get("commands_sent", 0),
+                "commands_success": stats.get("commands_success", 0),
+                "commands_timeout": stats.get("commands_timeout", 0),
+                "frames_received": stats.get("frames_received", 0),
+                "queue_size": stats.get("queue_size", 0),
+                "auto_query_enabled": stats.get("auto_query_enabled", False),
+            }
+        else:
+            return {
+                "running": self.is_update_thread_running(),
+                "enabled": self._thread_running,
+                "mode": "legacy_thread",
+                "thread_exists": self._update_thread is not None,
+                "thread_alive": self._update_thread.is_alive() if self._update_thread else False,
+                "stop_flag_set": self._stop_thread.is_set()
+            }
     
     def _update_loop(self):
         """Main loop of state update thread (active query mode with smart coordination)
@@ -498,6 +568,37 @@ class ServoDriver:
         else:
             command = self.INFO_COMMAND_MAP[actual_info_type]
         
+        # ===== 使用 CommunicationManager 模式 =====
+        if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
+            if not wait:
+                # 不等待响应，直接发送
+                self.comm_manager.send_command(
+                    data=command,
+                    priority=CommandPriority.QUERY,
+                    wait=False
+                )
+                return True
+            else:
+                # 等待响应模式：使用重试逻辑
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    # 发送命令并等待响应
+                    response = self.comm_manager.send_command(
+                        data=command,
+                        priority=CommandPriority.QUERY,
+                        wait=True,
+                        timeout=retry_interval
+                    )
+                    if response is not None:
+                        # 响应已收到（data_parser 已解析）
+                        return True
+                    # 响应超时，继续重试
+                
+                # 总超时
+                logger.warning(f"[CommManager] Failed to get {info_type} within timeout period after multiple retries")
+                return False
+        
+        # ===== 传统模式（直接串口访问）=====
         # If not waiting, just send once
         if not wait:
             success = self.serial_comm.send_data(command)
@@ -657,16 +758,132 @@ class ServoDriver:
         if self.debug_mode:
             print(f"[TX] 发送控制数据包: {' '.join(f'{b:02X}' for b in frame)}")
 
-        # Record user command time (for background thread coordination)
-        self._last_user_command_time = time.perf_counter()
+        # 根据模式发送命令
+        if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
+            # 使用通信管理器发送（高优先级控制命令，不等待响应）
+            # 控制命令发送后，响应会被通信管理器读取并由 data_parser 解析
+            self.comm_manager.send_command(
+                data=frame,
+                priority=CommandPriority.CONTROL,
+                wait=False  # 高频控制不等待响应
+            )
+            return True
+        else:
+            # 传统模式：直接发送
+            # Record user command time (for background thread coordination)
+            self._last_user_command_time = time.perf_counter()
+            
+            # Send control command (background thread will handle any response)
+            success = self.serial_comm.send_data(frame)
+            
+            if self.debug_mode and not success:
+                logger.warning("Failed to send joint control command")
+            
+            return success
+    
+    def set_joint_and_gripper_sync(self, 
+                                   joint_angles: Optional[List[float]] = None,
+                                   gripper_value: Optional[float] = None,
+                                   speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                                   torque_nm: Union[float, List[float], np.ndarray] = 0.0,
+                                   gripper_speed_deg_s: Optional[float] = None,
+                                   control_aim: int = None,
+                                   control_mode: tuple = None,
+                                   response_timeout: float = 0.003) -> Tuple[bool, Optional[List[int]], float]:
+        """
+        同步版本的关节和夹爪控制接口 - 专为高频控制设计
         
-        # Send control command (background thread will handle any response)
-        success = self.serial_comm.send_data(frame)
+        此方法实现发送-等待-接收的同步机制，确保每次发送后等待MCU响应完成，
+        避免数据"撞车"问题。适用于需要高同步率的高频控制场景（如500Hz）。
         
-        if self.debug_mode and not success:
-            logger.warning("Failed to send joint control command")
+        与 set_joint_and_gripper 的区别:
+            - 异步版本: 发送后立即返回，响应由后台线程处理
+            - 同步版本: 发送后等待响应，返回后再进行下一次发送
         
-        return success
+        Args:
+            joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
+            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
+            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s
+            torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm
+            gripper_speed_deg_s: 夹爪速度 (度/秒)
+            control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂)
+            control_mode: 控制模式元组
+            response_timeout: 等待响应的超时时间 (秒), 默认3ms
+            
+        Returns:
+            Tuple[bool, Optional[List[int]], float]:
+                - 发送是否成功
+                - 响应帧 (如果收到) 或 None
+                - 往返延迟 (毫秒)
+        
+        Example:
+            >>> # 500Hz 高频控制循环
+            >>> while running:
+            ...     success, response, latency = driver.set_joint_and_gripper_sync(
+            ...         joint_angles=target_angles,
+            ...         speed_deg_s=50.0,
+            ...         response_timeout=0.003
+            ...     )
+            ...     if success and response:
+            ...         # 解析响应...
+            ...         pass
+        """
+        # 默认值
+        if control_aim is None:
+            control_aim = self.default_control_aim
+        if control_mode is None:
+            control_mode = self.PATTERN_PV
+        
+        # 检查是否使用MIT系列模式
+        is_mit_mode = control_mode in (
+            self.PATTERN_MIT,
+            self.PATTERN_MIT_POSITION,
+            self.PATTERN_MIT_SPEED,
+            self.PATTERN_MIT_TORQUE
+        )
+        
+        if is_mit_mode and not self._mit_mode_initialized:
+            if self.auto_init_mit:
+                if not self.initialize_mit_mode():
+                    logger.error("Failed to initialize MIT mode")
+                    return False, None, 0.0
+            else:
+                logger.warning("MIT mode requires initialization. Run examples/00_config_mit_params.py first.")
+                return False, None, 0.0
+        
+        # 构建控制帧
+        frame = self._build_send_joint_frame(
+            joint_angles=joint_angles,
+            gripper_value=gripper_value,
+            speed_deg_s=speed_deg_s,
+            torque_nm=torque_nm,
+            gripper_speed_deg_s=gripper_speed_deg_s,
+            control_aim=control_aim,
+            control_mode=control_mode
+        )
+        
+        # 使用同步发送接收
+        success, response, latency_ms = self.serial_comm.send_and_receive_sync(
+            data=frame,
+            timeout=response_timeout
+        )
+        
+        # 如果收到响应，解析它
+        if success and response is not None:
+            self.data_parser.parse_frame(response)
+        
+        return success, response, latency_ms
+    
+    def enable_low_latency_mode(self, enable: bool = True):
+        """
+        启用/禁用低延迟模式
+        
+        在高频控制场景下，启用此模式可以优化串口参数以降低通信延迟。
+        
+        Args:
+            enable: 是否启用低延迟模式
+        """
+        self.serial_comm.set_low_latency_mode(enable)
     
     
     def _build_send_joint_frame(self, 
@@ -744,7 +961,27 @@ class ServoDriver:
 
         if joint_angles is None:
             if current_state and current_state.angles:
-                effective_joints = current_state.angles
+                # 验证数据有效性：检查是否是无效的初始值（全0或接近-12.5 rad）
+                angles = current_state.angles
+                is_valid = True
+                
+                # 检查1：全零是无效的（未初始化的默认值）
+                if all(abs(a) < 0.001 for a in angles):
+                    is_valid = False
+                    if self.debug_mode:
+                        logger.warning("Current joint state is all zeros (uninitialized), using [0.0]*6 as fallback")
+                
+                # 检查2：接近 -12.5 rad 是无效的（原始值0转换后的结果）
+                if all(abs(a - (-12.5)) < 0.1 for a in angles):
+                    is_valid = False
+                    if self.debug_mode:
+                        logger.warning("Current joint state is all -12.5 rad (invalid raw data), using [0.0]*6 as fallback")
+                
+                if is_valid:
+                    effective_joints = angles
+                else:
+                    # 数据无效时，使用安全的默认值
+                    effective_joints = [0.0] * self.joint_count
             else:
                 # Default to zero if no current state available
                 effective_joints = [0.0] * self.joint_count
