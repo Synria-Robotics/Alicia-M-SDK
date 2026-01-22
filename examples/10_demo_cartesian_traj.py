@@ -187,7 +187,7 @@ if __name__ == '__main__':
     # Robot connection
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型")
-    parser.add_argument('--robot_version', type=str, default="v1_0", help="机械臂版本")
+    parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="tool0", help="末端执行器链路名称")
     

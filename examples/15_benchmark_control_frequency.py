@@ -347,7 +347,7 @@ Examples:
                        help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", 
                        help="夹爪型号 (默认: 100mm)")
-    parser.add_argument('--robot_version', type=str, default="v1_0", 
+    parser.add_argument('--robot_version', type=str, default="v1_1", 
                        help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", 
                        help="基座链路名称")
