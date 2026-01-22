@@ -41,6 +41,7 @@ from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from synriard import get_model_path
 import json
 from pathlib import Path
+from typing import Optional
 
 
 __version__ = "1.0.0"
@@ -83,13 +84,19 @@ def _get_gripper_type_from_json() -> str:
 
 def create_robot(
     port: str = "",
-    baudrate: int = 1000000,
-    gripper_type: str = None,
-    robot_version: str = "v1_0",
+    version: str = "v1_0",
+    variant: str = "follower",
+    model_format: str = "urdf",
     debug_mode: bool = False,
     auto_connect: bool = True,
     base_link: str = "base_link",
     end_link: str = "tool0",
+    backend: Optional[str] = None,
+    device: str = "cpu",
+    model_path: str = None,
+    gripper_type: str = None,
+    # M-SDK specific parameters
+    baudrate: int = 1000000,
     control_aim: str = None,
     control_mode: str = None,
 ) -> SynriaRobotAPI:
@@ -97,31 +104,38 @@ def create_robot(
     Create robot instance.
 
     :param port: Serial port
-    :param baudrate: Serial port baudrate (default: 1000000)
-    :param gripper_type: Gripper type:
-        - explicit value such as "50mm" / "100mm" for user-defined configuration
-        - None to auto-select from saved JSON (if available) or default to "100mm"
-    :param robot_version: Robot version (e.g., "v1_0", "v1_1")
+    :param version: Version name, e.g., "v1_0", "v1_1", etc.
+    :param variant: Variant name, e.g., "gripper_50mm", "gripper_100mm", etc.
+    :param model_format: Model format, 'urdf' or 'mjcf', default is 'urdf'
     :param debug_mode: Debug mode
-    :param auto_connect: Auto connect to robot
+    :param auto_connect: Automatically connect on initialization
     :param base_link: Base link name in the robot model (default 'base_link')
     :param end_link: End link name in the robot model (default 'tool0')
-    :param control_aim: Control target string - "teach" or "operation" (Motor-specific)
-    :param control_mode: Control mode string - "pv", "pvt", "v", "mit", "mit_position", "mit_speed", "mit_torque" (Motor-specific)
+    :param backend: Computation backend, 'numpy' or 'torch' (default: None, uses 'numpy')
+    :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
+    :param model_path: Model path, if None, use default model path
+    :param gripper_type: Gripper type: deprecated, use variant instead please
+        - explicit value such as "50mm" / "100mm" for user-defined configuration
+        - None to auto-select from saved JSON (if available) or default to "100mm"
+    :param baudrate: Serial port baudrate (default: 1000000)
+    :param control_mode: Control mode string - "pv", "pvt", "v", "mit", "mit_position", "mit_speed", "mit_torque"
     :return: SynriaRobotAPI instance
     """
     effective_gripper_type = gripper_type if gripper_type is not None else _get_gripper_type_from_json()
+    variant = variant if variant is not None else f"gripper_{effective_gripper_type}"
 
-    # Convert control_aim string to constant
-    control_aim_const = None
-    if control_aim is not None:
-        control_aim_lower = control_aim.lower()
-        if control_aim_lower == 'teach':
-            control_aim_const = ServoDriver.AIM_TEACH
-        elif control_aim_lower == 'operation':
-            control_aim_const = ServoDriver.AIM_OPERATION
-        else:
-            raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: 'teach', 'operation'")
+    # Auto-infer from variant: if variant contains "leader", it's a teach arm
+    if variant is not None and "leader" in variant.lower():
+        control_aim_const = ServoDriver.AIM_TEACH
+    else:
+        control_aim_const = ServoDriver.AIM_OPERATION
+
+    servo_driver = ServoDriver(
+        port=port,
+        baudrate=baudrate,
+        debug_mode=debug_mode,
+        control_aim=control_aim_const
+    )
 
     # Convert control_mode string to constant
     control_mode_const = None
@@ -144,28 +158,21 @@ def create_robot(
             # Backward compatibility: accept tuple directly
             control_mode_const = control_mode
 
-    # Create hardware layer
-    servo_driver = ServoDriver(
-        port=port,
-        baudrate=baudrate,
-        debug_mode=debug_mode,
-        control_aim=control_aim_const
-    )
-    
-    # Create kinematics layer using RoboCore and synriard
-    urdf_path = get_model_path(
-        "Alicia_M",
-        version=robot_version,
-        variant=f"gripper_{effective_gripper_type}",
-        model_format="urdf"
-    )
-    robot_model = RobotModel(str(urdf_path), base_link=base_link, end_link=end_link)
-    
-    # Create user layer API
+    if model_path is None:
+        model_path = get_model_path(
+            "Alicia_M",
+            version=version,
+            variant=variant,
+            model_format=model_format
+        )
+    robot_model = RobotModel(str(model_path), base_link=base_link, end_link=end_link)
+
     robot = SynriaRobotAPI(
         servo_driver=servo_driver,
         robot_model=robot_model,
-        auto_connect=auto_connect
+        auto_connect=auto_connect,
+        backend=backend,
+        device=device
     )
     
     # Set control_mode if provided

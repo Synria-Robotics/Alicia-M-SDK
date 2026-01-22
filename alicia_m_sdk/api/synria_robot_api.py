@@ -32,6 +32,7 @@ from typing import List, Optional, Dict, Union, Tuple, Any
 import numpy as np
 import json
 import os
+import robocore as rc
 # Import from robocore for kinematics and planning
 from robocore.kinematics import inverse_kinematics
 from robocore.modeling import RobotModel
@@ -53,17 +54,27 @@ class SynriaRobotAPI:
     def __init__(self,
                  servo_driver: ServoDriver,
                  robot_model: RobotModel,
-                 auto_connect: bool = True):
+                 auto_connect: bool = True,
+                 backend: Optional[str] = None,
+                 device: str = "cpu"):
         """Initialize robot API.
 
         :param servo_driver: Servo driver instance (low-level hardware)
         :param robot_model: Pre-loaded robot model (RoboCore RobotModel)
-        :param auto_connect: Automatically connect on initialization
+        :param auto_connect: Auto connect to robot on initialization
+        :param backend: Computation backend, 'numpy' or 'torch' (default: None, uses 'numpy')
+        :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
         """
         self.servo_driver = servo_driver
         self.data_parser = servo_driver.data_parser  # Direct access to data parser
         self.robot_model = robot_model
         self.debug_mode = servo_driver.debug_mode  # Access debug mode from servo driver
+
+        # Set backend if provided, otherwise use default 'numpy'
+        if backend is not None:
+            rc.set_backend(backend, device=device)
+        else:
+            rc.set_backend('numpy')
 
         # Higher-level helpers
         self.robot_type = None
