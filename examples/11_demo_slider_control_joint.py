@@ -444,7 +444,7 @@ if __name__ == "__main__":
     parser.add_argument('--version', type=str, default="v1_1",  
                         help="机器人版本 (默认: v1_1)")
     parser.add_argument('--gripper_type', type=str, default="100mm",  
-                        help="夹爪型号 (默认: 100mm)")
+                        help="夹爪型号 (v1_1版本会被忽略，自动使用follower变体)")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],

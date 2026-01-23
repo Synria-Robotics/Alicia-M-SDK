@@ -105,7 +105,9 @@ def create_robot(
 
     :param port: Serial port
     :param version: Version name, e.g., "v1_1", "v1_1", etc.
-    :param variant: Variant name, e.g., "gripper_50mm", "gripper_100mm", etc.
+    :param variant: Variant name, e.g., "gripper_50mm", "gripper_100mm", "follower", etc.
+        Note: For Alicia_M v1_1, only "follower" variant is available.
+              The gripper_type parameter will be ignored for v1_1.
     :param model_format: Model format, 'urdf' or 'mjcf', default is 'urdf'
     :param debug_mode: Debug mode
     :param auto_connect: Automatically connect on initialization
@@ -117,12 +119,17 @@ def create_robot(
     :param gripper_type: Gripper type: deprecated, use variant instead please
         - explicit value such as "50mm" / "100mm" for user-defined configuration
         - None to auto-select from saved JSON (if available) or default to "100mm"
+        - Note: Ignored for Alicia_M v1_1 (only "follower" variant available)
     :param baudrate: Serial port baudrate (default: 1000000)
     :param control_mode: Control mode string - "pv", "pvt", "v", "mit", "mit_position", "mit_speed", "mit_torque"
     :return: SynriaRobotAPI instance
     """
     effective_gripper_type = gripper_type if gripper_type is not None else _get_gripper_type_from_json()
-    variant = variant if variant is not None else f"gripper_{effective_gripper_type}"
+    
+    # Alicia_M v1_1 has inconsistent variant naming across synriard versions
+    # We set a default here but will use a fallback mechanism during get_model_path
+    if variant is None:
+        variant = f"gripper_{effective_gripper_type}"
 
     # Determine control_aim: prioritize user's input, then infer from variant
     if control_aim is not None:
@@ -175,12 +182,31 @@ def create_robot(
             control_mode_const = control_mode
 
     if model_path is None:
-        model_path = get_model_path(
-            "Alicia_M",
-            version=version,
-            variant=variant,
-            model_format=model_format
-        )
+        try:
+            model_path = get_model_path(
+                "Alicia_M",
+                version=version,
+                variant=variant,
+                model_format=model_format
+            )
+        except ValueError as e:
+            # Fallback handling for Alicia_M v1_1 naming inconsistency
+            if version == "v1_1":
+                # If variant was "follower", try "gripper_100mm"
+                # If variant was "gripper_xxx", try "follower"
+                fallback_variant = "follower" if "gripper" in variant else "gripper_100mm"
+                try:
+                    model_path = get_model_path(
+                        "Alicia_M",
+                        version=version,
+                        variant=fallback_variant,
+                        model_format=model_format
+                    )
+                except ValueError:
+                    # If both fail, raise the original exception
+                    raise e
+            else:
+                raise e
     robot_model = RobotModel(str(model_path), base_link=base_link, end_link=end_link)
 
     robot = SynriaRobotAPI(

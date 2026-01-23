@@ -204,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--speed_deg_s', type=int, default=10,  help="关节运动速度 (单位: 度/秒，默认: 10，范围: 5-400度/秒)")
     parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (默认: v1_1)")
-    parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型 (默认: 100mm)")
+    parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型 (v1_1版本会被忽略，自动使用follower变体)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称, world 或 base_link等")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称, tool0 或 link6等")
 
