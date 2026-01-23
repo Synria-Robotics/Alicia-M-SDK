@@ -42,7 +42,7 @@ def main(args):
     robot = alicia_m_sdk.create_robot(
         port=args.port,
         gripper_type=args.gripper_type,
-        robot_version=args.robot_version,
+        version=args.version,
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim=args.control_aim,
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     # Serial port settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪型号 (默认: 100mm)")
-    parser.add_argument('--robot_version', type=str, default="v1_1", help="机械臂版本")
+    parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称 (默认: tool0)")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],

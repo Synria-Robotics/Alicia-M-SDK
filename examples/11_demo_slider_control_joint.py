@@ -376,7 +376,7 @@ def main(args):
     robot = alicia_m_sdk.create_robot(
         port=args.port,
         baudrate=args.baudrate,
-        robot_version=args.robot_version,
+        version=args.version,
         gripper_type=args.gripper_type,
         debug_mode=args.debug,
         control_aim=args.control_aim,
@@ -441,7 +441,7 @@ if __name__ == "__main__":
                         help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
     parser.add_argument('--baudrate', type=int, default=1000000,  
                         help="波特率 (默认: 1000000)")
-    parser.add_argument('--robot_version', type=str, default="v1_1",  
+    parser.add_argument('--version', type=str, default="v1_1",  
                         help="机器人版本 (默认: v1_1)")
     parser.add_argument('--gripper_type', type=str, default="100mm",  
                         help="夹爪型号 (默认: 100mm)")

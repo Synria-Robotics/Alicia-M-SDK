@@ -84,8 +84,8 @@ def _get_gripper_type_from_json() -> str:
 
 def create_robot(
     port: str = "",
-    version: str = "v1_0",
-    variant: str = "follower",
+    version: str = "v1_1",
+    variant: str = None,
     model_format: str = "urdf",
     debug_mode: bool = False,
     auto_connect: bool = True,
@@ -104,7 +104,7 @@ def create_robot(
     Create robot instance.
 
     :param port: Serial port
-    :param version: Version name, e.g., "v1_0", "v1_1", etc.
+    :param version: Version name, e.g., "v1_1", "v1_1", etc.
     :param variant: Variant name, e.g., "gripper_50mm", "gripper_100mm", etc.
     :param model_format: Model format, 'urdf' or 'mjcf', default is 'urdf'
     :param debug_mode: Debug mode
@@ -124,11 +124,27 @@ def create_robot(
     effective_gripper_type = gripper_type if gripper_type is not None else _get_gripper_type_from_json()
     variant = variant if variant is not None else f"gripper_{effective_gripper_type}"
 
-    # Auto-infer from variant: if variant contains "leader", it's a teach arm
-    if variant is not None and "leader" in variant.lower():
-        control_aim_const = ServoDriver.AIM_TEACH
+    # Determine control_aim: prioritize user's input, then infer from variant
+    if control_aim is not None:
+        # User explicitly specified control_aim
+        if isinstance(control_aim, str):
+            control_aim_lower = control_aim.lower()
+            aim_map = {
+                'teach': ServoDriver.AIM_TEACH,
+                'operation': ServoDriver.AIM_OPERATION,
+            }
+            control_aim_const = aim_map.get(control_aim_lower)
+            if control_aim_const is None:
+                raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: {list(aim_map.keys())}")
+        else:
+            # Backward compatibility: accept constant directly
+            control_aim_const = control_aim
     else:
-        control_aim_const = ServoDriver.AIM_OPERATION
+        # Auto-infer from variant: if variant contains "leader", it's a teach arm
+        if variant is not None and "leader" in variant.lower():
+            control_aim_const = ServoDriver.AIM_TEACH
+        else:
+            control_aim_const = ServoDriver.AIM_OPERATION
 
     servo_driver = ServoDriver(
         port=port,

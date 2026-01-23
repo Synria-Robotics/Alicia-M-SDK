@@ -115,7 +115,7 @@ python 00_demo_read_version.py
 python 00_demo_read_version.py --port /dev/ttyUSB0
 
 # 指定机械臂版本和夹爪型号
-python 00_demo_read_version.py --robot_version v1_0 --gripper_type 100mm
+python 00_demo_read_version.py --robot_version v1_1 --gripper_type 100mm
 ```
 
 **适用场景：**
@@ -505,7 +505,7 @@ SDK支持多种控制模式，不同demo使用不同模式：
 - `--baudrate`: 波特率（默认：1000000）
 
 ### 机器人参数
-- `--robot_version`: 机器人版本（默认：v1_0）
+- `--robot_version`: 机器人版本（默认：v1_1）
 - `--gripper_type`: 夹爪型号（默认：100mm）
 
 ### 运动参数
