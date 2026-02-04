@@ -38,7 +38,6 @@ def main(args):
     # Initialize robot instance
     robot = alicia_m_sdk.create_robot(
         port=args.port,
-        gripper_type=args.gripper_type,
         version=args.version,
         base_link=args.base_link,
         end_link=args.end_link,
@@ -80,8 +79,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="机械臂运动控制示例")
     
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
-    parser.add_argument('--gripper_type', type=str, default="100mm", help="夹爪类型 (v1_1版本会被忽略，自动使用follower变体)")
-    parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本")
+    parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (可选: v1_0, v1_1，默认: v1_1)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],

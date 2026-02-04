@@ -12,13 +12,11 @@ from alicia_m_sdk import create_robot
 robot = create_robot(
     port="",                    # 串口（留空自动查找）
     baudrate=1000000,           # 波特率
-    robot_version="v5_6",       # 机械臂结构版本
-    gripper_type="50mm",        # 夹爪类型
-    firmware_version=None,      # 固件版本（自动检测）
+    version="v1_1",             # 机械臂版本 (可选: v1_0, v1_1)
+    variant=None,               # 变体名称 (默认自动选择 follower)
     debug_mode=False,           # 调试模式
-    speed_deg_s=20.0,          # 默认速度（度/秒），建议使用默认值
-    control_aim=None,          # 控制目标（None则使用默认AIM_TEACH）
-    control_mode=None          # 控制模式（None则使用默认PATTERN_PV）
+    control_aim=None,           # 控制目标（None则使用默认AIM_OPERATION）
+    control_mode=None           # 控制模式（None则使用默认PATTERN_PV）
 )
 ```
 

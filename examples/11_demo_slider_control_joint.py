@@ -377,7 +377,6 @@ def main(args):
         port=args.port,
         baudrate=args.baudrate,
         version=args.version,
-        gripper_type=args.gripper_type,
         debug_mode=args.debug,
         control_aim=args.control_aim,
         control_mode=args.control_mode
@@ -442,9 +441,7 @@ if __name__ == "__main__":
     parser.add_argument('--baudrate', type=int, default=1000000,  
                         help="波特率 (默认: 1000000)")
     parser.add_argument('--version', type=str, default="v1_1",  
-                        help="机器人版本 (默认: v1_1)")
-    parser.add_argument('--gripper_type', type=str, default="100mm",  
-                        help="夹爪型号 (v1_1版本会被忽略，自动使用follower变体)")
+                        help="机器人版本 (可选: v1_0, v1_1，默认: v1_1)")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],

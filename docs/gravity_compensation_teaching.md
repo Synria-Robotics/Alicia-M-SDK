@@ -66,7 +66,7 @@ robot.connect()
 # 创建示教对象
 teaching = GravityCompensationTeaching(
     controller=robot,
-    urdf_path='Alicia_M_v1_1_gripper_100mm.urdf',
+    urdf_path='Alicia_M_v1_1_follower.urdf',
     sample_hz=200.0,
     torque_scale=1.0
 )
@@ -96,7 +96,7 @@ robot.disconnect()
 
 **交互式流程（最简单）：**
 ```python
-teaching = GravityCompensationTeaching(robot, 'Alicia_M_v1_1_gripper_100mm.urdf')
+teaching = GravityCompensationTeaching(robot, 'Alicia_M_v1_1_follower.urdf')
 teaching.run_interactive("my_motion")
 ```
 
@@ -110,7 +110,7 @@ teaching.run_interactive("my_motion")
 |------|--------|------|
 | `sample_hz` | 200.0 | 采样频率（Hz），范围50-500 |
 | `torque_scale` | 1.0 | 扭矩缩放系数，范围0.5-1.5 |
-| `urdf_path` | `Alicia_M_v1_1_gripper_100mm.urdf` | URDF文件路径 |
+| `urdf_path` | `Alicia_M_v1_1_follower.urdf` | URDF文件路径 |
 
 **torque_scale 调整：**
 - `< 1.0`: 补偿不足，机械臂下垂 → 增大值
@@ -196,7 +196,7 @@ executor.execute(..., playback_hz=meta['sample_hz'])
 ```python
 # 使用绝对路径
 import os
-urdf_path = os.path.join(os.path.dirname(__file__), 'Alicia_M_v1_1_gripper_100mm.urdf')
+urdf_path = os.path.join(os.path.dirname(__file__), 'Alicia_M_v1_1_follower.urdf')
 ```
 
 ---
