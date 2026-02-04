@@ -75,6 +75,17 @@ class SparkVisBridge:
         except Exception as e:
             print(f"[Log] 初始化关节目标值失败: {e}")
 
+        # 缓存上一次的夹爪值，防止UI不发送夹爪时默认闭合
+        self.last_gripper_value = 50.0  # 默认半开状态 (50%)
+        try:
+            # 尝试初始化为当前机器人夹爪状态
+            current_gripper = self.robot.get_robot_state("gripper")
+            if current_gripper is not None:
+                self.last_gripper_value = float(current_gripper)
+                print(f"[Log] 初始化夹爪缓存值: {self.last_gripper_value:.1f}%")
+        except Exception as e:
+            print(f"[Log] 初始化夹爪值失败，使用默认值50%: {e}")
+
         # CSV logging
         self.output_file = output_file
         self.file_handle = None
@@ -173,32 +184,29 @@ class SparkVisBridge:
             # 更新缓存
             self.last_joint_targets = joints_rad
             
-            gripper_val = joint_values.get('gripper', 0.0)
+            # 使用缓存的夹爪值作为默认值，而不是0.0（避免默认闭合）
+            gripper_val = joint_values.get('gripper', self.last_gripper_value)
+            
+            # 如果UI发送了夹爪值，更新缓存
+            if 'gripper' in joint_values:
+                self.last_gripper_value = float(gripper_val)
 
-            # 🚀 关键优化: 使用 set_joint_and_gripper_combined() 
+            # 🚀 关键优化: 使用 set_joint_and_gripper() 
             # 这个方法内部已经针对高频控制优化，将关节和夹爪控制合并为一个串口命令
             # 避免了两次串口通信的开销
             
-            # 如果夹爪值在消息中，使用合并命令
-            if 'gripper' in joint_values:
-                pct = max(0.0, min(1.0, float(gripper_val)))
-                gripper_angle = pct * 100.0
-                
-                # 合并关节和夹爪命令（单次串口通信）
-                self.robot.servo_driver.set_joint_and_gripper(
-                    joint_angles=joints_rad,
-                    gripper_value=gripper_angle,
-                    speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 500,  # 默认 500 deg/s
-                )
-            else:
-                # 仅关节控制
-                # 注意: target_joints 是位置(rad)，speed_deg_s 是速度(deg/s)，两者单位独立
-                self.robot.set_robot_state(
-                    target_joints=joints_rad,        # 关节目标位置(弧度)
-                    joint_format='rad',              # 位置单位: 弧度
-                    speed_deg_s=500,                 # 运动速度: 度/秒
-                    wait_for_completion=False,
-                )
+            # 统一使用合并命令（无论UI是否发送gripper）
+            # 如果UI发送了gripper：使用UI值并更新缓存
+            # 如果UI未发送gripper：使用缓存值保持当前状态
+            pct = max(0.0, min(1.0, float(gripper_val)))
+            gripper_angle = pct * 100.0
+            
+            # 合并关节和夹爪命令（单次串口通信）
+            self.robot.servo_driver.set_joint_and_gripper(
+                joint_angles=joints_rad,
+                gripper_value=gripper_angle,
+                speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 500,  # 默认 500 deg/s
+            )
 
             # 记录 UI 命令到 CSV (优化: 减少 flush 频率)
             if self.file_handle and self.log_source in ("ui", "both"):

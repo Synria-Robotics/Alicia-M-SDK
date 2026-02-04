@@ -46,7 +46,7 @@ def main(args):
         port=args.port,
         baudrate=args.baudrate,
         version=args.version,
-        control_aim="teach",
+        control_aim="operation",
         control_mode="pv"
     )
 
