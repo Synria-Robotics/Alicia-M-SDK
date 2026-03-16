@@ -78,11 +78,9 @@ class ServoDriver:
     INFO_COMMAND_MAP: Dict[str, List[int]] = {
         # Get firmware version查询固件版（通用指令，不受control_aim影响）
         "version": [0xAA, 0x01, 0x7E, 0x01, 0xFE, 0x79, 0xFF],
-        # Set current position as zero将当前姿态设为零位（通用指令）
-        "zero_cali": [0xAA, 0x03, 0x00, 0x01, 0xFE, 0xA8, 0xFF], 
-        # Torque on/off使能/关闭力矩（通用指令）
-        "torque_on": [0xAA, 0x05, 0x00, 0x01, 0x01, 0xF9, 0xFF],
-        "torque_off": [0xAA, 0x05, 0x00, 0x01, 0x00, 0x6F, 0xFF],
+        # DEPRECATED: zero_cali/torque_on/torque_off entries removed.
+        # Use enable_torque() / disable_torque() / set_zero_position() methods instead,
+        # which dynamically build correct frames based on control_aim.
         # Joint information acquisition请求关节信息
         # 注意：此处为模板，实际使用时需根据 control_aim 动态构建
         # "joint": [0xAA, 0x06, 0x02, 0x02,0x00, 0x01, 0xCE, 0xFF],  # 旧的硬编码操作臂指令
@@ -364,6 +362,90 @@ class ServoDriver:
         # 注意：断开连接时不重置 _mit_mode_initialized 标志
         # 因为MIT参数配置保存在STM32内存中，只要不断电就一直有效
         # self._mit_mode_initialized = False  # 注释掉，避免重复初始化
+    
+    # ==================== Torque & Calibration Commands ====================
+    
+    def enable_torque(self, control_aim: int = None) -> bool:
+        """Enable torque (power on all motors) for the specified body part.
+        
+        Uses Instruction ID 0x09 (enable/disable) with write flag.
+        
+        :param control_aim: Target body part (AIM_TEACH=0x01, AIM_OPERATION=0x02).
+                           Defaults to instance's default_control_aim.
+        :return: True if command sent successfully
+        """
+        if control_aim is None:
+            control_aim = self.default_control_aim
+        
+        # Instruction 0x09: func_code = 0x80 (write) | control_aim; data = 0x01 (enable)
+        func_code = 0x80 | control_aim
+        frame = [0xAA, 0x09, func_code, 0x01, 0x01, 0x00, 0xFF]
+        frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
+        
+        if self.debug_mode:
+            logger.info(f"[enable_torque] aim=0x{control_aim:02X}: {' '.join(f'{b:02X}' for b in frame)}")
+        
+        return self._send_critical_command(frame)
+
+    def disable_torque(self, control_aim: int = None) -> bool:
+        """Disable torque (power off all motors) for the specified body part.
+        
+        Uses Instruction ID 0x09 (enable/disable) with write flag.
+        
+        :param control_aim: Target body part (AIM_TEACH=0x01, AIM_OPERATION=0x02).
+                           Defaults to instance's default_control_aim.
+        :return: True if command sent successfully
+        """
+        if control_aim is None:
+            control_aim = self.default_control_aim
+        
+        # Instruction 0x09: func_code = 0x80 (write) | control_aim; data = 0x00 (disable)
+        func_code = 0x80 | control_aim
+        frame = [0xAA, 0x09, func_code, 0x01, 0x00, 0x00, 0xFF]
+        frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
+        
+        if self.debug_mode:
+            logger.info(f"[disable_torque] aim=0x{control_aim:02X}: {' '.join(f'{b:02X}' for b in frame)}")
+        
+        return self._send_critical_command(frame)
+
+    def set_zero_position(self, control_aim: int = None) -> bool:
+        """Set current position as new zero (home) position.
+        
+        WARNING: This permanently changes the zero position and cannot be restored
+        to factory zero without a calibration tool.
+        
+        :param control_aim: Target body part (AIM_TEACH=0x01, AIM_OPERATION=0x02).
+                           Defaults to instance's default_control_aim.
+        :return: True if command sent successfully
+        """
+        if control_aim is None:
+            control_aim = self.default_control_aim
+        
+        frame = [0xAA, 0x03, control_aim, 0x02, 0x00, 0x07, 0x00, 0xFF]
+        frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
+        
+        if self.debug_mode:
+            logger.info(f"[set_zero_position] aim=0x{control_aim:02X}: {' '.join(f'{b:02X}' for b in frame)}")
+        
+        return self._send_critical_command(frame)
+    
+    def _send_critical_command(self, frame: List[int]) -> bool:
+        """Send a critical command frame (torque control, zero calibration, etc.).
+        
+        :param frame: Command frame as list of ints
+        :return: True if sent successfully
+        """
+        if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
+            response = self.comm_manager.send_command(
+                data=frame,
+                priority=CommandPriority.CRITICAL,
+                wait=True,
+                timeout=0.5
+            )
+            return response is not None
+        else:
+            return self.serial_comm.send_data(frame)
     
     def start_update_thread(self):
         """Start state update thread / communication manager"""
