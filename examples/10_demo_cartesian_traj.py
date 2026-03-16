@@ -17,12 +17,16 @@
 # Author: Synria Robotics Team
 # Website: https://synriarobotics.ai
 
-"""Cartesian Spline Trajectory Planning with Inverse Kinematics
+"""Cartesian Spline Trajectory Planning with Inverse Kinematics (MoveIt-style Plan → Execute)
 
 This demo demonstrates:
-1. Generating a smooth spline trajectory in Cartesian space through multiple waypoints
-2. Solving inverse kinematics for all poses in the trajectory (batch IK)
-3. Executing the trajectory on the robot
+1. Defining Cartesian waypoints (record, random, or load from file)
+2. Planning a smooth spline trajectory + batch IK solving
+3. Reviewing the plan (stats + optional plot)
+4. Executing the trajectory on the robot
+
+Per-segment control: duration and interpolation points are specified per segment
+(between two consecutive waypoints), then summed for the global Cartesian spline.
 """
 
 import numpy as np
@@ -49,7 +53,7 @@ from alicia_m_sdk.utils.trajectory_utils import (
 
 def main(args):
     """Main function for Cartesian space trajectory planning and execution."""
-    # [0] Initialize robot connection
+    # ── [0] Connect ──────────────────────────────────────────────
     beauty_print("Cartesian Spline Planning with IK Batch Solver", type="module")
     
     robot = alicia_m_sdk.create_robot(
@@ -63,10 +67,9 @@ def main(args):
     rc.set_backend(args.backend, device=args.device)
     robot_model = robot.robot_model
 
-    # [1] Handle waypoint recording or loading/generation
+    # ── [1] Waypoints ────────────────────────────────────────────
     waypoints, _ = handle_waypoint_recording(robot, args, waypoint_type='cartesian')
     if waypoints is None:
-        # Load or generate waypoints
         try:
             waypoints = load_or_generate_cartesian_waypoints(robot_model, args)
         except Exception as e:
@@ -75,25 +78,32 @@ def main(args):
             return
     
     display_cartesian_waypoints(waypoints)
+    n_segments = max(len(waypoints) - 1, 1)
 
-    # [2] Generate Cartesian trajectory
-    beauty_print("[2] Generating Spline Trajectory", type="module", centered=False)
-    
+    # ── [2] Plan (Cartesian spline + IK) ─────────────────────────
+    beauty_print("[2] Planning Cartesian Spline Trajectory", type="module", centered=False)
+
+    total_duration = args.duration_per_segment * n_segments
+    total_points = args.num_points_per_segment * n_segments
+    print(f"  Segments       : {n_segments}")
+    print(f"  Per-segment    : {args.duration_per_segment:.1f}s, {args.num_points_per_segment} pts")
+    print(f"  Total planned  : {total_duration:.1f}s, {total_points} pts")
+    print(f"  Cmd frequency  : {total_points / total_duration:.0f} Hz")
+
     trajectory = robot.plan_cartesian_trajectory(
         waypoints=waypoints,
-        duration=args.duration,
-        num_points=args.num_points,
-        backend='numpy'  # Use numpy for smooth cubic spline interpolation
+        duration=total_duration,
+        num_points=total_points,
+        backend='numpy'
     )
 
     display_cartesian_trajectory_stats(trajectory)
     verify_cartesian_waypoints(trajectory, waypoints)
 
-    # [3] Extract poses and solve IK
+    # ── [3] Solve IK ────────────────────────────────────────────
     if 'poses' in trajectory:
         target_poses = trajectory['poses']
     else:
-        # Build poses from positions and orientations
         positions = trajectory['positions']
         orientations = trajectory['orientations']
         target_poses = np.array([make_transform(orientations[i], positions[i]) 
@@ -101,7 +111,6 @@ def main(args):
 
     beauty_print("[3] Solving Inverse Kinematics", type="module", centered=False)
     
-    # Get initial joint configuration
     q0 = robot.get_robot_state("joint") if args.init_strategy == 'current' else None
     actual_strategy = 'random' if (q0 is not None and args.init_strategy == 'current') else args.init_strategy
     
@@ -110,7 +119,6 @@ def main(args):
         print(f"  Current joints (rad): {beauty_print_array(q0)}")
         print(f"  Current joints (deg): {beauty_print_array(np.rad2deg(q0))}")
 
-    # Solve IK for all poses
     ik_result = robot.solve_ik_for_trajectory(
         target_poses=target_poses,
         q_init=q0,
@@ -127,21 +135,21 @@ def main(args):
     )
 
     display_ik_results(ik_result, trajectory)
-    beauty_print("✓ Cartesian spline planning with IK batch solver completed!", type="success")
 
     joint_angles = ik_result['joint_angles']
     ik_results = ik_result['ik_results']
     success_rate = ik_result['success_rate']
 
-    # [4] Plot trajectory (optional)
+    # ── [4] Review (optional plot) ───────────────────────────────
     if args.plot:
         beauty_print("[4] Plotting Trajectory", type="module", centered=False)
         plot_trajectory(trajectory, waypoints, plot_type='cartesian', 
                        joint_angles=joint_angles, ik_results=ik_results)
     
-    input("\nPress Enter to start trajectory execution...")
+    beauty_print("Plan complete. Review the trajectory above.", type="success")
+    input("\nPress Enter to execute on robot (Ctrl+C to cancel)...")
 
-    # [5] Execute trajectory
+    # ── [5] Execute ──────────────────────────────────────────────
     beauty_print("[5] Executing Trajectory on Robot", type="module", centered=False)
     
     executor = CartesianTrajectoryExecutor(
@@ -181,7 +189,16 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Cartesian Spline Planning with IK Batch Solver')
+    parser = argparse.ArgumentParser(
+        description='Cartesian Spline Planning with IK Batch Solver (MoveIt-style)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  # Per-segment control (default): 2 waypoints, 5s per segment, 100 pts per segment
+  python 10_demo_cartesian_traj.py --no-record
+
+  # Custom per-segment timing
+  python 10_demo_cartesian_traj.py --no-record --duration-per-segment 3.0 --num-points-per-segment 150
+""")
     
     # Robot connection
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
@@ -207,9 +224,11 @@ if __name__ == '__main__':
     parser.add_argument('--num-waypoints', type=int, default=2, help='Number of waypoints for random generation')
     parser.add_argument('--workspace-scale', type=float, default=0.6, help='Workspace scale (0.0-1.0)')
     
-    # Trajectory planning
-    parser.add_argument('--duration', type=float, default=1.0, help='Trajectory duration (seconds)')
-    parser.add_argument('--num-points', type=int, default=10, help='Number of trajectory points')
+    # Trajectory planning (per-segment)
+    parser.add_argument('--duration-per-segment', type=float, default=5.0,
+                        help='Duration per segment in seconds (default: 5.0)')
+    parser.add_argument('--num-points-per-segment', type=int, default=100,
+                        help='Interpolation points per segment (default: 100)')
     
     # IK settings
     parser.add_argument('--method', type=str, default='dls', choices=['dls', 'pinv', 'transpose'], help='IK method')
@@ -217,14 +236,14 @@ if __name__ == '__main__':
     parser.add_argument('--pos-tol', type=float, default=1e-2, help='Position tolerance (m)')
     parser.add_argument('--ori-tol', type=float, default=1e-2, help='Orientation tolerance (rad)')
     parser.add_argument('--init-scale', type=float, default=0.6, help='Initial guess scale (0.0-1.0)')
-    parser.add_argument('--num-inits', type=int, default=5, help='Number of initial guesses')
+    parser.add_argument('--num-inits', type=int, default=2, help='Number of initial guesses')
     parser.add_argument('--init-strategy', type=str, default='current',
                         choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform', 'current'],
                         help='Initial guess strategy')
     parser.add_argument('--seed', type=int, default=666, help='Random seed')
     
     # Execution
-    parser.add_argument('--speed_deg_s', type=int, default=20, help="关节运动速度 (单位: 度/秒，默认: 20，范围: 10-400度/秒)")
+    parser.add_argument('--speed_deg_s', type=int, default=100, help="关节运动速度 (单位: 度/秒，默认: 100，范围: 10-400度/秒)")
     parser.add_argument('--timeout', type=float, default=10.0, help='Timeout per command (seconds)')
     
     # Other

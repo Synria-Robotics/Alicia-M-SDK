@@ -1328,8 +1328,7 @@ class SynriaRobotAPI:
                     logger.info(f"✓ 已到达目标位置 (耗时: {elapsed:.2f}s, 最大误差: {max_error:.2f}°)")
                     return True
             
-            # 短暂休眠，避免 CPU 空转，同时等待后台线程更新数据
-            # time.sleep(0.1)
+            time.sleep(0.02)
 
         # 超时，打印当前状态
         current_joints = self.get_robot_state("joint")
