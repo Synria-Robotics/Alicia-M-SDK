@@ -165,6 +165,7 @@ def create_robot(
                 'mit_position': ServoDriver.PATTERN_MIT_POSITION,
                 'mit_speed': ServoDriver.PATTERN_MIT_SPEED,
                 'mit_torque': ServoDriver.PATTERN_MIT_TORQUE,
+                'mit_full': ServoDriver.PATTERN_MIT_FULL,
             }
             control_mode_const = mode_map.get(control_mode_lower)
             if control_mode_const is None:

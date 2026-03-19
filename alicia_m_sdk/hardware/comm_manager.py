@@ -99,23 +99,23 @@ class CommunicationManager:
         self.data_parser = data_parser
         self.response_timeout = response_timeout
         self.debug_mode = debug_mode
-        
+
         # 命令队列（优先级队列）
         self._cmd_queue = queue.PriorityQueue()
-        
+
         # 命令ID计数器
         self._cmd_id_counter = 0
         self._cmd_id_lock = threading.Lock()
-        
+
         # 等待响应的命令映射：{cmd_id: CommandItem}
         self._pending_responses: Dict[int, CommandItem] = {}
         self._pending_lock = threading.Lock()
-        
+
         # 通信线程控制
         self._comm_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._running = False
-        
+
         # 状态统计
         self._stats = {
             "commands_sent": 0,
@@ -125,16 +125,16 @@ class CommunicationManager:
             "queue_peak_size": 0,
         }
         self._stats_lock = threading.Lock()
-        
+
         # 后台查询控制
         self._auto_query_enabled = False
-        self._auto_query_interval = 0.02  # 50Hz 默认查询频率
+        self._auto_query_interval = 0.01  # 100Hz 默认查询频率
         self._last_query_time = 0.0
         self._query_builder: Optional[Callable[[], List[int]]] = None
-        
+
         # 用户命令时间戳（用于智能避让）
         self._last_user_cmd_time = 0.0
-        self._user_cmd_cooldown = 0.01  # 用户命令后的冷却时间
+        self._user_cmd_cooldown = 0.002  # 用户命令后的冷却时间
     
     def start(self) -> bool:
         """启动通信管理线程"""
@@ -268,7 +268,7 @@ class CommunicationManager:
         
         return None
     
-    def send_control_command(self, data: List[int], wait: bool = True, timeout: float = 0.05) -> Optional[List[int]]:
+    def send_control_command(self, data: List[int], wait: bool = True, timeout: float = 0.005) -> Optional[List[int]]:
         """
         发送控制命令（高优先级快捷方法）
         
@@ -323,52 +323,55 @@ class CommunicationManager:
     def _communication_loop(self):
         """
         通信线程主循环
-        
+
         职责：
         1. 从队列取命令（优先级排序）
         2. 发送命令到串口
-        3. 等待并读取响应
+        3. 等待并读取响应（仅对需要响应的命令）
         4. 分发响应给等待者
         5. 在空闲时执行自动查询
         """
         logger.info("Communication loop started")
-        
+
         while not self._stop_event.is_set():
             try:
                 cmd_item = None
-                
-                # 尝试从队列获取命令（非阻塞，短超时）
+
+                # 尝试从队列获取命令（短超时避免忙等待，同时保持低延迟）
                 try:
-                    cmd_item = self._cmd_queue.get(timeout=0.001)
+                    cmd_item = self._cmd_queue.get(timeout=0.0005)
                 except queue.Empty:
                     # 队列为空，检查是否需要自动查询
                     self._handle_auto_query()
                     continue
-                
+
                 if cmd_item is None:
                     continue
-                
+
                 # 发送命令
                 send_success = self._send_and_receive(cmd_item)
-                
+
                 with self._stats_lock:
                     self._stats["commands_sent"] += 1
                     if send_success:
                         self._stats["commands_success"] += 1
-                
+
             except Exception as e:
                 logger.error(f"Communication loop exception: {e}")
                 time.sleep(0.01)  # 避免错误循环
-        
+
         logger.info("Communication loop stopped")
     
     def _send_and_receive(self, cmd_item: CommandItem) -> bool:
         """
         发送命令并等待响应
-        
+
+        对于不需要响应的命令（fire-and-forget，如高频控制命令），
+        发送后仅做一次非阻塞读取即返回，不阻塞通信线程。
+
         Args:
             cmd_item: 命令项
-            
+
         Returns:
             是否成功
         """
@@ -377,43 +380,56 @@ class CommunicationManager:
             logger.warning(f"Failed to send command {cmd_item.cmd_id}")
             self._notify_response(cmd_item.cmd_id, None)
             return False
-        
+
         if self.debug_mode:
             hex_str = ' '.join(f'{b:02X}' for b in cmd_item.data)
             logger.debug(f"[TX] cmd_id={cmd_item.cmd_id} priority={cmd_item.priority} data={hex_str}")
-        
-        # 等待并读取响应
+
+        # 对于不需要响应的命令（高频控制），排空所有已到达的帧后立即返回
+        if not cmd_item.need_response:
+            # 排空缓冲区中所有已到达的帧，避免积压导致CRC错误
+            for _ in range(10):  # 最多排空10帧，防止无限循环
+                frame = self.serial_comm.read_frame()
+                if frame is None:
+                    break
+                if frame == 9999999:
+                    break
+                with self._stats_lock:
+                    self._stats["frames_received"] += 1
+                self.data_parser.parse_frame(frame)
+            return True
+
+        # 需要响应的命令：等待并读取响应
         timeout_start = time.perf_counter()
         response = None
-        
+
         while (time.perf_counter() - timeout_start) < cmd_item.timeout:
             frame = self.serial_comm.read_frame()
-            
+
             if frame is None:
                 time.sleep(0.0001)  # 0.1ms 短暂休眠
                 continue
-            
+
             if frame == 9999999:
                 logger.error("Severe serial communication error")
                 break
-            
+
             # 收到响应帧
             with self._stats_lock:
                 self._stats["frames_received"] += 1
-            
+
             if self.debug_mode:
                 hex_str = ' '.join(f'{b:02X}' for b in frame)
                 logger.debug(f"[RX] cmd_id={cmd_item.cmd_id} data={hex_str}")
-            
+
             # 解析响应
             self.data_parser.parse_frame(frame)
             response = frame
             break
-        
+
         # 通知等待者
-        if cmd_item.need_response:
-            self._notify_response(cmd_item.cmd_id, response)
-        
+        self._notify_response(cmd_item.cmd_id, response)
+
         return response is not None
     
     def _notify_response(self, cmd_id: int, response: Optional[List[int]]):
@@ -437,29 +453,42 @@ class CommunicationManager:
     def _handle_auto_query(self):
         """处理自动后台查询"""
         if not self._auto_query_enabled or self._query_builder is None:
+            # 即使不做查询，也排空缓冲区中的残留帧
+            for _ in range(5):
+                frame = self.serial_comm.read_frame()
+                if frame is None:
+                    break
+                if frame == 9999999:
+                    break
+                with self._stats_lock:
+                    self._stats["frames_received"] += 1
+                self.data_parser.parse_frame(frame)
             time.sleep(0.001)  # 避免忙等待
             return
-        
+
         current_time = time.perf_counter()
-        
+
         # 智能避让：如果用户刚发送命令，暂缓查询
         time_since_user_cmd = current_time - self._last_user_cmd_time
         if time_since_user_cmd < self._user_cmd_cooldown:
             return
-        
+
         # 检查查询间隔
         if (current_time - self._last_query_time) < self._auto_query_interval:
             return
-        
+
         # 构建并发送查询命令
         try:
             query_data = self._query_builder()
             if query_data:
                 # 直接发送，不通过队列（避免优先级反转）
                 if self.serial_comm.send_data(query_data):
-                    # 读取响应
+                    # 读取响应（短超时），如果有控制命令到达则立即中断
                     timeout_start = time.perf_counter()
-                    while (time.perf_counter() - timeout_start) < 0.03:
+                    while (time.perf_counter() - timeout_start) < 0.003:
+                        # 如果队列中有控制命令，立即让出通信线程
+                        if not self._cmd_queue.empty():
+                            break
                         frame = self.serial_comm.read_frame()
                         if frame and frame != 9999999:
                             self.data_parser.parse_frame(frame)
@@ -467,7 +496,7 @@ class CommunicationManager:
                                 self._stats["frames_received"] += 1
                             break
                         time.sleep(0.0001)
-                
+
                 self._last_query_time = current_time
         except Exception as e:
             logger.error(f"Auto query error: {e}")

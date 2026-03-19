@@ -15,7 +15,10 @@ DEFAULT_LENGTH = 6
 
 class SerialComm:
     """Robot arm serial communication module"""
-    
+
+    # 缓存 CRC32 实例，避免每次计算都创建新对象
+    _crc_calculator = CRC32()
+
     PLATFORM_PRIORITIES = {
         "Darwin": ["cu.wchusbserial", "cu.SLAB_USBtoUART", "cu.usbserial", "cu.usbmodem", "ttyUSB", "COM"],
         "Linux": ["ttyUSB", "ttyACM", "ttyCH343USB", "ttyCH341USB", "cu.wchusbserial", 
@@ -214,11 +217,9 @@ class SerialComm:
             if self.serial_port.in_waiting == 0:
                 return None
 
-            # 3) 分批读取到内部接收缓冲 _rx_buffer
+            # 3) 读取所有可用数据到内部接收缓冲 _rx_buffer
             available_bytes = self.serial_port.in_waiting
-            max_read_size = 80
-            read_size = min(available_bytes, max_read_size)
-            self._rx_buffer += self.serial_port.read(read_size)
+            self._rx_buffer += self.serial_port.read(available_bytes)
 
             # 4) 基于协议的帧提取循环
             while len(self._rx_buffer) >= 6:
@@ -264,9 +265,20 @@ class SerialComm:
 
                     return list(candidate)
                 else:
-                    # 失败：打印原始帧内容并丢弃一个字节，继续同步
+                    # CRC失败：跳过当前0xAA，快速定位到下一个0xAA
                     logger.warning(f"CRC Error. Raw: {' '.join(f'{b:02X}' for b in candidate)}")
-                    self._rx_buffer.pop(0)
+                    # 在candidate内部寻找下一个0xAA（跳过第一个字节）
+                    next_aa = -1
+                    for i in range(1, len(candidate)):
+                        if candidate[i] == 0xAA:
+                            next_aa = i
+                            break
+                    if next_aa > 0:
+                        # 跳到candidate内部的下一个0xAA
+                        self._rx_buffer = self._rx_buffer[next_aa:]
+                    else:
+                        # candidate内无其他0xAA，丢弃整个candidate
+                        self._rx_buffer = self._rx_buffer[frame_length:]
 
             return None
 
@@ -293,8 +305,7 @@ class SerialComm:
         """
         Use CRC-32 and only use the last 8 bits by pycrc
         """
-        crc_calculator = CRC32()
-        crc = crc_calculator.calculate(bytes(data))
+        crc = self._crc_calculator.calculate(bytes(data))
         return crc & 0xFF
 
 

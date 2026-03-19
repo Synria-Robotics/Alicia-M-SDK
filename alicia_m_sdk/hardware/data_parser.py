@@ -978,7 +978,6 @@ class DataParser:
             radians *= self.joint_directions[joint_index]
             
         return radians
-        return x_min + (hex_value / max_val) * (x_max - x_min)
 
     
     def _value_to_radians(self, value: int) -> float:

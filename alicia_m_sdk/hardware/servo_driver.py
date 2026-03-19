@@ -56,6 +56,10 @@ class ServoDriver:
     
     # 兼容旧代码：PATTERN_MIT 默认为扭矩模式
     PATTERN_MIT = (0x02, 0x01)           # MIT模式-仅扭矩（默认），每电机2字节
+
+    # MIT全参数模式 - 发送全部5个参数，每电机10字节
+    # P(16bit) + V(12bit) + T(12bit) + Kp(16bit) + Kd(16bit)
+    PATTERN_MIT_FULL = (0x00, 0x05)
     
     # ==================== 数据类型标志 ====================
     DATA_FLAG_WRITE = 0x00         # 写入数据
@@ -160,7 +164,7 @@ class ServoDriver:
             self.comm_manager = CommunicationManager(
                 serial_comm=self.serial_comm,
                 data_parser=self.data_parser,
-                response_timeout=0.05,
+                response_timeout=0.005,
                 debug_mode=debug_mode
             )
         
@@ -302,54 +306,167 @@ class ServoDriver:
         logger.warning(f"[Auto-Detect] Failed to detect valid arm type, keeping default: 0x{self.default_control_aim:02X}")
         return self.default_control_aim
     
-    def initialize_mit_mode(self, repeat_times: int = 2) -> bool:
+    def switch_control_mode(self, target_mode: str = 'pv', control_aim: int = None) -> bool:
         """
-        初始化MIT控制模式。
-        在使用任何MIT系列控制模式(PATTERN_MIT_POSITION/SPEED/TORQUE)前必须调用。
-        
-        :param repeat_times: 重复发送初始化指令的次数(默认2次,确保固件接收)
+        切换固件控制模式 (MIT <-> PV)。
+
+        通过指令0x11设置电机参数addr=0x0B来切换模式。
+
+        :param target_mode: 'pv' 或 'mit'
+        :param control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂)。None使用实例默认值
+        :return: 是否成功切换
+        """
+        if control_aim is None:
+            control_aim = self.default_control_aim
+
+        mode_byte = 0x02 if target_mode == 'pv' else 0x01
+        mode_name = "PV" if target_mode == 'pv' else "MIT"
+
+        # 构建模式切换指令: AA 11 [func] 07 01 07 0B [mode] 00 00 00 [crc] FF
+        func_code = 0x80 | control_aim
+        frame = [0xAA, 0x11, func_code, 0x07, 0x01, 0x07, 0x0B, mode_byte, 0x00, 0x00, 0x00]
+        checksum = self.serial_comm.calculate_checksum(frame[1:])
+        frame.append(checksum)
+        frame.append(0xFF)
+
+        logger.info(f"Switching to {mode_name} mode (aim=0x{control_aim:02X})...")
+
+        # 发送多次确保固件接收
+        for attempt in range(5):
+            if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
+                resp = self.comm_manager.send_command(
+                    data=frame,
+                    priority=CommandPriority.CRITICAL,
+                    wait=True,
+                    timeout=0.1
+                )
+                if resp is not None:
+                    logger.info(f"✓ Switched to {mode_name} mode")
+                    return True
+            else:
+                success = self.serial_comm.send_data(frame)
+                if success:
+                    # 等待响应
+                    time.sleep(0.05)
+                    resp_frame = self.serial_comm.read_frame()
+                    if resp_frame is not None:
+                        logger.info(f"✓ Switched to {mode_name} mode")
+                        return True
+            time.sleep(0.05)
+
+        # 即使没收到确认，也认为发送成功（固件可能不回复确认）
+        logger.warning(f"No confirmation received, assuming {mode_name} mode switch succeeded")
+        return True
+
+    def _build_mit_init_frame(self, control_aim: int = None,
+                               kp_large: float = 50.0, kd_large: float = 2.0,
+                               kp_small: float = 20.0, kd_small: float = 1.0) -> list:
+        """
+        动态构建MIT初始化帧（全5参数: P+V+T+Kp+Kd），可指定control_aim。
+
+        :param control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂)
+        :param kp_large: 大关节(1-3)的位置环Kp (范围0~500)
+        :param kd_large: 大关节(1-3)的速度环Kd (范围0~5)
+        :param kp_small: 小关节(4-7)的位置环Kp (范围0~500)
+        :param kd_small: 小关节(4-7)的速度环Kd (范围0~5)
+        :return: 完整的MIT初始化帧
+        """
+        if control_aim is None:
+            control_aim = self.default_control_aim
+
+        func_code = 0x80 | control_aim
+
+        # 每电机10字节: P(16b) + V(12b stored in 16b) + T(12b stored in 16b) + Kp(16b) + Kd(16b)
+        # 初始值: P=0(中值0x7FFF), V=0(中值0x07FF), T=0(中值0x07FF)
+        pos_mid = 0x7FFF   # 0 rad
+        vel_mid = 0x07FF   # 0 rad/s (12-bit中值)
+        torque_mid = 0x07FF  # 0 N*m
+
+        # Kp/Kd编码: [0, 500] → [0, 65535], [0, 5] → [0, 65535]
+        kp_large_hw = int(kp_large / 500.0 * 65535)
+        kd_large_hw = int(kd_large / 5.0 * 65535)
+        kp_small_hw = int(kp_small / 500.0 * 65535)
+        kd_small_hw = int(kd_small / 5.0 * 65535)
+
+        def motor_data(kp_hw, kd_hw):
+            return [
+                pos_mid & 0xFF, (pos_mid >> 8) & 0xFF,
+                vel_mid & 0xFF, (vel_mid >> 8) & 0xFF,
+                torque_mid & 0xFF, (torque_mid >> 8) & 0xFF,
+                kp_hw & 0xFF, (kp_hw >> 8) & 0xFF,
+                kd_hw & 0xFF, (kd_hw >> 8) & 0xFF,
+            ]
+
+        # 7 motors × 10 bytes = 70 bytes data + 2 bytes prefix = 72 = 0x48
+        data_length = 2 + 7 * 10  # 72
+        frame = [0xAA, 0x06, func_code, data_length]
+        frame.append(0x00)  # prefix1: start_addr=0 (position)
+        frame.append(0x05)  # prefix2: offset=5 (P+V+T+Kp+Kd)
+
+        # Motors 1-3: 大关节
+        for _ in range(3):
+            frame.extend(motor_data(kp_large_hw, kd_large_hw))
+        # Motors 4-7: 小关节 + 夹爪
+        for _ in range(4):
+            frame.extend(motor_data(kp_small_hw, kd_small_hw))
+
+        # CRC + footer
+        checksum = self.serial_comm.calculate_checksum(frame[1:])
+        frame.append(checksum)
+        frame.append(0xFF)
+
+        return frame
+
+    def initialize_mit_mode(self, repeat_times: int = 2, control_aim: int = None,
+                            kp_large: float = 50.0, kd_large: float = 2.0,
+                            kp_small: float = 20.0, kd_small: float = 1.0) -> bool:
+        """
+        初始化MIT控制模式: 先切换固件到MIT模式，再发送Kp/Kd参数。
+
+        :param repeat_times: 重复发送Kp/Kd配置指令的次数(默认2次)
+        :param control_aim: 控制目标。None使用实例默认值
+        :param kp_large: 大关节(1-3) Kp (0~500, 默认50)
+        :param kd_large: 大关节(1-3) Kd (0~5, 默认2.0)
+        :param kp_small: 小关节(4-7) Kp (0~500, 默认20)
+        :param kd_small: 小关节(4-7) Kd (0~5, 默认1.0)
         :return: 是否成功初始化
         """
-        if self._mit_mode_initialized:
-            if self.debug_mode:
-                logger.debug("MIT mode already initialized, skipping")
-            return True
-        
-        if not self.serial_comm.serial_port or not self.serial_comm.serial_port.is_open:
-            logger.error("Serial port not connected, cannot initialize MIT mode")
-            return False
-        
+        if control_aim is None:
+            control_aim = self.default_control_aim
+
         try:
-            if self.debug_mode:
-                logger.info(f"Initializing MIT control mode (sending {repeat_times} times)...")
-            
+            # 步骤1: 切换固件到MIT模式
+            logger.info("Step 1: Switching firmware to MIT mode...")
+            self.switch_control_mode('mit', control_aim=control_aim)
+            time.sleep(0.1)
+
+            # 步骤2: 发送Kp/Kd参数配置
+            logger.info(f"Step 2: Sending MIT Kp/Kd config (Kp_large={kp_large}, Kd_large={kd_large}, "
+                       f"Kp_small={kp_small}, Kd_small={kd_small})...")
+
+            mit_init_frame = self._build_mit_init_frame(
+                control_aim=control_aim,
+                kp_large=kp_large, kd_large=kd_large,
+                kp_small=kp_small, kd_small=kd_small
+            )
+
             for i in range(repeat_times):
-                # 根据模式发送 MIT 初始化指令
                 if self.use_comm_manager and self.comm_manager and self.comm_manager.is_running():
-                    # 使用通信管理器发送（高优先级关键命令）
                     self.comm_manager.send_command(
-                        data=list(self.MIT_INIT_COMMAND),
+                        data=mit_init_frame,
                         priority=CommandPriority.CRITICAL,
                         wait=True,
                         timeout=0.1
                     )
                 else:
-                    # 传统模式：直接写入
-                    self.serial_comm.serial_port.write(self.MIT_INIT_COMMAND)
-                
-                if self.debug_mode:
-                    logger.debug(f"  MIT init command sent ({i+1}/{repeat_times})")
-                time.sleep(0.02)  # 20ms间隔
-            
-            # 等待固件处理完成
+                    self.serial_comm.send_data(mit_init_frame)
+                time.sleep(0.02)
+
             time.sleep(0.1)
-            
             self._mit_mode_initialized = True
-            if self.debug_mode:
-                logger.info("✓ MIT mode initialization complete")
-            
+            logger.info("✓ MIT mode initialization complete")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize MIT mode: {e}")
             return False
@@ -551,9 +668,9 @@ class ServoDriver:
             try:
                 # Smart coordination: Check if user is sending commands frequently
                 time_since_last_user_cmd = time.perf_counter() - self._last_user_command_time
-                
-                # If user sent command very recently (< 50ms), skip this query to avoid collision
-                if time_since_last_user_cmd < 0.05:
+
+                # If user sent command very recently (< 5ms), skip this query to avoid collision
+                if time_since_last_user_cmd < 0.005:
                     time.sleep(self.thread_update_interval)
                     continue
                 
@@ -769,7 +886,7 @@ class ServoDriver:
         Args:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
             gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
-            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-10, +10] rad/s).
+            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-50, +50] rad/s).
                         可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
                       可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
@@ -792,7 +909,8 @@ class ServoDriver:
             self.PATTERN_MIT,
             self.PATTERN_MIT_POSITION,
             self.PATTERN_MIT_SPEED,
-            self.PATTERN_MIT_TORQUE
+            self.PATTERN_MIT_TORQUE,
+            self.PATTERN_MIT_FULL,
         )
         
         # print(f"[DEBUG] set_joint_and_gripper called: is_mit_mode={is_mit_mode}, control_mode={control_mode}, _mit_mode_initialized={self._mit_mode_initialized}")
@@ -921,7 +1039,8 @@ class ServoDriver:
             self.PATTERN_MIT,
             self.PATTERN_MIT_POSITION,
             self.PATTERN_MIT_SPEED,
-            self.PATTERN_MIT_TORQUE
+            self.PATTERN_MIT_TORQUE,
+            self.PATTERN_MIT_FULL,
         )
         
         if is_mit_mode and not self._mit_mode_initialized:
@@ -968,14 +1087,16 @@ class ServoDriver:
         self.serial_comm.set_low_latency_mode(enable)
     
     
-    def _build_send_joint_frame(self, 
-                           joint_angles: Optional[List[float]] = None, 
-                           gripper_value: Optional[float] = None, 
+    def _build_send_joint_frame(self,
+                           joint_angles: Optional[List[float]] = None,
+                           gripper_value: Optional[float] = None,
                                 speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
                                 torque_nm: Union[float, List[float], np.ndarray] = 0.0,
                                 gripper_speed_deg_s: Optional[float] = None,
                            control_aim: int = None,
-                           control_mode: tuple = None) -> List[int]:
+                           control_mode: tuple = None,
+                           mit_kp: Optional[List[float]] = None,
+                           mit_kd: Optional[List[float]] = None) -> List[int]:
         """
         构建关节+夹爪+速度控制帧 (支持多种控制模式)
         
@@ -985,7 +1106,7 @@ class ServoDriver:
         Args:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
             gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
-            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-10, +10] rad/s).
+            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-50, +50] rad/s).
                         可以是单个值(所有关节相同)或列表(每关节独立)
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
                       可以是单个值(所有关节相同)或列表(每关节独立)
@@ -1185,7 +1306,29 @@ class ServoDriver:
                 speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
                 frame[offset] = speed_hw_value & 0xFF
                 frame[offset + 1] = (speed_hw_value >> 8) & 0xFF
-        
+
+            elif control_mode == self.PATTERN_MIT_FULL:
+                # MIT全参数模式: P(2B) + V(2B) + T(2B) + Kp(2B) + Kd(2B) = 10字节
+                speed_val = speed_list[joint_idx]
+                speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
+                torque_val = torque_list[joint_idx]
+                torque_hw_value = self._value_to_hardware_value_torque(torque_val, direction)
+                # Kp/Kd: [0,500] → 16bit, [0,5] → 16bit
+                kp_val = mit_kp[joint_idx] if mit_kp else (50.0 if joint_idx < 3 else 20.0)
+                kd_val = mit_kd[joint_idx] if mit_kd else (2.0 if joint_idx < 3 else 1.0)
+                kp_hw = self._float_to_uint(kp_val, 0.0, 500.0, 16)
+                kd_hw = self._float_to_uint(kd_val, 0.0, 5.0, 16)
+                frame[offset] = hardware_value & 0xFF
+                frame[offset + 1] = (hardware_value >> 8) & 0xFF
+                frame[offset + 2] = speed_hw_value & 0xFF
+                frame[offset + 3] = (speed_hw_value >> 8) & 0xFF
+                frame[offset + 4] = torque_hw_value & 0xFF
+                frame[offset + 5] = (torque_hw_value >> 8) & 0xFF
+                frame[offset + 6] = kp_hw & 0xFF
+                frame[offset + 7] = (kp_hw >> 8) & 0xFF
+                frame[offset + 8] = kd_hw & 0xFF
+                frame[offset + 9] = (kd_hw >> 8) & 0xFF
+
         # Gripper data (夹爪不需要方向校正，始终使用默认方向)
         gripper_offset = data_start + 6 * bytes_per_motor
         if gripper_value is not None:
@@ -1235,9 +1378,28 @@ class ServoDriver:
             frame[gripper_offset] = gripper_speed_hw_value & 0xFF
             frame[gripper_offset + 1] = (gripper_speed_hw_value >> 8) & 0xFF
 
+        elif control_mode == self.PATTERN_MIT_FULL:
+            # MIT全参数模式: 夹爪 P+V+T+Kp+Kd = 10字节
+            gripper_speed_hw_value = self._value_to_hardware_value_speed(gripper_speed_val)
+            gripper_torque_hw_value = self._value_to_hardware_value_torque(gripper_torque_val)
+            kp_val = mit_kp[6] if mit_kp and len(mit_kp) > 6 else 20.0
+            kd_val = mit_kd[6] if mit_kd and len(mit_kd) > 6 else 1.0
+            kp_hw = self._float_to_uint(kp_val, 0.0, 500.0, 16)
+            kd_hw = self._float_to_uint(kd_val, 0.0, 5.0, 16)
+            frame[gripper_offset] = gripper_hw_value & 0xFF
+            frame[gripper_offset + 1] = (gripper_hw_value >> 8) & 0xFF
+            frame[gripper_offset + 2] = gripper_speed_hw_value & 0xFF
+            frame[gripper_offset + 3] = (gripper_speed_hw_value >> 8) & 0xFF
+            frame[gripper_offset + 4] = gripper_torque_hw_value & 0xFF
+            frame[gripper_offset + 5] = (gripper_torque_hw_value >> 8) & 0xFF
+            frame[gripper_offset + 6] = kp_hw & 0xFF
+            frame[gripper_offset + 7] = (kp_hw >> 8) & 0xFF
+            frame[gripper_offset + 8] = kd_hw & 0xFF
+            frame[gripper_offset + 9] = (kd_hw >> 8) & 0xFF
+
         # 计算校验位
         frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
-        
+
         if self.debug_mode:
             # 详细调试输出
             if joint_angles is not None:
@@ -1268,7 +1430,7 @@ class ServoDriver:
         """
         [已废弃] 兼容旧版本的函数别名，请使用 _build_send_joint_frame
         
-        注意: 速度参数现在使用度/秒 (deg/s)，范围 [-573, +573]
+        注意: 速度参数现在使用度/秒 (deg/s)，范围 [-2865, +2865]
         """
         return self._build_send_joint_frame(
             joint_angles=joint_angles,
@@ -1379,20 +1541,20 @@ class ServoDriver:
     def _value_to_hardware_value_speed(self, speed_deg_s: float, direction: float = 1.0) -> int:
         """
         将速度从度/秒转换为12位硬件值 [0, 4095]
-        
+
         转换流程:
         1. 度/秒 -> 弧度/秒 (deg * π/180)
         2. 弧度/秒映射到12位: [-10.0, +10.0] rad/s -> [0, 4095]
-        
+
         遵循右手定则：
         - 大拇指指向电机输出轴方向
         - 四指弯曲方向（逆时针）= 正速度方向
-        
+
         映射关系:
         - -573 deg/s (-10.0 rad/s) -> 0
         -    0 deg/s (  0.0 rad/s) -> 2048 (中间值)
         - +573 deg/s (+10.0 rad/s) -> 4095
-        
+
         :param speed_deg_s: 目标速度值 (度/秒)，有效范围 [-573, +573] deg/s
         :param direction: 电机方向系数 (1.0 或 -1.0)，用于适配电机安装方向
         :return: 原始 12位整数速度值 (0-4095)
@@ -1400,22 +1562,23 @@ class ServoDriver:
         # 确保输入是Python float类型，避免numpy数组导致的布尔值歧义
         speed_deg_s = float(speed_deg_s)
         direction = float(direction)
-        
+
         # 步骤1: 度/秒 -> 弧度/秒
         speed_rad_s = speed_deg_s * self.DEG_TO_RAD
-        
+
         # 应用方向系数
         speed_rad_s = speed_rad_s * direction
-        
+
         # 步骤2: 映射到硬件范围
         x_min = -10.0  # rad/s
         x_max = 10.0   # rad/s
         bits = 12
 
-        # 超出范围时进行裁剪
-        if speed_rad_s < x_min or speed_rad_s > x_max:
+        # 超出范围时进行裁剪（容差 0.01 rad/s ≈ 0.57 deg/s，避免边界值刷屏警告）
+        tolerance = 0.01
+        if speed_rad_s < x_min - tolerance or speed_rad_s > x_max + tolerance:
             logger.warning(f"Speed out of range: {speed_deg_s:.1f} deg/s ({speed_rad_s:.3f} rad/s), valid range: [-573, +573] deg/s ([-10, +10] rad/s), will be clipped")
-            speed_rad_s = max(x_min, min(x_max, speed_rad_s))
+        speed_rad_s = max(x_min, min(x_max, speed_rad_s))
 
         return self._float_to_uint(speed_rad_s, x_min, x_max, bits)
     
