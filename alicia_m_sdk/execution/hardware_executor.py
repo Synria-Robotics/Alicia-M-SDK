@@ -70,20 +70,20 @@ class HardwareExecutor:
                 speed_deg_s
             )
     
-    def _execute_pv_mode(self, 
-                        joint_traj: List[List[float]], 
-                        gripper_traj: Optional[List[float]], 
+    def _execute_pv_mode(self,
+                        joint_traj: List[List[float]],
+                        gripper_traj: Optional[List[float]],
                         speed_deg_s: float) -> bool:
         """
         使用PV模式执行轨迹（低频，带速度控制）
-        
+
         :param joint_traj: 关节轨迹
         :param gripper_traj: 夹爪轨迹
         :param speed_deg_s: 关节速度 (deg/s)
         :return: True if executed successfully
         """
         logger.info(f"[PV模式] 执行轨迹，共 {len(joint_traj)} 个点")
-        
+
         for idx, point in enumerate(joint_traj):
             # Select corresponding gripper value (if provided)
             g = None
@@ -95,9 +95,10 @@ class HardwareExecutor:
                 joint_angles=point,
                 gripper_value=g,
                 speed_deg_s=speed_deg_s,
+                control_aim=self.joint_controller.default_control_aim,
             )
             time.sleep(self.delay)
-        
+
         logger.info("[PV模式] 轨迹执行完成")
         return True
     
@@ -119,10 +120,11 @@ class HardwareExecutor:
         logger.info(f"[MIT位置模式] 执行轨迹，共 {len(joint_traj)} 个点")
         logger.info(f"[MIT位置模式] 回放频率: {playback_hz} Hz")
         
-        # 初始化MIT模式
-        if not self.joint_controller.initialize_mit_mode(repeat_times=3):
-            logger.error("[MIT位置模式] 初始化失败")
-            return False
+        # 初始化MIT模式（如果尚未初始化则执行，已初始化则跳过）
+        if not self.joint_controller._mit_mode_initialized:
+            if not self.joint_controller.initialize_mit_mode(repeat_times=3):
+                logger.error("[MIT位置模式] 初始化失败")
+                return False
         
         dt = 1.0 / playback_hz
         
@@ -135,12 +137,12 @@ class HardwareExecutor:
                 g = gripper_traj[idx]
             
             # 使用MIT位置模式发送
-            self.joint_controller._send_joint_frame_internal(
+            self.joint_controller.set_joint_and_gripper(
                 joint_angles=point,
                 gripper_value=g,
-                speed_rad_s=0.0,  # MIT位置模式不使用速度
+                speed_deg_s=0.0,  # MIT位置模式不使用速度
                 torque_nm=0.0,    # MIT位置模式不使用扭矩
-                control_aim=self.joint_controller.AIM_OPERATION,
+                control_aim=self.joint_controller.default_control_aim,
                 control_mode=self.joint_controller.PATTERN_MIT_POSITION
             )
             

@@ -47,8 +47,8 @@ def main(args):
         version=args.version,
         base_link=args.base_link,
         end_link=args.end_link,
-        control_aim="teach",
-        control_mode="pv"
+        control_aim=args.control_aim,
+        control_mode=args.control_mode
     )
 
     # Set backend
@@ -205,6 +205,11 @@ if __name__ == "__main__":
     parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (可选: v1_0, v1_1，默认: v1_1)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称, world 或 base_link等")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称, tool0 或 link6等")
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (默认: operation)')
+    parser.add_argument('--control-mode', type=str, default='pv',
+                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode (默认: pv)')
 
     # IK Configuration
     parser.add_argument('--end-pose', type=float, nargs=7, 

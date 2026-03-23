@@ -277,18 +277,19 @@ class _BaseTrajectoryExecutor:
         logger.info(f"[MIT位置模式] 执行轨迹，共 {n_points} 个点")
         logger.info(f"[MIT位置模式] 回放频率: {playback_hz} Hz")
         
-        # Initialize MIT mode
+        # 初始化MIT模式（如果尚未初始化则执行，已初始化则跳过）
         servo_driver = self.robot.servo_driver
-        if not servo_driver.initialize_mit_mode(repeat_times=3):
-            logger.error("[MIT位置模式] 初始化失败")
-            beauty_print("Failed to initialize MIT mode", type="error")
-            return {
-                'success': False,
-                'executed': 0,
-                'failed': n_points,
-                'total': n_points,
-                'duration': 0.0
-            }
+        if not servo_driver._mit_mode_initialized:
+            if not servo_driver.initialize_mit_mode(repeat_times=3):
+                logger.error("[MIT位置模式] 初始化失败")
+                beauty_print("Failed to initialize MIT mode", type="error")
+                return {
+                    'success': False,
+                    'executed': 0,
+                    'failed': n_points,
+                    'total': n_points,
+                    'duration': 0.0
+                }
         
         dt = 1.0 / playback_hz
         self.start_time = time.time()
@@ -303,14 +304,14 @@ class _BaseTrajectoryExecutor:
             if gripper_values is not None and idx < len(gripper_values):
                 g = gripper_values[idx]
             
-            # Use MIT position mode to send (direct access to servo_driver)
+            # 使用MIT位置模式发送
             try:
-                servo_driver._send_joint_frame_internal(
+                servo_driver.set_joint_and_gripper(
                     joint_angles=joint_angles[idx].tolist(),
                     gripper_value=g,
-                    speed_rad_s=0.0,  # MIT position mode doesn't use speed
-                    torque_nm=0.0,   # MIT position mode doesn't use torque
-                    control_aim=servo_driver.AIM_OPERATION,
+                    speed_deg_s=0.0,  # MIT position mode doesn't use speed
+                    torque_nm=0.0,    # MIT position mode doesn't use torque
+                    control_aim=servo_driver.default_control_aim,
                     control_mode=servo_driver.PATTERN_MIT_POSITION
                 )
                 self.executed_count += 1

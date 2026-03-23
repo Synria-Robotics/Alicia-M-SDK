@@ -161,7 +161,7 @@ def create_robot(
                 'pv': ServoDriver.PATTERN_PV,
                 'pvt': ServoDriver.PATTERN_PVT,
                 'v': ServoDriver.PATTERN_V,
-                'mit': ServoDriver.PATTERN_MIT,
+                'mit': ServoDriver.PATTERN_MIT_POSITION,       # MIT默认使用位置模式（与D-SDK遥操一致）
                 'mit_position': ServoDriver.PATTERN_MIT_POSITION,
                 'mit_speed': ServoDriver.PATTERN_MIT_SPEED,
                 'mit_torque': ServoDriver.PATTERN_MIT_TORQUE,
@@ -188,11 +188,8 @@ def create_robot(
         robot_model=robot_model,
         auto_connect=auto_connect,
         backend=backend,
-        device=device
+        device=device,
+        control_mode=control_mode_const
     )
-    
-    # Set control_mode if provided
-    if control_mode_const is not None:
-        robot.control_mode = control_mode_const
 
     return robot

@@ -56,7 +56,8 @@ class SynriaRobotAPI:
                  robot_model: RobotModel,
                  auto_connect: bool = True,
                  backend: Optional[str] = None,
-                 device: str = "cpu"):
+                 device: str = "cpu",
+                 control_mode: tuple = None):
         """Initialize robot API.
 
         :param servo_driver: Servo driver instance (low-level hardware)
@@ -64,6 +65,8 @@ class SynriaRobotAPI:
         :param auto_connect: Auto connect to robot on initialization
         :param backend: Computation backend, 'numpy' or 'torch' (default: None, uses 'numpy')
         :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
+        :param control_mode: Control mode tuple (e.g. ServoDriver.PATTERN_PV, PATTERN_MIT_POSITION).
+                            If None, defaults to PATTERN_PV. Must be set before connect() for MIT init.
         """
         self.servo_driver = servo_driver
         self.data_parser = servo_driver.data_parser  # Direct access to data parser
@@ -81,9 +84,9 @@ class SynriaRobotAPI:
 
         # Access control_aim from servo_driver (motor-specific)
         self.control_aim = getattr(servo_driver, 'default_control_aim', ServoDriver.AIM_OPERATION)
-        # Set default control_mode to PATTERN_PV (position+velocity mode)
-        # Note: ServoDriver defaults to PATTERN_PV if control_mode is None
-        self.control_mode = ServoDriver.PATTERN_PV
+        # Set control_mode: use provided value or default to PATTERN_PV
+        # Must be set before connect() so _auto_init_mit_if_needed() can detect MIT mode
+        self.control_mode = control_mode if control_mode is not None else ServoDriver.PATTERN_PV
 
         # Create execution layer components
         self.hardware_executor = HardwareExecutor(servo_driver)
@@ -127,6 +130,10 @@ class SynriaRobotAPI:
                 # Initialize state
                 self.get_robot_state("joint_gripper")
                 self._robot_type()
+
+                # 如果control_mode为MIT系列，自动初始化MIT模式（发送Kp/Kd参数）
+                self._auto_init_mit_if_needed()
+
                 logger.info("Synria Robot Connected successfully.")
                 return True
             except Exception as e:
@@ -134,11 +141,40 @@ class SynriaRobotAPI:
                 return False
         return False
     
+    def _auto_init_mit_if_needed(self):
+        """当control_mode为MIT系列时，自动初始化MIT模式（切换固件+发送Kp/Kd参数）。
+
+        MIT模式需要两步初始化:
+        1. 通过0x11指令切换固件到MIT模式
+        2. 发送Kp/Kd参数配置PD控制器
+        如果硬件已通过按键切换到MIT模式，步骤1是幂等的；步骤2是必需的。
+        """
+        is_mit = self.control_mode in (
+            ServoDriver.PATTERN_MIT,
+            ServoDriver.PATTERN_MIT_POSITION,
+            ServoDriver.PATTERN_MIT_SPEED,
+            ServoDriver.PATTERN_MIT_TORQUE,
+            ServoDriver.PATTERN_MIT_FULL,
+        )
+        if is_mit:
+            logger.info("MIT control mode detected, initializing MIT parameters...")
+            # 跳过固件模式切换：假定硬件已通过按键切换到MIT模式，仅发送Kp/Kd参数
+            success = self.servo_driver.initialize_mit_mode(
+                control_aim=self.control_aim,
+                kp_large=150.0,
+                kd_large=2.0,
+                kp_small=20.0,
+                kd_small=1.0,
+                skip_mode_switch=True
+            )
+            if not success:
+                logger.warning("MIT mode initialization failed, MIT control may not work properly")
+
     def disconnect(self):
         """Disconnect from robot and stop update threads."""
         self.servo_driver.stop_update_thread()
         self.servo_driver.disconnect()
-    
+
     def is_connected(self) -> bool:
         """Check if robot is connected.
         """
@@ -314,6 +350,7 @@ class SynriaRobotAPI:
         If no valid joint data is available, zeros (HOME position) will be used as fallback.
         """
         # Convert joint format if needed
+        user_provided_joints = target_joints is not None  # 标记用户是否提供了关节目标
         if target_joints is not None:
             if joint_format == 'deg':
                 target_joints = [a * np.pi / 180.0 for a in target_joints]
@@ -346,19 +383,28 @@ class SynriaRobotAPI:
         
         # 速度参数直接传递,无需转换 (现在全SDK统一使用deg/s)
 
-        # Use unified method with control mode parameters
-        success = self.servo_driver.set_joint_and_gripper(
-            joint_angles=target_joints,
-            gripper_value=gripper_value,
-            speed_deg_s=speed_deg_s,
-            gripper_speed_deg_s=gripper_speed_deg_s,
-            control_aim=effective_control_aim,
-            control_mode=effective_control_mode
+        # 检查是否为MIT模式且需要等待完成
+        # MIT + wait_for_completion: 跳过初始直发，由插值逻辑控制发送，避免初始抖动
+        is_mit_wait = wait_for_completion and effective_control_mode in (
+            ServoDriver.PATTERN_MIT, ServoDriver.PATTERN_MIT_POSITION,
+            ServoDriver.PATTERN_MIT_SPEED, ServoDriver.PATTERN_MIT_TORQUE,
+            ServoDriver.PATTERN_MIT_FULL,
         )
 
-        if not success:
-            logger.error("Failed to set robot target")
-            return False
+        if not is_mit_wait:
+            # PV模式或MIT不等待: 直接发送目标位置
+            success = self.servo_driver.set_joint_and_gripper(
+                joint_angles=target_joints,
+                gripper_value=gripper_value,
+                speed_deg_s=speed_deg_s,
+                gripper_speed_deg_s=gripper_speed_deg_s,
+                control_aim=effective_control_aim,
+                control_mode=effective_control_mode
+            )
+
+            if not success:
+                logger.error("Failed to set robot target")
+                return False
 
         # Wait for completion if requested
         if wait_for_completion and (target_joints is not None or gripper_value is not None):
@@ -371,33 +417,72 @@ class SynriaRobotAPI:
             gripper_result = True
             
             try:
-                # Wait for joints if target_joints is provided
-                if target_joints is not None:
+                # Wait for joints — 仅当用户明确提供了关节目标时才运行
+                # (target_joints可能被自动填充为当前位置，但不应触发关节等待)
+                if user_provided_joints and target_joints is not None:
                     joint_result = self._wait_for_joint_target(
                         target_joints=target_joints,
                         tolerance_deg=tolerance * 180.0 / np.pi,  # Convert rad to deg
                         timeout=timeout,
-                        log_prefix="等待关节接近目标"
+                        log_prefix="等待关节接近目标",
+                        speed_deg_s=speed_deg_s
                     )
-                
+
                 # Wait for gripper if gripper_value is provided
                 if gripper_value is not None:
                     gripper_tolerance = 5.0  # Increase tolerance to 5% for more reliable completion
                     gripper_timeout = min(4.0, timeout)  # Use max 4 seconds for gripper wait
                     start_time = time.time()
-                    
-                    # Give hardware some time to start responding
-                    time.sleep(0.05)
-                    
+
+                    # 检查是否为MIT模式（MIT模式需要持续发送指令）
+                    is_mit = effective_control_mode in (
+                        ServoDriver.PATTERN_MIT, ServoDriver.PATTERN_MIT_POSITION,
+                        ServoDriver.PATTERN_MIT_SPEED, ServoDriver.PATTERN_MIT_TORQUE,
+                        ServoDriver.PATTERN_MIT_FULL,
+                    )
+
+                    # MIT模式: 准备夹爪插值参数（立即开始，不等待）
+                    gripper_start = None
+                    gripper_total_time = 0
+                    if is_mit:
+                        gripper_start = self.get_robot_state("gripper")
+                        if gripper_start is None:
+                            gripper_start = 0.0
+                        grip_speed = abs(gripper_speed_deg_s) if gripper_speed_deg_s else 57.3
+                        grip_speed = max(grip_speed, 1.0)
+                        gripper_total_time = abs(gripper_value - gripper_start) / grip_speed
+                    else:
+                        # PV模式: 给硬件一点时间响应
+                        time.sleep(0.05)
+
                     # Check gripper position with timeout
                     gripper_reached = False
                     while time.time() - start_time < gripper_timeout:
+                        # MIT模式: 按速度限制发送插值夹爪位置
+                        if is_mit:
+                            elapsed_g = time.time() - start_time
+                            if gripper_total_time > 0:
+                                prog = min(1.0, elapsed_g / gripper_total_time)
+                                interp_gripper = gripper_start + prog * (gripper_value - gripper_start)
+                            else:
+                                interp_gripper = gripper_value
+                            # 始终使用实时关节位置，避免因stale位置导致关节跳动
+                            fresh_joints = self.get_robot_state("joint")
+                            grip_joint_angles = list(fresh_joints) if fresh_joints is not None else target_joints
+                            self.servo_driver.set_joint_and_gripper(
+                                joint_angles=grip_joint_angles,
+                                gripper_value=interp_gripper,
+                                speed_deg_s=0.0,
+                                gripper_speed_deg_s=0.0,
+                                control_aim=effective_control_aim,
+                                control_mode=effective_control_mode
+                            )
                         current_gripper = self.get_robot_state("gripper")
                         if current_gripper is not None:
                             if abs(current_gripper - gripper_value) <= gripper_tolerance:
                                 gripper_reached = True
                                 break
-                        time.sleep(0.05)
+                        time.sleep(0.005 if is_mit else 0.05)  # MIT: 200Hz, PV: 20Hz
                     
                     # If we didn't verify position but command was sent, still consider success
                     if not gripper_reached:
@@ -1233,88 +1318,113 @@ class SynriaRobotAPI:
                                target_joints: List[float],
                                tolerance_deg: float = 5.0,
                                timeout: float = 120.0,
-                               log_prefix: str = "等待关节接近目标") -> bool:
+                               log_prefix: str = "等待关节接近目标",
+                               speed_deg_s: Union[int, float, List[float], np.ndarray] = 20) -> bool:
         """Wait until all joints reach target angles.
-        
+
         基于单片机反馈的实际位置与目标位置进行比较，
         当所有关节的误差都在容差范围内时，判断电机到位。
-        
-        对于MIT模式,会持续发送目标位置指令以保持运动。
+
+        对于MIT模式，使用线性插值按speed_deg_s限速，持续发送插值位置指令。
+        PV模式由固件控速，此方法仅监测位置反馈。
 
         :param target_joints: Target joint angles in radians
         :param tolerance_deg: Degrees, acceptable abs distance to target for all joints (default ±5°)
         :param timeout: Seconds, maximum wait time (default 120s)
         :param log_prefix: Log message prefix
+        :param speed_deg_s: MIT模式下的插值速度(度/秒)，用于限制运动速度。PV模式下忽略此参数。
         :return: True if target reached, False if timeout
         """
         start_time = time.time()
         RAD_TO_DEG = 180.0 / np.pi
-        
+        DEG_TO_RAD = np.pi / 180.0
+
         # 将目标角度转换为度，用于比较
         target_joints_deg = [a * RAD_TO_DEG for a in target_joints]
-        
-        # 检查是否为MIT模式
+
+        # 检查是否为MIT模式（MIT模式需要持续发送目标位置）
         is_mit_mode = self.control_mode in (
             self.servo_driver.PATTERN_MIT,
             self.servo_driver.PATTERN_MIT_POSITION,
             self.servo_driver.PATTERN_MIT_SPEED,
-            self.servo_driver.PATTERN_MIT_TORQUE
+            self.servo_driver.PATTERN_MIT_TORQUE,
+            self.servo_driver.PATTERN_MIT_FULL,
         )
-        
+
+        mode_str = "MIT" if is_mit_mode else "PV"
+        logger.info(f"{log_prefix}... ({mode_str}模式, 容差: ±{tolerance_deg}°, 超时: {timeout}s)")
+
+        last_mit_send_time = 0
+        mit_send_interval = 0.005  # MIT模式发送频率: 200Hz
+
+        # MIT模式: 准备线性插值参数
+        mit_start_joints = None  # 插值起始位置(弧度)
         if is_mit_mode:
-            logger.info(f"{log_prefix}... (MIT模式-持续发送, 容差: ±{tolerance_deg}°, 超时: {timeout}s)")
-            # MIT模式说明：在MIT模式下没有实时位置反馈，只有控制指令的接收状态反馈
-            # 因此我们基于时间等待，而不是位置误差判断
-            print(f"[MIT模式] 目标角度: {[round(a, 1) for a in target_joints_deg[:min(len(target_joints_deg), 6)]]}°")
-            print(f"[MIT模式] 注意: MIT模式无实时位置反馈，将持续发送控制指令 {timeout}秒")
-        else:
-            logger.info(f"{log_prefix}... (容差: ±{tolerance_deg}°, 超时: {timeout}s)")
-        
-        last_send_time = 0
-        send_interval = 0.005  # MIT模式发送频率: 200Hz
+            # 解析speed_deg_s为每关节速度列表(度/秒)
+            if isinstance(speed_deg_s, (list, tuple, np.ndarray)):
+                mit_speed_list = [abs(float(s)) for s in speed_deg_s]
+                if len(mit_speed_list) < 6:
+                    mit_speed_list.extend([mit_speed_list[-1]] * (6 - len(mit_speed_list)))
+            else:
+                mit_speed_list = [abs(float(speed_deg_s))] * 6
+            # 限制最低速度，避免除零
+            mit_speed_list = [max(s, 1.0) for s in mit_speed_list]
+
+            # 读取当前位置作为插值起点
+            current = self.get_robot_state("joint")
+            if current is not None:
+                mit_start_joints = list(current)
+            else:
+                mit_start_joints = [0.0] * 6
+
+            # 计算每个关节到达目标所需时间，取最大值作为总运动时间
+            mit_durations = []
+            for i in range(min(6, len(mit_start_joints), len(target_joints))):
+                dist_deg = abs(mit_start_joints[i] * RAD_TO_DEG - target_joints_deg[i])
+                dur = dist_deg / mit_speed_list[i] if mit_speed_list[i] > 0 else 0
+                mit_durations.append(dur)
+            mit_total_time = max(mit_durations) if mit_durations else 0
+            logger.info(f"MIT插值: 速度={mit_speed_list[0]:.0f}°/s, 预计耗时={mit_total_time:.2f}s")
 
         while time.time() - start_time < timeout:
-            # MIT模式需要持续发送目标位置
-            if is_mit_mode and (time.time() - last_send_time) >= send_interval:
+            # MIT模式: 按速度限制发送插值位置
+            if is_mit_mode and (time.time() - last_mit_send_time) >= mit_send_interval:
+                elapsed = time.time() - start_time
+
+                if mit_total_time > 0:
+                    # 计算插值进度 [0, 1]，到达后保持发送目标位置
+                    progress = min(1.0, elapsed / mit_total_time)
+                    interp_joints = [
+                        mit_start_joints[i] + progress * (target_joints[i] - mit_start_joints[i])
+                        for i in range(min(6, len(mit_start_joints), len(target_joints)))
+                    ]
+                else:
+                    interp_joints = list(target_joints[:6])
+
                 self.servo_driver.set_joint_and_gripper(
-                    joint_angles=target_joints,
-                    gripper_value=None,  # 保持当前夹爪状态
-                    speed_deg_s=self.speed_deg_s if hasattr(self, 'speed_deg_s') else 57.3,
+                    joint_angles=interp_joints,
+                    gripper_value=None,
+                    speed_deg_s=0.0,
                     torque_nm=0.0,
                     control_aim=self.control_aim,
                     control_mode=self.control_mode
                 )
-                last_send_time = time.time()
-            
-            # MIT模式：没有实时位置反馈，基于时间判断
-            if is_mit_mode:
-                elapsed = time.time() - start_time
-                # 简单的时间判断：假设电机需要一定时间到达目标
-                # 可以根据目标角度与起始角度的差值来估算所需时间
-                # 这里使用一个简单的策略：持续发送一段时间后认为已到达
-                estimated_time = min(timeout * 0.5, 3.0)  # 最多等待3秒或超时时间的一半
-                if elapsed >= estimated_time:
-                    print(f"[MIT模式] 已持续发送 {elapsed:.2f}s，假定已到达目标")
-                    logger.info(f"✓ MIT模式控制完成 (耗时: {elapsed:.2f}s)")
-                    return True
-                # 短暂休眠
-                time.sleep(0.05)
-                continue
-            
-            # 非MIT模式：后台线程会持续更新关节状态，这里直接读取最新数据
+                last_mit_send_time = time.time()
+
+            # 后台线程会持续更新关节状态，读取最新位置反馈进行判断
             current_joints = self.get_robot_state("joint")
-            
+
             if current_joints is not None:
                 # 将当前角度转换为度
                 current_joints_deg = [a * RAD_TO_DEG for a in current_joints]
-                
+
                 # 只比较前6个关节（排除夹爪）
                 joints_to_compare = min(len(current_joints_deg), len(target_joints_deg), 6)
-                
+
                 # 计算每个关节的误差（度）
                 errors_deg = [abs(cur - tgt) for cur, tgt in zip(current_joints_deg[:joints_to_compare], target_joints_deg[:joints_to_compare])]
                 max_error = max(errors_deg) if errors_deg else 0
-                
+
                 # 每秒打印一次当前状态（使用 print 确保输出）
                 elapsed = time.time() - start_time
                 if int(elapsed) % 1 == 0 and int(elapsed) != getattr(self, '_last_print_time', -1):
@@ -1322,12 +1432,12 @@ class SynriaRobotAPI:
                     print(f"[位置检测] 目标: {[round(a, 1) for a in target_joints_deg[:joints_to_compare]]}°")
                     print(f"[位置检测] 当前: {[round(a, 1) for a in current_joints_deg[:joints_to_compare]]}°")
                     print(f"[位置检测] 误差: {[round(e, 1) for e in errors_deg]}°, 最大误差: {max_error:.1f}°, 容差: {tolerance_deg}°")
-                
+
                 # 判断所有关节是否都在容差范围内
                 if all(err <= tolerance_deg for err in errors_deg):
                     logger.info(f"✓ 已到达目标位置 (耗时: {elapsed:.2f}s, 最大误差: {max_error:.2f}°)")
                     return True
-            
+
             time.sleep(0.02)
 
         # 超时，打印当前状态

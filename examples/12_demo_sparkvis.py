@@ -46,8 +46,8 @@ def main(args):
         port=args.port,
         baudrate=args.baudrate,
         version=args.version,
-        control_aim="operation",
-        control_mode="pv"
+        control_aim=args.control_aim,
+        control_mode=args.control_mode
     )
 
     try:
@@ -92,7 +92,12 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=str, default='/dev/ttyCH343USB0', help='串口设备，如 /dev/ttyUSB0 或 COM3')
     parser.add_argument('--baudrate', type=int, default=1000000, help='串口波特率，默认1000000；若读取超时请尝试 921600')
     parser.add_argument('--version', type=str, default='v1_1', help='机器人版本 (可选: v1_0, v1_1，默认: v1_1)')
-    
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (默认: operation)')
+    parser.add_argument('--control-mode', type=str, default='pv',
+                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode (默认: pv)')
+
     # WebSocket settings
     parser.add_argument('--host', type=str, default='localhost', help='WebSocket主机')
     parser.add_argument('--websocket-port', type=int, default=8765, help='WebSocket端口')

@@ -32,11 +32,16 @@ from alicia_m_sdk.utils.logger import logger
 
 def main(args):
     """Demonstrate gripper control.
-    
+
     :param args: Command line arguments
     """
     # Initialize robot instance
-    robot = alicia_m_sdk.create_robot(port=args.port)
+    robot = alicia_m_sdk.create_robot(
+        port=args.port,
+        version=args.version,
+        control_aim=args.control_aim,
+        control_mode=args.control_mode
+    )
     
     try:
         # Get gripper value (0-100)
@@ -74,10 +79,15 @@ def main(args):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="Gripper Control Demo")
-    
+
     # Serial port settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
+    parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (可选: v1_0, v1_1，默认: v1_1)")
+    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
+                        help='Control aim: teach or operation (默认: operation)')
+    parser.add_argument('--control-mode', type=str, default='pv',
+                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        help='Control mode (默认: pv)')
     args = parser.parse_args()
-    
-    
+
     main(args)

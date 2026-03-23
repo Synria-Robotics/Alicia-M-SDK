@@ -541,11 +541,11 @@ class SimpleDragTeaching:
                     gripper_value = point.get("grip", 0.0)
                     
                     # 使用combined control直接设置关节和夹爪，无插值
-                    # speed_rad_s: 30 rad/s ≈ 0.524 rad/s
+                    # 30 rad/s ≈ 1718.9 deg/s (超出PV模式范围，裁剪到573 deg/s)
                     self.controller.servo_driver.set_joint_and_gripper(
                         joint_angles=point["q"],
                         gripper_value=gripper_value,
-                        speed_rad_s=0.524  # 高速回放 (约30 rad/s)
+                        speed_deg_s=573.0  # 最大速度回放
                     )
                     
                     print(f"[回放] {i+1}/{len(data)}")
@@ -798,12 +798,12 @@ class GravityCompensationTeaching:
         
         # 发送零扭矩
         zero_torques = [0.0] * 6
-        self.servo_driver._send_joint_frame_internal(
+        self.servo_driver.set_joint_and_gripper(
             joint_angles=None,
             gripper_value=None,
             speed_deg_s=0.0,
             torque_nm=zero_torques,
-            control_aim=self.servo_driver.AIM_OPERATION,
+            control_aim=self.servo_driver.default_control_aim,
             control_mode=self.servo_driver.PATTERN_MIT_TORQUE
         )
         
@@ -830,12 +830,12 @@ class GravityCompensationTeaching:
                 scaled_torques = [t * self.torque_scale for t in gravity_torques]
                 
                 # 4. 发送MIT扭矩命令
-                self.servo_driver._send_joint_frame_internal(
+                self.servo_driver.set_joint_and_gripper(
                     joint_angles=None,
                     gripper_value=None,
                     speed_deg_s=0.0,
                     torque_nm=scaled_torques,
-                    control_aim=self.servo_driver.AIM_OPERATION,
+                    control_aim=self.servo_driver.default_control_aim,
                     control_mode=self.servo_driver.PATTERN_MIT_TORQUE
                 )
                 

@@ -90,20 +90,6 @@ class ServoDriver:
         # "joint": [0xAA, 0x06, 0x02, 0x02,0x00, 0x01, 0xCE, 0xFF],  # 旧的硬编码操作臂指令
     }
     
-    # MIT模式初始化指令 - 必须在使用MIT控制模式前发送
-    # 这是一个特殊的初始化包,让固件进入MIT控制状态
-    # 格式: 功能码=0x81(AIM_TEACH写入), 模式=(0x00, 0x05)每电机10字节
-    MIT_INIT_COMMAND = bytes.fromhex(
-        "AA 06 81 48 00 05 "
-        "FF 7F FF 07 FF 07 99 19 66 66 "  # Motor 1
-        "FF 7F FF 07 FF 07 99 19 66 66 "  # Motor 2
-        "FF 7F FF 07 FF 07 99 19 66 66 "  # Motor 3
-        "FF 7F FF 07 FF 07 3D 0A 33 33 "  # Motor 4
-        "FF 7F FF 07 FF 07 3D 0A 33 33 "  # Motor 5
-        "FF 7F FF 07 FF 07 3D 0A 33 33 "  # Motor 6
-        "FF 7F FF 07 FF 07 3D 0A 33 33 "  # Motor 7 (Gripper)
-        "44 FF"
-    )
     def __init__(self, port, baudrate=1000000, debug_mode=False, firmware_version=None, robot_type=None, gripper_type="100mm", auto_init_mit=False, control_aim=None, use_comm_manager=True, **kwargs):
         """
         接受额外的关键字参数以保持向后兼容（例如 firmware_version）。
@@ -210,7 +196,6 @@ class ServoDriver:
             if js and max(abs(a) for a in js.angles) > 1e-3:
                 return True
             time.sleep(0.05)
-        # print(f"[Timeout] No valid joint state received")
         return False
 
     def __del__(self):
@@ -359,7 +344,7 @@ class ServoDriver:
         return True
 
     def _build_mit_init_frame(self, control_aim: int = None,
-                               kp_large: float = 50.0, kd_large: float = 2.0,
+                               kp_large: float = 150.0, kd_large: float = 2.0,
                                kp_small: float = 20.0, kd_small: float = 1.0) -> list:
         """
         动态构建MIT初始化帧（全5参数: P+V+T+Kp+Kd），可指定control_aim。
@@ -418,27 +403,32 @@ class ServoDriver:
         return frame
 
     def initialize_mit_mode(self, repeat_times: int = 2, control_aim: int = None,
-                            kp_large: float = 50.0, kd_large: float = 2.0,
-                            kp_small: float = 20.0, kd_small: float = 1.0) -> bool:
+                            kp_large: float = 150.0, kd_large: float = 2.0,
+                            kp_small: float = 20.0, kd_small: float = 1.0,
+                            skip_mode_switch: bool = False) -> bool:
         """
         初始化MIT控制模式: 先切换固件到MIT模式，再发送Kp/Kd参数。
 
         :param repeat_times: 重复发送Kp/Kd配置指令的次数(默认2次)
         :param control_aim: 控制目标。None使用实例默认值
-        :param kp_large: 大关节(1-3) Kp (0~500, 默认50)
+        :param kp_large: 大关节(1-3) Kp (0~500, 默认150)
         :param kd_large: 大关节(1-3) Kd (0~5, 默认2.0)
         :param kp_small: 小关节(4-7) Kp (0~500, 默认20)
         :param kd_small: 小关节(4-7) Kd (0~5, 默认1.0)
+        :param skip_mode_switch: 若为True，跳过固件模式切换（适用于硬件已通过按键切换到MIT模式的情况）
         :return: 是否成功初始化
         """
         if control_aim is None:
             control_aim = self.default_control_aim
 
         try:
-            # 步骤1: 切换固件到MIT模式
-            logger.info("Step 1: Switching firmware to MIT mode...")
-            self.switch_control_mode('mit', control_aim=control_aim)
-            time.sleep(0.1)
+            # 步骤1: 切换固件到MIT模式（可跳过，当硬件已处于MIT模式时）
+            if not skip_mode_switch:
+                logger.info("Step 1: Switching firmware to MIT mode...")
+                self.switch_control_mode('mit', control_aim=control_aim)
+                time.sleep(0.1)
+            else:
+                logger.info("Step 1: Skipped (hardware already in MIT mode)")
 
             # 步骤2: 发送Kp/Kd参数配置
             logger.info(f"Step 2: Sending MIT Kp/Kd config (Kp_large={kp_large}, Kd_large={kd_large}, "
@@ -913,19 +903,14 @@ class ServoDriver:
             self.PATTERN_MIT_FULL,
         )
         
-        # print(f"[DEBUG] set_joint_and_gripper called: is_mit_mode={is_mit_mode}, control_mode={control_mode}, _mit_mode_initialized={self._mit_mode_initialized}")
-        
         if is_mit_mode and not self._mit_mode_initialized:
             # 只有当 auto_init_mit=True 时才自动初始化
             if self.auto_init_mit:
-                # print("[DEBUG] MIT mode not initialized, initializing...")
                 if self.debug_mode:
                     logger.info("Detected MIT mode usage, initializing MIT mode first...")
                 if not self.initialize_mit_mode():
                     logger.error("Failed to initialize MIT mode, cannot proceed")
-                    # print("[DEBUG] MIT mode initialization FAILED!")
                     return False
-                # print("[DEBUG] MIT mode initialization SUCCESS!")
             else:
                 # 提示用户需要手动配置MIT参数
                 logger.warning("=" * 60)
@@ -941,8 +926,6 @@ class ServoDriver:
         if isinstance(speed_deg_s, (int, float)):
             # Relaxed check to allow negative values for the new mapping [-573, 573]
             pass
-        
-        # print(f"[DEBUG] Building control frame with joint_angles={joint_angles}, gripper={gripper_value}, control_aim=0x{control_aim:02X}, control_mode={control_mode}")
         
         frame = self._build_send_joint_frame(
             joint_angles=joint_angles,
@@ -1422,26 +1405,6 @@ class ServoDriver:
             
         return frame
 
-    # 保留旧函数名作为兼容别名
-    def _build_joint_frame(self, 
-                           joint_angles: Optional[List[float]] = None, 
-                           gripper_value: Optional[float] = None, 
-                           speed_deg_s: Union[float, List[float]] = 57.3) -> List[int]:
-        """
-        [已废弃] 兼容旧版本的函数别名，请使用 _build_send_joint_frame
-        
-        注意: 速度参数现在使用度/秒 (deg/s)，范围 [-2865, +2865]
-        """
-        return self._build_send_joint_frame(
-            joint_angles=joint_angles,
-            gripper_value=gripper_value,
-            speed_deg_s=speed_deg_s,
-            torque_nm=0.0,
-            control_aim=self.AIM_TEACH,
-            control_mode=self.PATTERN_PV
-        )
-
-    
      #----------------------------------------------start-位置数据转换---------------------------------------
     
     def _rad_to_hardware_value(self, angle_rad: float, direction: float = 1.0) -> int:
