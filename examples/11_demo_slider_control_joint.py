@@ -444,8 +444,8 @@ if __name__ == "__main__":
                         help="机器人版本 (可选: v1_0, v1_1，默认: v1_1)")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
-    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
+                        help='Control mode: pv or mit (默认: pv)')
     parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
     parser.add_argument('--debug', action='store_true',
                         help="启用调试模式")

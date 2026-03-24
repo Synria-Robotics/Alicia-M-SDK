@@ -312,7 +312,7 @@ class _BaseTrajectoryExecutor:
                     speed_deg_s=0.0,  # MIT position mode doesn't use speed
                     torque_nm=0.0,    # MIT position mode doesn't use torque
                     control_aim=servo_driver.default_control_aim,
-                    control_mode=servo_driver.PATTERN_MIT_POSITION
+                    control_mode=servo_driver.PATTERN_MIT
                 )
                 self.executed_count += 1
             except Exception as e:

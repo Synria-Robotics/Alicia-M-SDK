@@ -87,7 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称")
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
-    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
+                        help='Control mode: pv or mit (默认: pv)')
 
     main(parser.parse_args())

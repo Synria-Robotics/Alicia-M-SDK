@@ -209,8 +209,8 @@ if __name__ == '__main__':
     # Motor-specific control settings
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
-    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
-                        help='Control mode: pv, pvt, v, mit, mit_position, mit_speed, mit_torque (默认: pv)')
+    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
+                        help='Control mode: pv or mit (默认: pv)')
     parser.add_argument('--use-mit-mode', action='store_true', 
                         help='Use MIT position mode for high-frequency playback (motor-specific)')
     parser.add_argument('--playback-hz', type=float, default=200.0,

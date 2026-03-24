@@ -116,7 +116,7 @@ def create_robot(
     :param model_path: Model path, if None, use default model path from synriard
     :param baudrate: Serial port baudrate (default: 1000000)
     :param control_aim: Control aim string - "teach", "operation"
-    :param control_mode: Control mode string - "pv", "pvt", "v", "mit", "mit_position", "mit_speed", "mit_torque"
+    :param control_mode: Control mode string - "pv" or "mit"
     :return: SynriaRobotAPI instance
     """
     # Get default variant for the specified version
@@ -159,13 +159,7 @@ def create_robot(
             control_mode_lower = control_mode.lower()
             mode_map = {
                 'pv': ServoDriver.PATTERN_PV,
-                'pvt': ServoDriver.PATTERN_PVT,
-                'v': ServoDriver.PATTERN_V,
-                'mit': ServoDriver.PATTERN_MIT_POSITION,       # MIT默认使用位置模式（与D-SDK遥操一致）
-                'mit_position': ServoDriver.PATTERN_MIT_POSITION,
-                'mit_speed': ServoDriver.PATTERN_MIT_SPEED,
-                'mit_torque': ServoDriver.PATTERN_MIT_TORQUE,
-                'mit_full': ServoDriver.PATTERN_MIT_FULL,
+                'mit': ServoDriver.PATTERN_MIT,
             }
             control_mode_const = mode_map.get(control_mode_lower)
             if control_mode_const is None:

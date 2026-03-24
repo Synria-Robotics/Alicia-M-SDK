@@ -65,7 +65,7 @@ class SynriaRobotAPI:
         :param auto_connect: Auto connect to robot on initialization
         :param backend: Computation backend, 'numpy' or 'torch' (default: None, uses 'numpy')
         :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
-        :param control_mode: Control mode tuple (e.g. ServoDriver.PATTERN_PV, PATTERN_MIT_POSITION).
+        :param control_mode: Control mode tuple (ServoDriver.PATTERN_PV or PATTERN_MIT).
                             If None, defaults to PATTERN_PV. Must be set before connect() for MIT init.
         """
         self.servo_driver = servo_driver
@@ -149,13 +149,7 @@ class SynriaRobotAPI:
         2. 发送Kp/Kd参数配置PD控制器
         如果硬件已通过按键切换到MIT模式，步骤1是幂等的；步骤2是必需的。
         """
-        is_mit = self.control_mode in (
-            ServoDriver.PATTERN_MIT,
-            ServoDriver.PATTERN_MIT_POSITION,
-            ServoDriver.PATTERN_MIT_SPEED,
-            ServoDriver.PATTERN_MIT_TORQUE,
-            ServoDriver.PATTERN_MIT_FULL,
-        )
+        is_mit = self.control_mode != ServoDriver.PATTERN_PV and self.control_mode is not None
         if is_mit:
             logger.info("MIT control mode detected, initializing MIT parameters...")
             # 跳过固件模式切换：假定硬件已通过按键切换到MIT模式，仅发送Kp/Kd参数
@@ -342,7 +336,7 @@ class SynriaRobotAPI:
         :param timeout: Seconds, maximum wait time
         :param wait_for_completion: If True, wait until target reached
         :param control_aim: Control target (ServoDriver.AIM_TEACH, AIM_OPERATION, etc.). If None, uses instance default
-        :param control_mode: Control mode (ServoDriver.PATTERN_PV, PATTERN_MIT_POSITION, etc.). If None, uses instance default
+        :param control_mode: Control mode (ServoDriver.PATTERN_PV or PATTERN_MIT). If None, uses instance default
         :return: True if successful, False otherwise
         
         Note: Due to hardware protocol constraints, joint and gripper data must be sent together.
@@ -385,11 +379,8 @@ class SynriaRobotAPI:
 
         # 检查是否为MIT模式且需要等待完成
         # MIT + wait_for_completion: 跳过初始直发，由插值逻辑控制发送，避免初始抖动
-        is_mit_wait = wait_for_completion and effective_control_mode in (
-            ServoDriver.PATTERN_MIT, ServoDriver.PATTERN_MIT_POSITION,
-            ServoDriver.PATTERN_MIT_SPEED, ServoDriver.PATTERN_MIT_TORQUE,
-            ServoDriver.PATTERN_MIT_FULL,
-        )
+        # 使用 != PATTERN_PV 判断MIT（比精确匹配PATTERN_MIT更健壮，避免常量值不一致导致跳过插值）
+        is_mit_wait = wait_for_completion and effective_control_mode != ServoDriver.PATTERN_PV and effective_control_mode is not None
 
         if not is_mit_wait:
             # PV模式或MIT不等待: 直接发送目标位置
@@ -435,11 +426,7 @@ class SynriaRobotAPI:
                     start_time = time.time()
 
                     # 检查是否为MIT模式（MIT模式需要持续发送指令）
-                    is_mit = effective_control_mode in (
-                        ServoDriver.PATTERN_MIT, ServoDriver.PATTERN_MIT_POSITION,
-                        ServoDriver.PATTERN_MIT_SPEED, ServoDriver.PATTERN_MIT_TORQUE,
-                        ServoDriver.PATTERN_MIT_FULL,
-                    )
+                    is_mit = effective_control_mode != ServoDriver.PATTERN_PV and effective_control_mode is not None
 
                     # MIT模式: 准备夹爪插值参数（立即开始，不等待）
                     gripper_start = None
@@ -1343,13 +1330,7 @@ class SynriaRobotAPI:
         target_joints_deg = [a * RAD_TO_DEG for a in target_joints]
 
         # 检查是否为MIT模式（MIT模式需要持续发送目标位置）
-        is_mit_mode = self.control_mode in (
-            self.servo_driver.PATTERN_MIT,
-            self.servo_driver.PATTERN_MIT_POSITION,
-            self.servo_driver.PATTERN_MIT_SPEED,
-            self.servo_driver.PATTERN_MIT_TORQUE,
-            self.servo_driver.PATTERN_MIT_FULL,
-        )
+        is_mit_mode = self.control_mode != self.servo_driver.PATTERN_PV and self.control_mode is not None
 
         mode_str = "MIT" if is_mit_mode else "PV"
         logger.info(f"{log_prefix}... ({mode_str}模式, 容差: ±{tolerance_deg}°, 超时: {timeout}s)")

@@ -645,16 +645,20 @@ class DataParser:
         
         # 提取电机数据（去掉最后一字节状态）
         motor_bytes = payload[:-1]
-        
+
+        # 根据offset_count计算每电机字节数（每个数据字段占2字节）
+        bytes_per_motor = max(1, offset_count) * 2
+
         # 解析 7 个电机（6 关节 + 1 夹爪）
         joint_values: List[float] = [0.0] * 6
         gripper_value = 0.0
-        
+
         for i in range(7):
-            idx = i * 2
+            idx = i * bytes_per_motor
             if idx + 2 > len(motor_bytes):
                 break
-            
+
+            # 位置数据始终是每电机数据的前2字节（起始地址=0x00时）
             chunk = motor_bytes[idx : idx + 2]
             
             if i < 6:
@@ -663,25 +667,12 @@ class DataParser:
                 joint_values[i] = self._bytes_to_radians(chunk, joint_index=i)
             else:
                 # 夹爪（索引 6）
-                # 新映射逻辑：与 ServoDriver 保持一致
-                # 0% (闭合) -> 32768 (0 rad)
-                # 100% (张开) -> 39688 (2.64 rad)
+                # 固件夹爪位置反馈使用 raw 值: 闭合≈0, 张开≈100
+                # 注意: 与控制路径的16-bit位置编码(GRI_VAL_CLOSE~GRI_VAL_OPEN)不同
                 gripper_low = chunk[0]
                 gripper_high = chunk[1]
                 gripper_raw = (gripper_low & 0xFF) | ((gripper_high & 0xFF) << 8)
-                
-                # 硬件值范围
-                close_val = 32768  # 0% 对应的硬件值
-                open_val = 39688   # 100% 对应的硬件值
-                
-                # 反向映射: 硬件值 -> 0-100%
-                # gripper_value = (gripper_raw - close_val) / (open_val - close_val) * 100
-                if open_val != close_val:
-                    val = (gripper_raw - close_val) / (open_val - close_val) * 100.0
-                else:
-                    val = 0.0
-                
-                gripper_value = round(max(0, min(val, 100)), 2)
+                gripper_value = round(max(0.0, min(float(gripper_raw), 100.0)), 2)
         
         # 更新状态
         with self._lock:

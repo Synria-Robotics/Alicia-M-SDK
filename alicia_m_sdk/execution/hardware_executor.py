@@ -143,7 +143,7 @@ class HardwareExecutor:
                 speed_deg_s=0.0,  # MIT位置模式不使用速度
                 torque_nm=0.0,    # MIT位置模式不使用扭矩
                 control_aim=self.joint_controller.default_control_aim,
-                control_mode=self.joint_controller.PATTERN_MIT_POSITION
+                control_mode=self.joint_controller.PATTERN_MIT
             )
             
             # 控制回放频率

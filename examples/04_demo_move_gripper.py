@@ -52,16 +52,16 @@ def main(args):
             logger.warning("Failed to read gripper value")
         
         # Test 1: Open gripper
-        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=100)
+        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=200)
         time.sleep(1)
-        # Test 2: Close gripper
-        robot.set_robot_state(gripper_value=0, wait_for_completion=True, gripper_speed_deg_s=100)
+        # Test 2: Partially open
+        robot.set_robot_state(gripper_value=50, wait_for_completion=True, gripper_speed_deg_s=200)
         time.sleep(1)
-        # Test 3: Partially open
-        robot.set_robot_state(gripper_value=50, wait_for_completion=True, gripper_speed_deg_s=100)
+        # Test 3: Open gripper again
+        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=200)
         time.sleep(1)
-        # Test 4: Open gripper
-        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=100)
+        # Test 4: Close gripper
+        robot.set_robot_state(gripper_value=0, wait_for_completion=True, gripper_speed_deg_s=200)
         time.sleep(1)
 
         
@@ -86,7 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach or operation (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv',
-                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        choices=['pv', 'mit'],
                         help='Control mode (默认: pv)')
     args = parser.parse_args()
 

@@ -804,7 +804,7 @@ class GravityCompensationTeaching:
             speed_deg_s=0.0,
             torque_nm=zero_torques,
             control_aim=self.servo_driver.default_control_aim,
-            control_mode=self.servo_driver.PATTERN_MIT_TORQUE
+            control_mode=self.servo_driver._PATTERN_MIT_TORQUE
         )
         
         print("[完成] 重力补偿已停止")
@@ -836,7 +836,7 @@ class GravityCompensationTeaching:
                     speed_deg_s=0.0,
                     torque_nm=scaled_torques,
                     control_aim=self.servo_driver.default_control_aim,
-                    control_mode=self.servo_driver.PATTERN_MIT_TORQUE
+                    control_mode=self.servo_driver._PATTERN_MIT_TORQUE
                 )
                 
                 if self.debug:

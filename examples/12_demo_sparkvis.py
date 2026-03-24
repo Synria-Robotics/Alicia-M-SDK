@@ -95,7 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
                         help='Control aim: teach or operation (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv',
-                        choices=['pv', 'pvt', 'v', 'mit', 'mit_position', 'mit_speed', 'mit_torque'],
+                        choices=['pv', 'mit'],
                         help='Control mode (默认: pv)')
 
     # WebSocket settings

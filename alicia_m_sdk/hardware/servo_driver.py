@@ -37,29 +37,15 @@ class ServoDriver:
     # ==================== 控制模式常量 (Control Pattern) ====================
     # 前缀格式: [数据类型标志 + 模式类型, 每电机字节数/2]
     # 数据类型标志: 0x00=写入, 0x80=反馈
-    # 
-    # 模式参数要求:
-    # - PATTERN_PV:  需要全部参数 (位置 + 速度)，每电机4字节
-    # - PATTERN_PVT: 需要全部参数 (位置 + 速度 + 扭矩)，每电机6字节
-    # - PATTERN_V:   需要全部参数 (速度)，每电机2字节
-    # - PATTERN_MIT_*: MIT模式，只发送单一参数，每电机2字节
+    #
+    # 用户可用模式:
+    # - PATTERN_PV:  位置+速度模式，每电机4字节（PV模式，固件控速）
+    # - PATTERN_MIT: MIT位置模式，每电机2字节（MIT模式，SDK插值控速）
     PATTERN_PV = (0x00, 0x02)      # 位置+速度模式，每电机4字节
-    PATTERN_PVT = (0x00, 0x03)     # 位置+速度+扭矩模式，每电机6字节
-    PATTERN_V = (0x01, 0x01)       # 速度模式，每电机2字节
-    
-    # MIT 模式 - 只发送单一参数，每电机2字节
-    # 前缀1: 0x02 = MIT模式标志
-    # 前缀2: 0x01 = 每电机2字节 (2/2=1)
-    PATTERN_MIT_POSITION = (0x00, 0x01)  # MIT模式-仅位置，每电机2字节
-    PATTERN_MIT_SPEED = (0x01, 0x01)     # MIT模式-仅速度，每电机2字节  
-    PATTERN_MIT_TORQUE = (0x02, 0x01)    # MIT模式-仅扭矩，每电机2字节
-    
-    # 兼容旧代码：PATTERN_MIT 默认为扭矩模式
-    PATTERN_MIT = (0x02, 0x01)           # MIT模式-仅扭矩（默认），每电机2字节
+    PATTERN_MIT = (0x00, 0x01)     # MIT位置模式，每电机2字节
 
-    # MIT全参数模式 - 发送全部5个参数，每电机10字节
-    # P(16bit) + V(12bit) + T(12bit) + Kp(16bit) + Kd(16bit)
-    PATTERN_MIT_FULL = (0x00, 0x05)
+    # 内部使用：MIT扭矩模式，仅用于重力补偿等特殊场景，不对外暴露
+    _PATTERN_MIT_TORQUE = (0x02, 0x01)
     
     # ==================== 数据类型标志 ====================
     DATA_FLAG_WRITE = 0x00         # 写入数据
@@ -348,6 +334,7 @@ class ServoDriver:
                                kp_small: float = 20.0, kd_small: float = 1.0) -> list:
         """
         动态构建MIT初始化帧（全5参数: P+V+T+Kp+Kd），可指定control_aim。
+        使用当前关节位置作为初始目标，避免切换MIT模式时跳变到零点。
 
         :param control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂)
         :param kp_large: 大关节(1-3)的位置环Kp (范围0~500)
@@ -362,10 +349,28 @@ class ServoDriver:
         func_code = 0x80 | control_aim
 
         # 每电机10字节: P(16b) + V(12b stored in 16b) + T(12b stored in 16b) + Kp(16b) + Kd(16b)
-        # 初始值: P=0(中值0x7FFF), V=0(中值0x07FF), T=0(中值0x07FF)
-        pos_mid = 0x7FFF   # 0 rad
         vel_mid = 0x07FF   # 0 rad/s (12-bit中值)
         torque_mid = 0x07FF  # 0 N*m
+
+        # 读取当前关节位置，用作MIT初始化的目标位置（避免跳变到零点）
+        current_state = self.data_parser.get_joint_state()
+        if current_state and current_state.angles:
+            current_angles = list(current_state.angles)
+            current_gripper = current_state.gripper if current_state.gripper is not None else 0.0
+            logger.info(f"MIT init: using current positions (deg): {[round(a * 57.2958, 1) for a in current_angles]}, gripper: {current_gripper:.1f}%")
+        else:
+            current_angles = [0.0] * 6
+            current_gripper = 0.0
+            logger.warning("MIT init: no position feedback, using zero positions")
+
+        # 将关节角度转换为硬件值（含方向校正）
+        joint_hw_positions = []
+        for i in range(6):
+            direction = self.joint_to_servo_map[i][1]
+            hw_val = self._rad_to_hardware_value(current_angles[i], direction)
+            joint_hw_positions.append(hw_val)
+        # 夹爪硬件值
+        gripper_hw_val = self._value_to_hardware_value_grip(current_gripper, type=self.gripper_type)
 
         # Kp/Kd编码: [0, 500] → [0, 65535], [0, 5] → [0, 65535]
         kp_large_hw = int(kp_large / 500.0 * 65535)
@@ -373,9 +378,9 @@ class ServoDriver:
         kp_small_hw = int(kp_small / 500.0 * 65535)
         kd_small_hw = int(kd_small / 5.0 * 65535)
 
-        def motor_data(kp_hw, kd_hw):
+        def motor_data(pos_hw, kp_hw, kd_hw):
             return [
-                pos_mid & 0xFF, (pos_mid >> 8) & 0xFF,
+                pos_hw & 0xFF, (pos_hw >> 8) & 0xFF,
                 vel_mid & 0xFF, (vel_mid >> 8) & 0xFF,
                 torque_mid & 0xFF, (torque_mid >> 8) & 0xFF,
                 kp_hw & 0xFF, (kp_hw >> 8) & 0xFF,
@@ -389,11 +394,13 @@ class ServoDriver:
         frame.append(0x05)  # prefix2: offset=5 (P+V+T+Kp+Kd)
 
         # Motors 1-3: 大关节
-        for _ in range(3):
-            frame.extend(motor_data(kp_large_hw, kd_large_hw))
-        # Motors 4-7: 小关节 + 夹爪
-        for _ in range(4):
-            frame.extend(motor_data(kp_small_hw, kd_small_hw))
+        for i in range(3):
+            frame.extend(motor_data(joint_hw_positions[i], kp_large_hw, kd_large_hw))
+        # Motors 4-6: 小关节
+        for i in range(3, 6):
+            frame.extend(motor_data(joint_hw_positions[i], kp_small_hw, kd_small_hw))
+        # Motor 7: 夹爪
+        frame.extend(motor_data(gripper_hw_val, kp_small_hw, kd_small_hw))
 
         # CRC + footer
         checksum = self.serial_comm.calculate_checksum(frame[1:])
@@ -884,9 +891,7 @@ class ServoDriver:
             control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂). None使用实例默认值
             control_mode: 控制模式元组. None使用实例默认值
                 - PATTERN_PV:  必须提供 joint_angles + speed_deg_s
-                - PATTERN_PVT: 必须提供 joint_angles + speed_deg_s + torque_nm
-                - PATTERN_V:   必须提供 speed_deg_s
-                - PATTERN_MIT: 可选提供 joint_angles / speed_deg_s / torque_nm 中的任意一个或多个
+                - PATTERN_MIT: MIT位置模式，提供 joint_angles
         """
         # 默认值
         if control_aim is None:
@@ -894,15 +899,9 @@ class ServoDriver:
         if control_mode is None:
             control_mode = self.PATTERN_PV
         
-        # 检查是否使用MIT系列模式,如果是且未初始化,则先初始化
-        is_mit_mode = control_mode in (
-            self.PATTERN_MIT,
-            self.PATTERN_MIT_POSITION,
-            self.PATTERN_MIT_SPEED,
-            self.PATTERN_MIT_TORQUE,
-            self.PATTERN_MIT_FULL,
-        )
-        
+        # 检查是否使用MIT模式,如果是且未初始化,则先初始化
+        is_mit_mode = control_mode in (self.PATTERN_MIT, self._PATTERN_MIT_TORQUE)
+
         if is_mit_mode and not self._mit_mode_initialized:
             # 只有当 auto_init_mit=True 时才自动初始化
             if self.auto_init_mit:
@@ -1017,14 +1016,8 @@ class ServoDriver:
         if control_mode is None:
             control_mode = self.PATTERN_PV
         
-        # 检查是否使用MIT系列模式
-        is_mit_mode = control_mode in (
-            self.PATTERN_MIT,
-            self.PATTERN_MIT_POSITION,
-            self.PATTERN_MIT_SPEED,
-            self.PATTERN_MIT_TORQUE,
-            self.PATTERN_MIT_FULL,
-        )
+        # 检查是否使用MIT模式
+        is_mit_mode = control_mode in (self.PATTERN_MIT, self._PATTERN_MIT_TORQUE)
         
         if is_mit_mode and not self._mit_mode_initialized:
             if self.auto_init_mit:
@@ -1097,7 +1090,7 @@ class ServoDriver:
             control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02, AIM_HEAD=0x04, 
                          AIM_LOIN=0x08, AIM_LEG=0x10, AIM_UNDERPAN=0x20)
                          默认使用实例的 default_control_aim (默认为 AIM_OPERATION)
-            control_mode: 控制模式元组 (PATTERN_PV, PATTERN_PVT, PATTERN_V, PATTERN_MIT)
+            control_mode: 控制模式元组 (PATTERN_PV, PATTERN_MIT)
                           格式: (模式类型, 每电机字节数/2)
 
         Returns:
@@ -1251,66 +1244,17 @@ class ServoDriver:
                 frame[offset + 2] = speed_hw_value & 0xFF
                 frame[offset + 3] = (speed_hw_value >> 8) & 0xFF
                 
-            elif control_mode == self.PATTERN_PVT:
-                # PVT模式: 位置(2字节) + 速度(2字节) + 扭矩(2字节) = 6字节
-                speed_val = speed_list[joint_idx]
-                speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
-                torque_val = torque_list[joint_idx]
-                torque_hw_value = self._value_to_hardware_value_torque(torque_val, direction)
+            elif control_mode == self.PATTERN_MIT:
+                # MIT位置模式: 仅位置(2字节) = 2字节
                 frame[offset] = hardware_value & 0xFF
                 frame[offset + 1] = (hardware_value >> 8) & 0xFF
-                frame[offset + 2] = speed_hw_value & 0xFF
-                frame[offset + 3] = (speed_hw_value >> 8) & 0xFF
-                frame[offset + 4] = torque_hw_value & 0xFF
-                frame[offset + 5] = (torque_hw_value >> 8) & 0xFF
-                
-            elif control_mode == self.PATTERN_V:
-                # V模式: 速度(2字节) = 2字节
-                speed_val = speed_list[joint_idx]
-                speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
-                frame[offset] = speed_hw_value & 0xFF
-                frame[offset + 1] = (speed_hw_value >> 8) & 0xFF
-                
-            elif control_mode in (self.PATTERN_MIT, self.PATTERN_MIT_TORQUE):
-                # MIT扭矩模式: 仅扭矩(2字节) = 2字节
+
+            elif control_mode == self._PATTERN_MIT_TORQUE:
+                # MIT扭矩模式(内部): 仅扭矩(2字节) = 2字节
                 torque_val = torque_list[joint_idx]
                 torque_hw_value = self._value_to_hardware_value_torque(torque_val, direction)
                 frame[offset] = torque_hw_value & 0xFF
                 frame[offset + 1] = (torque_hw_value >> 8) & 0xFF
-                
-            elif control_mode == self.PATTERN_MIT_POSITION:
-                # MIT位置模式: 仅位置(2字节) = 2字节
-                frame[offset] = hardware_value & 0xFF
-                frame[offset + 1] = (hardware_value >> 8) & 0xFF
-                
-            elif control_mode == self.PATTERN_MIT_SPEED:
-                # MIT速度模式: 仅速度(2字节) = 2字节
-                speed_val = speed_list[joint_idx]
-                speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
-                frame[offset] = speed_hw_value & 0xFF
-                frame[offset + 1] = (speed_hw_value >> 8) & 0xFF
-
-            elif control_mode == self.PATTERN_MIT_FULL:
-                # MIT全参数模式: P(2B) + V(2B) + T(2B) + Kp(2B) + Kd(2B) = 10字节
-                speed_val = speed_list[joint_idx]
-                speed_hw_value = self._value_to_hardware_value_speed(speed_val, direction)
-                torque_val = torque_list[joint_idx]
-                torque_hw_value = self._value_to_hardware_value_torque(torque_val, direction)
-                # Kp/Kd: [0,500] → 16bit, [0,5] → 16bit
-                kp_val = mit_kp[joint_idx] if mit_kp else (50.0 if joint_idx < 3 else 20.0)
-                kd_val = mit_kd[joint_idx] if mit_kd else (2.0 if joint_idx < 3 else 1.0)
-                kp_hw = self._float_to_uint(kp_val, 0.0, 500.0, 16)
-                kd_hw = self._float_to_uint(kd_val, 0.0, 5.0, 16)
-                frame[offset] = hardware_value & 0xFF
-                frame[offset + 1] = (hardware_value >> 8) & 0xFF
-                frame[offset + 2] = speed_hw_value & 0xFF
-                frame[offset + 3] = (speed_hw_value >> 8) & 0xFF
-                frame[offset + 4] = torque_hw_value & 0xFF
-                frame[offset + 5] = (torque_hw_value >> 8) & 0xFF
-                frame[offset + 6] = kp_hw & 0xFF
-                frame[offset + 7] = (kp_hw >> 8) & 0xFF
-                frame[offset + 8] = kd_hw & 0xFF
-                frame[offset + 9] = (kd_hw >> 8) & 0xFF
 
         # Gripper data (夹爪不需要方向校正，始终使用默认方向)
         gripper_offset = data_start + 6 * bytes_per_motor
@@ -1329,56 +1273,16 @@ class ServoDriver:
             frame[gripper_offset + 2] = gripper_speed_hw_value & 0xFF
             frame[gripper_offset + 3] = (gripper_speed_hw_value >> 8) & 0xFF
             
-        elif control_mode == self.PATTERN_PVT:
-            gripper_speed_hw_value = self._value_to_hardware_value_speed(gripper_speed_val)
-            gripper_torque_hw_value = self._value_to_hardware_value_torque(gripper_torque_val)
-            frame[gripper_offset] = gripper_hw_value & 0xFF
-            frame[gripper_offset + 1] = (gripper_hw_value >> 8) & 0xFF
-            frame[gripper_offset + 2] = gripper_speed_hw_value & 0xFF
-            frame[gripper_offset + 3] = (gripper_speed_hw_value >> 8) & 0xFF
-            frame[gripper_offset + 4] = gripper_torque_hw_value & 0xFF
-            frame[gripper_offset + 5] = (gripper_torque_hw_value >> 8) & 0xFF
-            
-        elif control_mode == self.PATTERN_V:
-            gripper_speed_hw_value = self._value_to_hardware_value_speed(gripper_speed_val)
-            frame[gripper_offset] = gripper_speed_hw_value & 0xFF
-            frame[gripper_offset + 1] = (gripper_speed_hw_value >> 8) & 0xFF
-            
-        elif control_mode in (self.PATTERN_MIT, self.PATTERN_MIT_TORQUE):
-            # MIT扭矩模式: 仅扭矩(2字节) = 2字节
-            gripper_torque_hw_value = self._value_to_hardware_value_torque(gripper_torque_val)
-            frame[gripper_offset] = gripper_torque_hw_value & 0xFF
-            frame[gripper_offset + 1] = (gripper_torque_hw_value >> 8) & 0xFF
-            
-        elif control_mode == self.PATTERN_MIT_POSITION:
+        elif control_mode == self.PATTERN_MIT:
             # MIT位置模式: 仅位置(2字节) = 2字节
             frame[gripper_offset] = gripper_hw_value & 0xFF
             frame[gripper_offset + 1] = (gripper_hw_value >> 8) & 0xFF
-            
-        elif control_mode == self.PATTERN_MIT_SPEED:
-            # MIT速度模式: 仅速度(2字节) = 2字节
-            gripper_speed_hw_value = self._value_to_hardware_value_speed(gripper_speed_val)
-            frame[gripper_offset] = gripper_speed_hw_value & 0xFF
-            frame[gripper_offset + 1] = (gripper_speed_hw_value >> 8) & 0xFF
 
-        elif control_mode == self.PATTERN_MIT_FULL:
-            # MIT全参数模式: 夹爪 P+V+T+Kp+Kd = 10字节
-            gripper_speed_hw_value = self._value_to_hardware_value_speed(gripper_speed_val)
+        elif control_mode == self._PATTERN_MIT_TORQUE:
+            # MIT扭矩模式(内部): 仅扭矩(2字节) = 2字节
             gripper_torque_hw_value = self._value_to_hardware_value_torque(gripper_torque_val)
-            kp_val = mit_kp[6] if mit_kp and len(mit_kp) > 6 else 20.0
-            kd_val = mit_kd[6] if mit_kd and len(mit_kd) > 6 else 1.0
-            kp_hw = self._float_to_uint(kp_val, 0.0, 500.0, 16)
-            kd_hw = self._float_to_uint(kd_val, 0.0, 5.0, 16)
-            frame[gripper_offset] = gripper_hw_value & 0xFF
-            frame[gripper_offset + 1] = (gripper_hw_value >> 8) & 0xFF
-            frame[gripper_offset + 2] = gripper_speed_hw_value & 0xFF
-            frame[gripper_offset + 3] = (gripper_speed_hw_value >> 8) & 0xFF
-            frame[gripper_offset + 4] = gripper_torque_hw_value & 0xFF
-            frame[gripper_offset + 5] = (gripper_torque_hw_value >> 8) & 0xFF
-            frame[gripper_offset + 6] = kp_hw & 0xFF
-            frame[gripper_offset + 7] = (kp_hw >> 8) & 0xFF
-            frame[gripper_offset + 8] = kd_hw & 0xFF
-            frame[gripper_offset + 9] = (kd_hw >> 8) & 0xFF
+            frame[gripper_offset] = gripper_torque_hw_value & 0xFF
+            frame[gripper_offset + 1] = (gripper_torque_hw_value >> 8) & 0xFF
 
         # 计算校验位
         frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
