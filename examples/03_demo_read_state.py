@@ -45,7 +45,8 @@ def main(args):
         base_link=args.base_link,
         end_link=args.end_link,
         control_aim=args.control_aim,
-        control_mode=args.control_mode
+        control_mode=args.control_mode,
+        skip_mit_init=True  # 读取模式：不发送Kp/Kd，保持机械臂当前状态（可拖动/重力补偿）
     )
     
     try:

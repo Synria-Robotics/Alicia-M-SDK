@@ -97,6 +97,7 @@ def create_robot(
     baudrate: int = 1000000,
     control_aim: str = None,
     control_mode: str = None,
+    skip_mit_init: bool = False,
 ) -> SynriaRobotAPI:
     """
     Create robot instance.
@@ -117,6 +118,7 @@ def create_robot(
     :param baudrate: Serial port baudrate (default: 1000000)
     :param control_aim: Control aim string - "teach", "operation"
     :param control_mode: Control mode string - "pv" or "mit"
+    :param skip_mit_init: Skip MIT Kp/Kd initialization, keep arm in current state (for read-only use)
     :return: SynriaRobotAPI instance
     """
     # Get default variant for the specified version
@@ -183,7 +185,8 @@ def create_robot(
         auto_connect=auto_connect,
         backend=backend,
         device=device,
-        control_mode=control_mode_const
+        control_mode=control_mode_const,
+        skip_mit_init=skip_mit_init
     )
 
     return robot

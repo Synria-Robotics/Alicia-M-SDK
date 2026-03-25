@@ -57,7 +57,8 @@ class SynriaRobotAPI:
                  auto_connect: bool = True,
                  backend: Optional[str] = None,
                  device: str = "cpu",
-                 control_mode: tuple = None):
+                 control_mode: tuple = None,
+                 skip_mit_init: bool = False):
         """Initialize robot API.
 
         :param servo_driver: Servo driver instance (low-level hardware)
@@ -67,7 +68,9 @@ class SynriaRobotAPI:
         :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
         :param control_mode: Control mode tuple (ServoDriver.PATTERN_PV or PATTERN_MIT).
                             If None, defaults to PATTERN_PV. Must be set before connect() for MIT init.
+        :param skip_mit_init: Skip MIT Kp/Kd initialization, keep arm in current state (for read-only use)
         """
+        self._skip_mit_init = skip_mit_init
         self.servo_driver = servo_driver
         self.data_parser = servo_driver.data_parser  # Direct access to data parser
         self.robot_model = robot_model
@@ -148,8 +151,13 @@ class SynriaRobotAPI:
         1. 通过0x11指令切换固件到MIT模式
         2. 发送Kp/Kd参数配置PD控制器
         如果硬件已通过按键切换到MIT模式，步骤1是幂等的；步骤2是必需的。
+
+        如果 skip_mit_init=True，跳过初始化，保持机械臂当前状态（可拖动/重力补偿）。
         """
         is_mit = self.control_mode != ServoDriver.PATTERN_PV and self.control_mode is not None
+        if is_mit and self._skip_mit_init:
+            logger.info("MIT control mode detected, skipping Kp/Kd init (read-only mode, arm stays in current state)")
+            return
         if is_mit:
             logger.info("MIT control mode detected, initializing MIT parameters...")
             # 跳过固件模式切换：假定硬件已通过按键切换到MIT模式，仅发送Kp/Kd参数
@@ -553,10 +561,13 @@ class SynriaRobotAPI:
                         backend: str = 'numpy',
                         method: str = 'dls',
                         display: bool = True,
-                        tolerance: float = 1e-4,
-                        max_iters: int = 100,
-                        multi_start: int = 0,
-                        use_random_init: bool = False,
+                        pos_tol: float = 1e-3,
+                        ori_tol: float = 1e-3,
+                        max_iters: int = 500,
+                        num_initial_guesses: int = 10,
+                        initial_guess_strategy: str = 'current',
+                        initial_guess_scale: float = 1.0,
+                        random_seed: Optional[int] = None,
                         speed_deg_s: Union[int, float, List[float], np.ndarray] = 10,
                         gripper_speed_deg_s: Optional[float] = 57.3,
                         execute: bool = True) -> Dict:
@@ -566,10 +577,13 @@ class SynriaRobotAPI:
         :param backend: Computation backend, 'numpy' or 'torch'
         :param method: IK solver method, 'dls', 'pinv', or 'transpose'
         :param display: Display solution details
-        :param tolerance: Position and orientation tolerance
+        :param pos_tol: Position tolerance in meters
+        :param ori_tol: Orientation tolerance in radians
         :param max_iters: Maximum number of iterations
-        :param multi_start: Number of multi-start attempts, 0 to disable
-        :param use_random_init: Use random initial guess instead of current pose
+        :param num_initial_guesses: Number of initial guesses for multi-start
+        :param initial_guess_strategy: Initial guess strategy ('zero', 'random', 'sobol', 'latin', 'center', 'uniform', 'current')
+        :param initial_guess_scale: Scale factor for initial guesses (0.0 to 1.0)
+        :param random_seed: Random seed for reproducibility
         :param speed_deg_s: Motion speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s)
         :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
         :param execute: Execute motion if True
@@ -582,37 +596,41 @@ class SynriaRobotAPI:
         pose_matrix = make_transform(rotation_matrix, position)
 
         # Get initial guess
-        if use_random_init:
-            # Generate random initial guess within joint limits
-            q_init = self._generate_random_q(scale=0.5)
-            if display:
-                logger.info("使用随机初始值")
+        q_init = self.get_robot_state("joint")
+        if q_init is None:
+            return {
+                'success': False,
+                'message': '无法获取当前关节角度',
+                'q': None
+            }
+
+        # Determine actual strategy
+        if initial_guess_strategy == 'current':
+            # Use current joints as base, with 'random' strategy for multi-start
+            actual_strategy = 'random'
+            q0 = q_init
         else:
-            q_init = self.get_robot_state("joint")
-            if q_init is None:
-                return {
-                    'success': False,
-                    'message': '无法获取当前关节角度',
-                    'q': None
-                }
+            actual_strategy = initial_guess_strategy
+            q0 = q_init
 
         if display:
             logger.info(f"初始关节角度 (rad): {[f'{q:+.4f}' for q in q_init]}")
             logger.info(f"初始关节角度 (deg): {[f'{np.rad2deg(q):+.2f}' for q in q_init]}")
-            logger.info(f"正在求解IK (方法: {method}, 最大迭代: {max_iters})...")
+            logger.info(f"正在求解IK (方法: {method}, 最大迭代: {max_iters}, 初始猜测: {num_initial_guesses})...")
 
         # Solve inverse kinematics
         ik_result = inverse_kinematics(
             self.robot_model,
             pose_matrix,
-            q_init,
-            backend=backend,
+            q0=q0,
             method=method,
             max_iters=max_iters,
-            pos_tol=tolerance,
-            ori_tol=tolerance,
-            multi_start=multi_start,
-            multi_noise=0.3,
+            pos_tol=pos_tol,
+            ori_tol=ori_tol,
+            num_initial_guesses=num_initial_guesses,
+            initial_guess_strategy=actual_strategy,
+            initial_guess_scale=initial_guess_scale,
+            random_seed=random_seed,
             use_analytic_jacobian=True
         )
 
@@ -651,20 +669,20 @@ class SynriaRobotAPI:
 
             return ik_result
     
-    def set_pose_target(self, 
-                       target_pose: List[float], 
-                       backend: str = 'numpy', 
-                       method: str = 'dls', 
-                       display: bool = True, 
-                       tolerance: float = 1e-3, 
-                       max_iters: int = 1000,
+    def set_pose_target(self,
+                       target_pose: List[float],
+                       backend: str = 'numpy',
+                       method: str = 'dls',
+                       display: bool = True,
+                       tolerance: float = 1e-3,
+                       max_iters: int = 500,
                        multi_start: int = 0,
                        use_random_init: bool = False,
                        speed_factor: float = 1.0,
                        execute: bool = True,
                        joint_limits: Optional[Tuple[List[float], List[float]]] = None) -> Dict:
         """Move end-effector to target pose using inverse kinematics.
-        
+
         .. deprecated:: 1.0.0
            Use :meth:`set_pose` instead. This method is kept for backward compatibility.
 
@@ -674,8 +692,8 @@ class SynriaRobotAPI:
         :param display: Display solution details
         :param tolerance: Position and orientation tolerance
         :param max_iters: Maximum number of iterations
-        :param multi_start: Number of multi-start attempts, 0 to disable
-        :param use_random_init: Use random initial guess instead of current pose
+        :param multi_start: Number of multi-start attempts, 0 to disable (mapped to num_initial_guesses)
+        :param use_random_init: Use random initial guess instead of current pose (deprecated, ignored)
         :param speed_factor: Motion speed multiplier
         :param execute: Execute motion if True
         :param joint_limits: Custom joint limits (deprecated, not used)
@@ -687,22 +705,23 @@ class SynriaRobotAPI:
             DeprecationWarning,
             stacklevel=2
         )
-        
+
         # Convert speed_factor to speed_deg_s
-        # Default speed is typically around 5-10 deg/s
         default_speed_deg_s = 10
         speed_deg_s = int(default_speed_deg_s * speed_factor)
-        
-        # Use new set_pose method with converted parameters
+
+        # Map old multi_start to new num_initial_guesses
+        num_initial_guesses = max(multi_start, 10)
+
         return self.set_pose(
             target_pose=target_pose,
             backend=backend,
             method=method,
             display=display,
-            tolerance=tolerance,
+            pos_tol=tolerance,
+            ori_tol=tolerance,
             max_iters=max_iters,
-            multi_start=multi_start,
-            use_random_init=use_random_init,
+            num_initial_guesses=num_initial_guesses,
             speed_deg_s=speed_deg_s,
             execute=execute
         )
