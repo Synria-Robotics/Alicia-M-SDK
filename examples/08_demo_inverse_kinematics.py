@@ -151,7 +151,7 @@ def main(args):
             success = robot.set_robot_state(
                 target_joints=q_ik,
                 joint_format='rad',
-                speed_deg_s=args.speed_deg_s,
+                speed=args.speed,
                 wait_for_completion=True,
                 timeout=10
             )
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     
     # Robot connection settings
     parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
-    parser.add_argument('--speed_deg_s', type=int, default=10,  help="关节运动速度 (单位: 度/秒，默认: 10，范围: 5-400度/秒)")
+    parser.add_argument('--speed', type=int, default=7,  help="关节运动速度 (默认: 7，范围: 0-400)")
     parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (可选: v1_0, v1_1，默认: v1_1)")
     parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称, world 或 base_link等")
     parser.add_argument('--end_link', type=str, default="link6", help="末端执行器链路名称, tool0 或 link6等")

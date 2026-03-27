@@ -26,7 +26,7 @@ class HardwareExecutor:
                 visualize: bool = False,
                 gripper_traj: List[float] = None,
                 interaction: bool = False,
-                speed_deg_s: float = 5.0,
+                speed: float = 4.0,
                 use_mit_mode: bool = False,
                 playback_hz: float = 50.0,
                 ):
@@ -37,7 +37,7 @@ class HardwareExecutor:
         :param visualize: 是否在执行前绘图
         :param gripper_traj: 夹爪轨迹（可选），与关节轨迹对齐
         :param interaction: 是否等待用户确认
-        :param speed_deg_s: PV模式下的关节速度 (deg/s)
+        :param speed: PV模式下的关节速度 (deg/s)
         :param use_mit_mode: 是否使用MIT位置模式（用于高频回放）
         :param playback_hz: MIT模式下的回放频率 (Hz)
         :return: True if executed, False if cancelled
@@ -67,19 +67,19 @@ class HardwareExecutor:
             return self._execute_pv_mode(
                 joint_traj, 
                 gripper_traj, 
-                speed_deg_s
+                speed
             )
     
     def _execute_pv_mode(self,
                         joint_traj: List[List[float]],
                         gripper_traj: Optional[List[float]],
-                        speed_deg_s: float) -> bool:
+                        speed: float) -> bool:
         """
         使用PV模式执行轨迹（低频，带速度控制）
 
         :param joint_traj: 关节轨迹
         :param gripper_traj: 夹爪轨迹
-        :param speed_deg_s: 关节速度 (deg/s)
+        :param speed: 关节速度 (deg/s)
         :return: True if executed successfully
         """
         logger.info(f"[PV模式] 执行轨迹，共 {len(joint_traj)} 个点")
@@ -94,7 +94,7 @@ class HardwareExecutor:
             self.joint_controller.set_joint_and_gripper(
                 joint_angles=point,
                 gripper_value=g,
-                speed_deg_s=speed_deg_s,
+                speed=speed,
                 control_aim=self.joint_controller.default_control_aim,
             )
             time.sleep(self.delay)
@@ -140,7 +140,7 @@ class HardwareExecutor:
             self.joint_controller.set_joint_and_gripper(
                 joint_angles=point,
                 gripper_value=g,
-                speed_deg_s=0.0,  # MIT位置模式不使用速度
+                speed=0.0,  # MIT位置模式不使用速度
                 torque_nm=0.0,    # MIT位置模式不使用扭矩
                 control_aim=self.joint_controller.default_control_aim,
                 control_mode=self.joint_controller.PATTERN_MIT

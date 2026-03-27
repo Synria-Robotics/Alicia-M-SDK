@@ -541,11 +541,11 @@ class SimpleDragTeaching:
                     gripper_value = point.get("grip", 0.0)
                     
                     # 使用combined control直接设置关节和夹爪，无插值
-                    # 30 rad/s ≈ 1718.9 deg/s (超出PV模式范围，裁剪到573 deg/s)
+                    # 最大速度回放
                     self.controller.servo_driver.set_joint_and_gripper(
                         joint_angles=point["q"],
                         gripper_value=gripper_value,
-                        speed_deg_s=573.0  # 最大速度回放
+                        speed=400  # 最大速度
                     )
                     
                     print(f"[回放] {i+1}/{len(data)}")
@@ -569,7 +569,7 @@ class SimpleDragTeaching:
                     gripper_value = point.get("grip", 0.0)
                     if gripper_value is not None:
                         try:
-                            # 夹爪值已经是0-100范围，直接使用
+                            # 夹爪值已经是0-1000范围，直接使用
                             self.controller.set_gripper_target(value=gripper_value, wait_for_completion=False)
                         except:
                             pass
@@ -801,7 +801,7 @@ class GravityCompensationTeaching:
         self.servo_driver.set_joint_and_gripper(
             joint_angles=None,
             gripper_value=None,
-            speed_deg_s=0.0,
+            speed=0.0,
             torque_nm=zero_torques,
             control_aim=self.servo_driver.default_control_aim,
             control_mode=self.servo_driver._PATTERN_MIT_TORQUE
@@ -833,7 +833,7 @@ class GravityCompensationTeaching:
                 self.servo_driver.set_joint_and_gripper(
                     joint_angles=None,
                     gripper_value=None,
-                    speed_deg_s=0.0,
+                    speed=0.0,
                     torque_nm=scaled_torques,
                     control_aim=self.servo_driver.default_control_aim,
                     control_mode=self.servo_driver._PATTERN_MIT_TORQUE

@@ -162,7 +162,7 @@ def print_joint_state(servo_driver, debug_mode=False):
     print(f"\n【关节状态 - DEBUG】")
     if joint_state:
         print(f"  关节角度 (弧度): {[f'{a:.3f}' for a in joint_state.angles]}")
-        print(f"  夹爪开合: {joint_state.gripper:.2f}%")
+        print(f"  夹爪开合: {joint_state.gripper:.1f}/1000")
         print(f"  时间戳: {joint_state.timestamp:.3f}")
     else:
         print(f"  关节数据: 未接收")

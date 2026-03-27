@@ -6,7 +6,7 @@ Licensed under GPL
 
 Features:
 - 7 sliders for 6 joints + 1 gripper control
-- Range: -180° to 180° for joints, 0-100 for gripper
+- Range: -180° to 180° for joints, 0-1000 for gripper
 - High frequency control (~200Hz)
 - Real-time joint position feedback display
 """
@@ -26,11 +26,11 @@ import os
 class JointSliderController:
     """GUI controller for robot joint control using sliders."""
     
-    def __init__(self, robot, speed_deg_s=200):
+    def __init__(self, robot, speed=200):
         """Initialize the slider controller.
         
         :param robot: Robot API instance
-        :param speed_deg_s: Joint speed in degrees per second
+        :param speed: Joint speed in degrees per second
         """
         self.robot = robot
         self.running = False
@@ -42,14 +42,14 @@ class JointSliderController:
         self.control_interval = 1.0 / self.control_frequency  # 0.005 seconds
         
         # Speed parameter (in deg/s for all 6 joints)
-        self.speed_deg_s = speed_deg_s
+        self.speed = speed
     
         
         # Joint limits (degrees)
         self.joint_min = [-150.0,-170.0, -170.0, -80.0, -80.0, -80.0]  # 6个关节的最小值
         self.joint_max = [ 150.0,   0.0,    0.0,  80.0,  80.0,  80.0] 
         self.gripper_min = 0.0
-        self.gripper_max = 100.0
+        self.gripper_max = 1000.0
         
         # Current target values (degrees)
         self.target_joints = [0.0] * 7  # 6 joints + 1 gripper
@@ -84,7 +84,7 @@ class JointSliderController:
         
         # Control frequency info
         freq_label = ttk.Label(main_frame, 
-                               text=f"控制频率: {self.control_frequency} Hz | 速度: {self.speed_deg_s}°/s",
+                               text=f"控制频率: {self.control_frequency} Hz | 速度: {self.speed}/400",
                                font=('Arial', 10))
         freq_label.pack(pady=5)
         
@@ -163,8 +163,8 @@ class JointSliderController:
                             orient=tk.HORIZONTAL, variable=var, length=400,
                             command=lambda val, idx=index: self._on_slider_change(idx, val))
         else:
-            # Gripper slider: 0 to 100
-            var = tk.DoubleVar(value=50.0)
+            # Gripper slider: 0 to 1000
+            var = tk.DoubleVar(value=500.0)
             slider = ttk.Scale(row_frame, from_=self.gripper_min, to=self.gripper_max,
                             orient=tk.HORIZONTAL, variable=var, length=400,
                             command=lambda val, idx=index: self._on_slider_change(idx, val))
@@ -242,7 +242,7 @@ class JointSliderController:
                 target = self.target_joints.copy()
                 
                 # Speed is in deg/s
-                speed_deg_s = self.speed_deg_s
+                speed = self.speed
                 
                 # 使用 set_robot_state 方法发送控制命令
                 # 注意：wait_for_completion=False 表示不等待到达目标位置，实现高频控制
@@ -252,7 +252,7 @@ class JointSliderController:
                     gripper_value=target[6],
                     joint_format='deg',  # 明确指定输入是角度
                     wait_for_completion=False,
-                    speed_deg_s=speed_deg_s
+                    speed=speed
                 )
                 
                 if not success:
@@ -296,7 +296,7 @@ class JointSliderController:
             # If control is running, it will automatically send the zero position
             if not self.running:
                 # Send zero position command using go_home method
-                self.robot.go_home(speed_deg_s=self.speed_deg_s)
+                self.robot.go_home(speed=self.speed)
             
             self.status_label.config(text="状态: 正在回零位...", foreground='blue')
             
@@ -405,7 +405,7 @@ def main(args):
         
         # Create and run the slider controller
         try:
-            controller = JointSliderController(robot, speed_deg_s=args.speed_deg_s)
+            controller = JointSliderController(robot, speed=args.speed)
             controller.run()
         except tk.TclError as e:
             print(f"\n✗ GUI显示错误: {e}")
@@ -446,7 +446,7 @@ if __name__ == "__main__":
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
                         help='Control mode: pv or mit (默认: pv)')
-    parser.add_argument('--speed_deg_s', type=int, default=300, help="关节运动速度 (单位: 度/秒，默认: 300，范围: 10-400度/秒)")
+    parser.add_argument('--speed', type=int, default=210, help="关节运动速度 (默认: 210，范围: 0-400)")
     parser.add_argument('--debug', action='store_true',
                         help="启用调试模式")
     

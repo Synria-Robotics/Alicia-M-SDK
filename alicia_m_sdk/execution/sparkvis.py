@@ -37,7 +37,7 @@ class SparkVisBridge:
         enable_robot_sync: bool = True,
         robot_sync_rate_hz: float = 500.0,  # 提升到500Hz
         log_source: str = "ui",  # ui | robot | both
-        speed_deg_s: Optional[List[float]] = None  # 关节速度设置（度/秒）
+        speed: Optional[List[float]] = None  # 关节速度设置（度/秒）
     ):
         """Initialize SparkVis bridge.
         
@@ -58,7 +58,7 @@ class SparkVisBridge:
         self.robot_sync_rate_hz = robot_sync_rate_hz
         self.robot_sync_interval = 1.0 / max(1e-3, robot_sync_rate_hz)
         self.log_source = log_source.lower()
-        self.speed_deg_s = speed_deg_s  # 保存速度设置
+        self.speed = speed  # 保存速度设置
         
 
         # WebSocket clients
@@ -76,7 +76,7 @@ class SparkVisBridge:
             print(f"[Log] 初始化关节目标值失败: {e}")
 
         # 缓存上一次的夹爪值，防止UI不发送夹爪时默认闭合
-        self.last_gripper_value = 50.0  # 默认半开状态 (50%)
+        self.last_gripper_value = 500.0  # 默认半开状态 (500/1000)
         try:
             # 尝试初始化为当前机器人夹爪状态
             current_gripper = self.robot.get_robot_state("gripper")
@@ -131,13 +131,13 @@ class SparkVisBridge:
         """Read current robot joint states and gripper position."""
         try:
             joints = self.robot.get_robot_state("joint")  # 6 rad
-            gripper_value = self.robot.get_robot_state("gripper")  # 0-100
+            gripper_value = self.robot.get_robot_state("gripper")  # 0-1000
             if joints is None or gripper_value is None:
                 return None
-            
+
             # Convert gripper to percentage [0..1] for UI
             try:
-                gripper_pct = max(0.0, min(1.0, float(gripper_value) / 100.0))
+                gripper_pct = max(0.0, min(1.0, float(gripper_value) / 1000.0))
             except Exception:
                 gripper_pct = 0.0
                 
@@ -199,13 +199,13 @@ class SparkVisBridge:
             # 如果UI发送了gripper：使用UI值并更新缓存
             # 如果UI未发送gripper：使用缓存值保持当前状态
             pct = max(0.0, min(1.0, float(gripper_val)))
-            gripper_angle = pct * 100.0
+            gripper_angle = pct * 1000.0
             
             # 合并关节和夹爪命令（单次串口通信）
             self.robot.servo_driver.set_joint_and_gripper(
                 joint_angles=joints_rad,
                 gripper_value=gripper_angle,
-                speed_deg_s=self.speed_deg_s[0] if self.speed_deg_s else 500,  # 默认 500 deg/s
+                speed=self.speed[0] if self.speed else 350,  # 默认 350 (≈500 deg/s)
             )
 
             # 记录 UI 命令到 CSV (优化: 减少 flush 频率)

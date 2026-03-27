@@ -44,24 +44,24 @@ def main(args):
     )
     
     try:
-        # Get gripper value (0-100)
+        # Get gripper value (0-1000)
         gripper_value = robot.get_robot_state("gripper")
         if gripper_value is not None:
-            logger.info(f"Gripper value: {gripper_value:.1f}")
+            logger.info(f"Gripper value: {gripper_value:.1f}/1000")
         else:
             logger.warning("Failed to read gripper value")
-        
+
         # Test 1: Open gripper
-        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=200)
+        robot.set_robot_state(gripper_value=1000, wait_for_completion=True, gripper_speed=100)
         time.sleep(1)
         # Test 2: Partially open
-        robot.set_robot_state(gripper_value=50, wait_for_completion=True, gripper_speed_deg_s=200)
+        robot.set_robot_state(gripper_value=500, wait_for_completion=True, gripper_speed=100)
         time.sleep(1)
         # Test 3: Open gripper again
-        robot.set_robot_state(gripper_value=100, wait_for_completion=True, gripper_speed_deg_s=200)
+        robot.set_robot_state(gripper_value=1000, wait_for_completion=True, gripper_speed=100)
         time.sleep(1)
         # Test 4: Close gripper
-        robot.set_robot_state(gripper_value=0, wait_for_completion=True, gripper_speed_deg_s=200)
+        robot.set_robot_state(gripper_value=0, wait_for_completion=True, gripper_speed=100)
         time.sleep(1)
 
         

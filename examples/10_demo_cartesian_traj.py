@@ -154,7 +154,7 @@ def main(args):
     
     executor = CartesianTrajectoryExecutor(
         robot=robot,
-        speed_deg_s=args.speed_deg_s,
+        speed=args.speed,
         tolerance=0.5,
         timeout=args.timeout,
         progress_interval=50,
@@ -243,7 +243,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=666, help='Random seed')
     
     # Execution
-    parser.add_argument('--speed_deg_s', type=int, default=100, help="关节运动速度 (单位: 度/秒，默认: 100，范围: 10-400度/秒)")
+    parser.add_argument('--speed', type=int, default=70, help="关节运动速度 (默认: 70，范围: 0-400)")
     parser.add_argument('--timeout', type=float, default=10.0, help='Timeout per command (seconds)')
     
     # Other

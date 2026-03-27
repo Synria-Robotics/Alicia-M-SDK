@@ -50,6 +50,11 @@ def main(args):
     )
     
     try:
+        # 启用扩展状态请求（位置+速度+力矩）
+        robot.servo_driver.set_extended_state(enabled=True)
+        import time as _time
+        _time.sleep(0.1)  # 等待后台线程获取一次扩展数据
+
         # Print robot state once
         if args.single:
             robot.print_state(continuous=False, output_format=args.format, robot_type=args.robot_type)

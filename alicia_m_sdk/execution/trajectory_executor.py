@@ -40,7 +40,7 @@ class _BaseTrajectoryExecutor:
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 100,
+        speed: int = 70,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -53,7 +53,7 @@ class _BaseTrajectoryExecutor:
         """Initialize base trajectory executor.
         
         :param robot: Robot controller instance (must have set_robot_state method)
-        :param speed_deg_s: Joint speed in degrees per second (for PV mode)
+        :param speed: Joint speed in degrees per second (for PV mode)
         :param tolerance: Joint tolerance in radians for reaching target
         :param timeout: Timeout for each motion command in seconds
         :param progress_interval: Print progress every N points (0 to disable)
@@ -64,7 +64,7 @@ class _BaseTrajectoryExecutor:
         :param playback_hz: Playback frequency in Hz for MIT position mode (default: 200Hz)
         """
         self.robot = robot
-        self.speed_deg_s = speed_deg_s
+        self.speed = speed
         self.tolerance = tolerance
         self.timeout = timeout
         self.progress_interval = progress_interval
@@ -130,7 +130,7 @@ class _BaseTrajectoryExecutor:
         control_freq = n_points / duration if duration > 0 else 0.0
         
         beauty_print(f"Executing trajectory with {n_points} points...")
-        beauty_print(f"Speed: {self.speed_deg_s} deg/s")
+        beauty_print(f"Speed: {self.speed} deg/s")
         if duration > 0:
             beauty_print(f"Trajectory duration: {duration:.3f} s")
             beauty_print(f"Control frequency: {control_freq:.1f} Hz")
@@ -143,7 +143,7 @@ class _BaseTrajectoryExecutor:
             target_joints=joint_angles[0],
             gripper_value=first_gripper,
             joint_format='rad',
-            speed_deg_s=self.speed_deg_s,
+            speed=self.speed,
             tolerance=initial_tolerance,
             wait_for_completion=initial_wait,
             timeout=self.timeout
@@ -183,7 +183,7 @@ class _BaseTrajectoryExecutor:
                 target_joints=joint_angles[i],
                 gripper_value=gripper_val,
                 joint_format='rad',
-                speed_deg_s=self.speed_deg_s,
+                speed=self.speed,
                 tolerance=self.tolerance,
                 wait_for_completion=self.wait_for_completion,
                 timeout=self.timeout
@@ -309,7 +309,7 @@ class _BaseTrajectoryExecutor:
                 servo_driver.set_joint_and_gripper(
                     joint_angles=joint_angles[idx].tolist(),
                     gripper_value=g,
-                    speed_deg_s=0.0,  # MIT position mode doesn't use speed
+                    speed=0.0,  # MIT position mode doesn't use speed
                     torque_nm=0.0,    # MIT position mode doesn't use torque
                     control_aim=servo_driver.default_control_aim,
                     control_mode=servo_driver.PATTERN_MIT
@@ -365,7 +365,7 @@ class JointTrajectoryExecutor(_BaseTrajectoryExecutor):
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 500,
+        speed: int = 350,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -378,7 +378,7 @@ class JointTrajectoryExecutor(_BaseTrajectoryExecutor):
         """Initialize joint trajectory executor.
         
         :param robot: Robot controller instance (must have set_robot_state method)
-        :param speed_deg_s: Joint speed in degrees per second (for PV mode)
+        :param speed: Joint speed in degrees per second (for PV mode)
         :param tolerance: Joint tolerance in radians for reaching target
         :param timeout: Timeout for each motion command in seconds
         :param progress_interval: Print progress every N points (0 to disable)
@@ -390,7 +390,7 @@ class JointTrajectoryExecutor(_BaseTrajectoryExecutor):
         """
         super().__init__(
             robot=robot,
-            speed_deg_s=speed_deg_s,
+            speed=speed,
             tolerance=tolerance,
             timeout=timeout,
             progress_interval=progress_interval,
@@ -446,7 +446,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
     def __init__(
         self,
         robot,
-        speed_deg_s: int = 500,
+        speed: int = 350,
         tolerance: float = 0.5,
         timeout: float = 10.0,
         progress_interval: int = 50,
@@ -459,7 +459,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
         """Initialize Cartesian trajectory executor.
         
         :param robot: Robot controller instance (must have set_robot_state method)
-        :param speed_deg_s: Joint speed in degrees per second (for PV mode)
+        :param speed: Joint speed in degrees per second (for PV mode)
         :param tolerance: Joint tolerance in radians for reaching target
         :param timeout: Timeout for each motion command in seconds
         :param progress_interval: Print progress every N points (0 to disable)
@@ -471,7 +471,7 @@ class CartesianTrajectoryExecutor(_BaseTrajectoryExecutor):
         """
         super().__init__(
             robot=robot,
-            speed_deg_s=speed_deg_s,
+            speed=speed,
             tolerance=tolerance,
             timeout=timeout,
             progress_interval=progress_interval,

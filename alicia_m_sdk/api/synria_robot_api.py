@@ -191,7 +191,7 @@ class SynriaRobotAPI:
         :param info_type: Type of information to get. Options:
             - "joint_gripper": Returns JointState (arm joint angles, gripper value, timestamp, run_status_text)
             - "joint": Returns List[float] of arm joint angles (radians) only
-            - "gripper": Returns float gripper value (0-100) only
+            - "gripper": Returns float gripper value (0-1000) only
             - "version": Returns Dict with serial_number, hardware_version, firmware_version
             - "temperature": Returns List[float] of temperatures in Celsius
             - "velocity": Returns List[float] of velocities in degrees per second
@@ -204,10 +204,22 @@ class SynriaRobotAPI:
         if info_type == "gripper_type":
             return self._get_gripper_type_with_cache(timeout)
 
-        # Joint and gripper data are continuously updated by background thread
+        # Joint, gripper, velocity, torque data are continuously updated by background thread
         # Just read from cache (no need to send query command)
-        if info_type in ("joint_gripper", "joint", "gripper"):
-            # Give background thread a chance to update if data is stale
+        if info_type in ("joint_gripper", "joint", "gripper", "velocity", "torque"):
+            # velocity/torque requires extended state mode
+            if info_type in ("velocity", "torque"):
+                joint_state = self.data_parser.get_joint_state()
+                if joint_state is None:
+                    time.sleep(0.05)
+                    joint_state = self.data_parser.get_joint_state()
+                if joint_state is None:
+                    return None
+                if info_type == "velocity":
+                    return joint_state.velocities
+                else:
+                    return joint_state.torques
+
             result = self.data_parser.get_info(info_type)
             if result is None:
                 # Cache not ready yet, wait briefly for background thread
@@ -291,28 +303,28 @@ class SynriaRobotAPI:
 
     # ==================== Robot Control ====================
 
-    def go_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
+    def go_home(self, speed: Union[int, float, List[float], np.ndarray] = 15, gripper_speed: Optional[float] = 40):
         """Move robot to home position (all joints at 0 degrees) and wait until completion.
 
-        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
-        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
+        :param speed: Speed value, range [0, 400] (0=stop, 400=max). Can be int/float (same for all joints) or list/array (per-joint), default 20
+        :param gripper_speed: Gripper speed, range [0, 400], default 40
         """
         home_joints = [0.0] * 6
         self.set_robot_state(
             target_joints=home_joints, 
             gripper_value=None, 
-            speed_deg_s=speed_deg_s,
-            gripper_speed_deg_s=gripper_speed_deg_s,
+            speed=speed,
+            gripper_speed=gripper_speed,
             wait_for_completion=True
         )
     
-    def set_home(self, speed_deg_s: Union[int, float, List[float], np.ndarray] = 20, gripper_speed_deg_s: Optional[float] = 57.3):
+    def set_home(self, speed: Union[int, float, List[float], np.ndarray] = 15, gripper_speed: Optional[float] = 40):
         """DEPRECATED: Use go_home() instead. This method will be removed in future versions.
         
         Move robot to home position (all joints at 0 degrees) and wait until completion.
 
-        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
-        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
+        :param speed: Speed value, range [0, 400] (0=stop, 400=max). Can be int/float (same for all joints) or list/array (per-joint), default 20
+        :param gripper_speed: Gripper speed, range [0, 400], default 40
         """
         import warnings
         warnings.warn(
@@ -320,14 +332,14 @@ class SynriaRobotAPI:
             DeprecationWarning,
             stacklevel=2
         )
-        self.go_home(speed_deg_s=speed_deg_s, gripper_speed_deg_s=gripper_speed_deg_s)
+        self.go_home(speed=speed, gripper_speed=gripper_speed)
 
     def set_robot_state(self,
                         target_joints: Optional[List[float]] = None,
                         gripper_value: Optional[int] = None,
                         joint_format: str = 'deg',
-                        speed_deg_s: Union[int, float, List[float], np.ndarray] = 20,
-                        gripper_speed_deg_s: Optional[float] = 57.3,
+                        speed: Union[int, float, List[float], np.ndarray] = 15,
+                        gripper_speed: Optional[float] = 40,
                         tolerance: float = 0.1,
                         timeout: float = 10.0,
                         wait_for_completion: bool = True,
@@ -336,10 +348,10 @@ class SynriaRobotAPI:
         """Set joint angles and/or gripper in a single combined command.
 
         :param target_joints: Optional target joint angles. If None, keeps current
-        :param gripper_value: Optional gripper value (0-100). If None, keeps current
+        :param gripper_value: Optional gripper value (0-1000, 0=closed, 1000=open). If None, keeps current
         :param joint_format: Unit format for joints, 'rad' or 'deg'
-        :param speed_deg_s: Speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s), default 20
-        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
+        :param speed: Speed value, range [0, 400] (0=stop, 400=max). Can be int/float (same for all joints) or list/array (per-joint), default 20
+        :param gripper_speed: Gripper speed, range [0, 400], default 40
         :param tolerance: Rad, acceptable abs distance to target for joints
         :param timeout: Seconds, maximum wait time
         :param wait_for_completion: If True, wait until target reached
@@ -387,16 +399,15 @@ class SynriaRobotAPI:
 
         # 检查是否为MIT模式且需要等待完成
         # MIT + wait_for_completion: 跳过初始直发，由插值逻辑控制发送，避免初始抖动
-        # 使用 != PATTERN_PV 判断MIT（比精确匹配PATTERN_MIT更健壮，避免常量值不一致导致跳过插值）
         is_mit_wait = wait_for_completion and effective_control_mode != ServoDriver.PATTERN_PV and effective_control_mode is not None
 
         if not is_mit_wait:
-            # PV模式或MIT不等待: 直接发送目标位置
+            # PV模式或MIT不等待: 直接发送目标位置（关节+夹爪在同一帧中）
             success = self.servo_driver.set_joint_and_gripper(
                 joint_angles=target_joints,
                 gripper_value=gripper_value,
-                speed_deg_s=speed_deg_s,
-                gripper_speed_deg_s=gripper_speed_deg_s,
+                speed=speed,
+                gripper_speed=gripper_speed,
                 control_aim=effective_control_aim,
                 control_mode=effective_control_mode
             )
@@ -407,53 +418,45 @@ class SynriaRobotAPI:
 
         # Wait for completion if requested
         if wait_for_completion and (target_joints is not None or gripper_value is not None):
-            # Store control_mode temporarily for _wait_for_joint_target
             original_control_mode = self.control_mode
             if effective_control_mode is not None:
                 self.control_mode = effective_control_mode
-            
-            joint_result = True
-            gripper_result = True
-            
-            try:
-                # Wait for joints — 仅当用户明确提供了关节目标时才运行
-                # (target_joints可能被自动填充为当前位置，但不应触发关节等待)
-                if user_provided_joints and target_joints is not None:
-                    joint_result = self._wait_for_joint_target(
-                        target_joints=target_joints,
-                        tolerance_deg=tolerance * 180.0 / np.pi,  # Convert rad to deg
-                        timeout=timeout,
-                        log_prefix="等待关节接近目标",
-                        speed_deg_s=speed_deg_s
-                    )
 
-                # Wait for gripper if gripper_value is provided
-                if gripper_value is not None:
-                    gripper_tolerance = 5.0  # Increase tolerance to 5% for more reliable completion
-                    gripper_timeout = min(4.0, timeout)  # Use max 4 seconds for gripper wait
+            try:
+                if user_provided_joints and target_joints is not None:
+                    # 关节+夹爪同时运动（夹爪在同一个等待循环中插值）
+                    result = self._wait_for_joint_target(
+                        target_joints=target_joints,
+                        tolerance_deg=tolerance * 180.0 / np.pi,
+                        timeout=timeout,
+                        log_prefix="等待关节和夹爪接近目标" if gripper_value is not None else "等待关节接近目标",
+                        speed=speed,
+                        gripper_value=gripper_value,
+                        gripper_speed=gripper_speed
+                    )
+                    return result
+                elif gripper_value is not None:
+                    # 仅夹爪目标，无关节目标 — 单独等待夹爪
+                    is_mit = effective_control_mode != ServoDriver.PATTERN_PV and effective_control_mode is not None
+                    gripper_tolerance = 50.0
+                    gripper_timeout = min(4.0, timeout)
                     start_time = time.time()
 
-                    # 检查是否为MIT模式（MIT模式需要持续发送指令）
-                    is_mit = effective_control_mode != ServoDriver.PATTERN_PV and effective_control_mode is not None
-
-                    # MIT模式: 准备夹爪插值参数（立即开始，不等待）
                     gripper_start = None
                     gripper_total_time = 0
                     if is_mit:
                         gripper_start = self.get_robot_state("gripper")
                         if gripper_start is None:
                             gripper_start = 0.0
-                        grip_speed = abs(gripper_speed_deg_s) if gripper_speed_deg_s else 57.3
-                        grip_speed = max(grip_speed, 1.0)
-                        gripper_total_time = abs(gripper_value - gripper_start) / grip_speed
+                        # 夹爪速度: SDK speed → deg/s → 夹爪SDK单位/秒
+                        # 夹爪物理范围2.64rad=1000单位, 1 deg/s = π/180 * 1000/2.64 ≈ 6.61 单位/s
+                        _gs_deg = (abs(gripper_speed) if gripper_speed else 40) * 573.0 / 400.0
+                        _gs_units = max(_gs_deg * 6.61, 1.0)
+                        gripper_total_time = abs(gripper_value - gripper_start) / _gs_units
                     else:
-                        # PV模式: 给硬件一点时间响应
                         time.sleep(0.05)
 
-                    # Check gripper position with timeout
-                    gripper_reached = False
                     while time.time() - start_time < gripper_timeout:
-                        # MIT模式: 按速度限制发送插值夹爪位置
                         if is_mit:
                             elapsed_g = time.time() - start_time
                             if gripper_total_time > 0:
@@ -461,42 +464,25 @@ class SynriaRobotAPI:
                                 interp_gripper = gripper_start + prog * (gripper_value - gripper_start)
                             else:
                                 interp_gripper = gripper_value
-                            # 始终使用实时关节位置，避免因stale位置导致关节跳动
                             fresh_joints = self.get_robot_state("joint")
-                            grip_joint_angles = list(fresh_joints) if fresh_joints is not None else target_joints
+                            grip_joint_angles = list(fresh_joints) if fresh_joints is not None else (target_joints or [0.0] * 6)
                             self.servo_driver.set_joint_and_gripper(
                                 joint_angles=grip_joint_angles,
                                 gripper_value=interp_gripper,
-                                speed_deg_s=0.0,
-                                gripper_speed_deg_s=0.0,
+                                speed=0.0,
+                                gripper_speed=0.0,
                                 control_aim=effective_control_aim,
                                 control_mode=effective_control_mode
                             )
                         current_gripper = self.get_robot_state("gripper")
-                        if current_gripper is not None:
-                            if abs(current_gripper - gripper_value) <= gripper_tolerance:
-                                gripper_reached = True
-                                break
-                        time.sleep(0.005 if is_mit else 0.05)  # MIT: 200Hz, PV: 20Hz
-                    
-                    # If we didn't verify position but command was sent, still consider success
-                    if not gripper_reached:
-                        final_check = self.get_robot_state("gripper")
-                        if final_check is None:
-                            # State unavailable, but command was sent
-                            gripper_result = True
-                        else:
-                            # Check one more time with tolerance
-                            gripper_result = abs(final_check - gripper_value) <= gripper_tolerance
-                    else:
-                        gripper_result = True
-            finally:
-                # Restore original control_mode
-                self.control_mode = original_control_mode
-            
-            return joint_result and gripper_result
+                        if current_gripper is not None and abs(current_gripper - gripper_value) <= gripper_tolerance:
+                            return True
+                        time.sleep(0.005 if is_mit else 0.05)
 
-        # Either waiting was not requested, or no targets were provided.
+                    return True  # 命令已发送，超时也视为成功
+            finally:
+                self.control_mode = original_control_mode
+
         return True
 
     # ==================== Gripper Control ====================
@@ -510,7 +496,7 @@ class SynriaRobotAPI:
         """Control gripper position.
 
         :param command: Command string, 'open' or 'close'
-        :param value: Gripper value, 0 (closed) to 100 (open)
+        :param value: Gripper value, 0 (closed) to 1000 (open)
         :param wait_for_completion: Wait until gripper reaches target
         :param timeout: Maximum wait time in seconds
         :param tolerance: Acceptable difference to target value
@@ -522,7 +508,7 @@ class SynriaRobotAPI:
         
         if command is not None:
             if command == "open":
-                value = 100.0  # 打开对应100
+                value = 1000.0  # 打开对应1000
             elif command == "close":
                 value = 0.0    # 关闭对应0
             else:
@@ -568,8 +554,8 @@ class SynriaRobotAPI:
                         initial_guess_strategy: str = 'current',
                         initial_guess_scale: float = 1.0,
                         random_seed: Optional[int] = None,
-                        speed_deg_s: Union[int, float, List[float], np.ndarray] = 10,
-                        gripper_speed_deg_s: Optional[float] = 57.3,
+                        speed: Union[int, float, List[float], np.ndarray] = 7,
+                        gripper_speed: Optional[float] = 40,
                         execute: bool = True) -> Dict:
         """Move end-effector to target pose using inverse kinematics.
 
@@ -584,8 +570,8 @@ class SynriaRobotAPI:
         :param initial_guess_strategy: Initial guess strategy ('zero', 'random', 'sobol', 'latin', 'center', 'uniform', 'current')
         :param initial_guess_scale: Scale factor for initial guesses (0.0 to 1.0)
         :param random_seed: Random seed for reproducibility
-        :param speed_deg_s: Motion speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s)
-        :param gripper_speed_deg_s: Gripper speed in degrees per second (range [-573, +573] deg/s), default 57.3
+        :param speed: Motion speed in degrees per second. Can be int/float (same for all joints) or list/array (per-joint speeds, range [-573, +573] deg/s)
+        :param gripper_speed: Gripper speed, range [0, 400], default 40
         :param execute: Execute motion if True
         :return: Dictionary with success, q, iters, pos_err, ori_err, message
         """
@@ -648,8 +634,8 @@ class SynriaRobotAPI:
                 result = self.set_robot_state(
                     target_joints=ik_result['q'],
                     joint_format='rad',
-                    speed_deg_s=speed_deg_s,
-                    gripper_speed_deg_s=gripper_speed_deg_s,
+                    speed=speed,
+                    gripper_speed=gripper_speed,
                     wait_for_completion=True
                 )
                 ik_result['motion_executed'] = result
@@ -706,9 +692,9 @@ class SynriaRobotAPI:
             stacklevel=2
         )
 
-        # Convert speed_factor to speed_deg_s
-        default_speed_deg_s = 10
-        speed_deg_s = int(default_speed_deg_s * speed_factor)
+        # Convert speed_factor to speed
+        default_speed = 10
+        speed = int(default_speed * speed_factor)
 
         # Map old multi_start to new num_initial_guesses
         num_initial_guesses = max(multi_start, 10)
@@ -722,7 +708,7 @@ class SynriaRobotAPI:
             ori_tol=tolerance,
             max_iters=max_iters,
             num_initial_guesses=num_initial_guesses,
-            speed_deg_s=speed_deg_s,
+            speed=speed,
             execute=execute
         )
 
@@ -1174,14 +1160,14 @@ class SynriaRobotAPI:
         """
         return self.servo_driver.set_acceleration(acceleration)
 
-    def set_speed(self, speed_deg_s: float) -> bool:
+    def set_speed(self, speed: float) -> bool:
         """Set robot motion speed.
 
-        :param speed_deg_s: Speed in degrees per second
+        :param speed: Speed in degrees per second
         :return: True if successful
         """
-        self.speed_deg_s = speed_deg_s
-        return self.servo_driver.set_speed(speed_deg_s)
+        self.speed = speed
+        return self.servo_driver.set_speed(speed)
     
     
     def torque_control(self, command: str) -> bool:
@@ -1277,6 +1263,21 @@ class SynriaRobotAPI:
                 joint_out = [round(angle, 3) for angle in joints]
                 unit = "rad"
             logger.info(f"关节角度（{unit}）：{joint_out} 夹爪开合度：{gripper}")
+
+            # 显示速度和力矩（如果有扩展数据）
+            velocities = self.get_robot_state("velocity")
+            torques = self.get_robot_state("torque")
+            if velocities is not None:
+                if output_format == 'deg':
+                    vel_out = [round(v * 180.0 / np.pi, 2) for v in velocities]
+                    logger.info(f"关节速度（°/s）：{vel_out}")
+                else:
+                    vel_out = [round(v, 4) for v in velocities]
+                    logger.info(f"关节速度（rad/s）：{vel_out}")
+            if torques is not None:
+                torque_out = [round(t, 3) for t in torques]
+                logger.info(f"关节力矩（N·m）：{torque_out}")
+
             if robot_type != "follower":
                 logger.info(f"同步键：{button1}, 锁定键：{button2}")
 
@@ -1325,25 +1326,26 @@ class SynriaRobotAPI:
                                tolerance_deg: float = 5.0,
                                timeout: float = 120.0,
                                log_prefix: str = "等待关节接近目标",
-                               speed_deg_s: Union[int, float, List[float], np.ndarray] = 20) -> bool:
-        """Wait until all joints reach target angles.
+                               speed: Union[int, float, List[float], np.ndarray] = 15,
+                               gripper_value: Optional[float] = None,
+                               gripper_speed: Optional[float] = 40) -> bool:
+        """Wait until all joints (and optionally gripper) reach target.
 
-        基于单片机反馈的实际位置与目标位置进行比较，
-        当所有关节的误差都在容差范围内时，判断电机到位。
-
-        对于MIT模式，使用线性插值按speed_deg_s限速，持续发送插值位置指令。
+        关节和夹爪同时运动，不再串行等待。
+        对于MIT模式，使用线性插值按speed限速，持续发送插值位置指令。
         PV模式由固件控速，此方法仅监测位置反馈。
 
         :param target_joints: Target joint angles in radians
         :param tolerance_deg: Degrees, acceptable abs distance to target for all joints (default ±5°)
         :param timeout: Seconds, maximum wait time (default 120s)
         :param log_prefix: Log message prefix
-        :param speed_deg_s: MIT模式下的插值速度(度/秒)，用于限制运动速度。PV模式下忽略此参数。
+        :param speed: MIT模式下的插值速度(度/秒)，用于限制运动速度。PV模式下忽略此参数。
+        :param gripper_value: Optional gripper target (0-1000). If provided, gripper moves simultaneously with joints.
+        :param gripper_speed: Gripper speed for MIT interpolation (deg/s).
         :return: True if target reached, False if timeout
         """
         start_time = time.time()
         RAD_TO_DEG = 180.0 / np.pi
-        DEG_TO_RAD = np.pi / 180.0
 
         # 将目标角度转换为度，用于比较
         target_joints_deg = [a * RAD_TO_DEG for a in target_joints]
@@ -1352,22 +1354,26 @@ class SynriaRobotAPI:
         is_mit_mode = self.control_mode != self.servo_driver.PATTERN_PV and self.control_mode is not None
 
         mode_str = "MIT" if is_mit_mode else "PV"
-        logger.info(f"{log_prefix}... ({mode_str}模式, 容差: ±{tolerance_deg}°, 超时: {timeout}s)")
+        gripper_str = f", 夹爪目标: {gripper_value}/1000" if gripper_value is not None else ""
+        logger.info(f"{log_prefix}... ({mode_str}模式, 容差: ±{tolerance_deg}°, 超时: {timeout}s{gripper_str})")
 
         last_mit_send_time = 0
         mit_send_interval = 0.005  # MIT模式发送频率: 200Hz
 
         # MIT模式: 准备线性插值参数
-        mit_start_joints = None  # 插值起始位置(弧度)
+        mit_start_joints = None
+        mit_total_time = 0
+        gripper_start = None
+        gripper_total_time = 0
         if is_mit_mode:
-            # 解析speed_deg_s为每关节速度列表(度/秒)
-            if isinstance(speed_deg_s, (list, tuple, np.ndarray)):
-                mit_speed_list = [abs(float(s)) for s in speed_deg_s]
+            # 将SDK速度 [0,400] 转换为 deg/s 用于插值时间计算
+            SCALE = 573.0 / 400.0
+            if isinstance(speed, (list, tuple, np.ndarray)):
+                mit_speed_list = [abs(float(s)) * SCALE for s in speed]
                 if len(mit_speed_list) < 6:
                     mit_speed_list.extend([mit_speed_list[-1]] * (6 - len(mit_speed_list)))
             else:
-                mit_speed_list = [abs(float(speed_deg_s))] * 6
-            # 限制最低速度，避免除零
+                mit_speed_list = [abs(float(speed)) * SCALE] * 6
             mit_speed_list = [max(s, 1.0) for s in mit_speed_list]
 
             # 读取当前位置作为插值起点
@@ -1377,22 +1383,38 @@ class SynriaRobotAPI:
             else:
                 mit_start_joints = [0.0] * 6
 
-            # 计算每个关节到达目标所需时间，取最大值作为总运动时间
+            # 计算每个关节到达目标所需时间
             mit_durations = []
             for i in range(min(6, len(mit_start_joints), len(target_joints))):
                 dist_deg = abs(mit_start_joints[i] * RAD_TO_DEG - target_joints_deg[i])
                 dur = dist_deg / mit_speed_list[i] if mit_speed_list[i] > 0 else 0
                 mit_durations.append(dur)
             mit_total_time = max(mit_durations) if mit_durations else 0
-            logger.info(f"MIT插值: 速度={mit_speed_list[0]:.0f}°/s, 预计耗时={mit_total_time:.2f}s")
+
+            # 夹爪插值参数
+            if gripper_value is not None:
+                gripper_start = self.get_robot_state("gripper")
+                if gripper_start is None:
+                    gripper_start = 0.0
+                # 夹爪速度: SDK speed → deg/s → 夹爪SDK单位/秒
+                # 夹爪物理范围2.64rad=1000单位, 1 deg/s = π/180 * 1000/2.64 ≈ 6.61 单位/s
+                _gs_deg = (abs(gripper_speed) if gripper_speed else 40) * SCALE
+                _gs_units = max(_gs_deg * 6.61, 1.0)
+                gripper_total_time = abs(gripper_value - gripper_start) / _gs_units
+
+            overall_time = max(mit_total_time, gripper_total_time)
+            logger.info(f"MIT插值: 关节速度={mit_speed_list[0]:.0f}°/s, 预计耗时={overall_time:.2f}s")
+
+        # PV模式: 夹爪已在set_robot_state的初始帧中一起发出，这里只需监测
+        gripper_tolerance = 50.0  # 夹爪容差 5%
 
         while time.time() - start_time < timeout:
-            # MIT模式: 按速度限制发送插值位置
+            # MIT模式: 按速度限制发送插值位置（关节+夹爪同时）
             if is_mit_mode and (time.time() - last_mit_send_time) >= mit_send_interval:
                 elapsed = time.time() - start_time
 
+                # 关节插值
                 if mit_total_time > 0:
-                    # 计算插值进度 [0, 1]，到达后保持发送目标位置
                     progress = min(1.0, elapsed / mit_total_time)
                     interp_joints = [
                         mit_start_joints[i] + progress * (target_joints[i] - mit_start_joints[i])
@@ -1401,58 +1423,74 @@ class SynriaRobotAPI:
                 else:
                     interp_joints = list(target_joints[:6])
 
+                # 夹爪插值（同时运动）
+                interp_gripper = None
+                if gripper_value is not None and gripper_start is not None:
+                    if gripper_total_time > 0:
+                        grip_prog = min(1.0, elapsed / gripper_total_time)
+                        interp_gripper = gripper_start + grip_prog * (gripper_value - gripper_start)
+                    else:
+                        interp_gripper = gripper_value
+
                 self.servo_driver.set_joint_and_gripper(
                     joint_angles=interp_joints,
-                    gripper_value=None,
-                    speed_deg_s=0.0,
+                    gripper_value=interp_gripper,
+                    speed=0.0,
                     torque_nm=0.0,
                     control_aim=self.control_aim,
                     control_mode=self.control_mode
                 )
                 last_mit_send_time = time.time()
 
-            # 后台线程会持续更新关节状态，读取最新位置反馈进行判断
+            # 读取最新位置反馈进行判断
             current_joints = self.get_robot_state("joint")
 
             if current_joints is not None:
-                # 将当前角度转换为度
                 current_joints_deg = [a * RAD_TO_DEG for a in current_joints]
-
-                # 只比较前6个关节（排除夹爪）
                 joints_to_compare = min(len(current_joints_deg), len(target_joints_deg), 6)
-
-                # 计算每个关节的误差（度）
                 errors_deg = [abs(cur - tgt) for cur, tgt in zip(current_joints_deg[:joints_to_compare], target_joints_deg[:joints_to_compare])]
                 max_error = max(errors_deg) if errors_deg else 0
 
-                # 每秒打印一次当前状态（使用 print 确保输出）
+                # 检查关节是否到位
+                joints_reached = all(err <= tolerance_deg for err in errors_deg)
+
+                # 检查夹爪是否到位（如果有夹爪目标）
+                gripper_reached = True
+                if gripper_value is not None:
+                    current_gripper = self.get_robot_state("gripper")
+                    if current_gripper is not None:
+                        gripper_reached = abs(current_gripper - gripper_value) <= gripper_tolerance
+
+                # 每秒打印一次当前状态（仅调试模式）
                 elapsed = time.time() - start_time
-                if int(elapsed) % 1 == 0 and int(elapsed) != getattr(self, '_last_print_time', -1):
+                if self.debug_mode and int(elapsed) % 1 == 0 and int(elapsed) != getattr(self, '_last_print_time', -1):
                     self._last_print_time = int(elapsed)
                     print(f"[位置检测] 目标: {[round(a, 1) for a in target_joints_deg[:joints_to_compare]]}°")
                     print(f"[位置检测] 当前: {[round(a, 1) for a in current_joints_deg[:joints_to_compare]]}°")
                     print(f"[位置检测] 误差: {[round(e, 1) for e in errors_deg]}°, 最大误差: {max_error:.1f}°, 容差: {tolerance_deg}°")
+                    if gripper_value is not None:
+                        current_gripper = self.get_robot_state("gripper")
+                        print(f"[位置检测] 夹爪: 当前={current_gripper}/1000, 目标={gripper_value}/1000")
 
-                # 判断所有关节是否都在容差范围内
-                if all(err <= tolerance_deg for err in errors_deg):
-                    logger.info(f"✓ 已到达目标位置 (耗时: {elapsed:.2f}s, 最大误差: {max_error:.2f}°)")
+                if joints_reached and gripper_reached:
+                    logger.info(f"✓ 已到达目标位置 (耗时: {elapsed:.2f}s, 最大关节误差: {max_error:.2f}°)")
                     return True
 
             time.sleep(0.02)
 
-        # 超时，打印当前状态
+        # 超时
         current_joints = self.get_robot_state("joint")
         if current_joints is not None:
             current_joints_deg = [a * RAD_TO_DEG for a in current_joints]
             joints_to_compare = min(len(current_joints_deg), len(target_joints_deg), 6)
             errors_deg = [abs(cur - tgt) for cur, tgt in zip(current_joints_deg[:joints_to_compare], target_joints_deg[:joints_to_compare])]
-            logger.warning(f"等待关节到目标附近超时 ({timeout}s)")
+            logger.warning(f"等待到目标附近超时 ({timeout}s)")
             logger.warning(f"  目标角度 (deg): {[round(a, 2) for a in target_joints_deg[:joints_to_compare]]}")
             logger.warning(f"  当前角度 (deg): {[round(a, 2) for a in current_joints_deg[:joints_to_compare]]}")
             logger.warning(f"  误差 (deg): {[round(e, 2) for e in errors_deg]}")
         else:
-            logger.warning("等待关节到目标附近超时，且无法获取当前关节状态")
-        
+            logger.warning("等待到目标附近超时，且无法获取当前关节状态")
+
         return False
     
 

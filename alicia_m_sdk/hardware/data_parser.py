@@ -12,6 +12,8 @@ class JointState(NamedTuple):
     gripper: float       # Gripper value
     timestamp: float     # Timestamp (seconds)
     run_status_text: str # Run status text
+    velocities: Optional[List[float]] = None  # Six joint velocities (rad/s), available in extended mode
+    torques: Optional[List[float]] = None     # Six joint torques (N·m), available in extended mode
 
 
 class DataParser:
@@ -83,6 +85,19 @@ class DataParser:
     RECV_STATUS_SUCCESS = 0x01  # 接收成功
     RECV_STATUS_FAILED = 0x02   # 接收失败
     
+    # ==================== 映射范围常量 ====================
+    # 位置映射范围 (16-bit): 0~65535 → [-12.5, +12.5] rad
+    POSITION_MAPPING_RANGE = 12.5
+    # 速度映射范围 (12-bit): 0~4095 → [-SPEED_RANGE, +SPEED_RANGE] rad/s
+    # 注: 该值应与固件0x11 addr=0x17的速度映射范围一致，可通过set_speed_mapping_range()修改
+    SPEED_MAPPING_RANGE = 30.0
+    # 力矩映射范围 (12-bit): 0~4095 → [-TORQUE_RANGE, +TORQUE_RANGE] N·m
+    # 注: 该值应与固件0x11 addr=0x18的扭矩映射范围一致，可通过set_torque_mapping_range()修改
+    TORQUE_MAPPING_RANGE = 20.0
+
+    # ==================== 夹爪常量 ====================
+    GRI_RAW_MAX = 99  # 固件夹爪反馈最大值（闭合=0, 张开≈99）
+
     # ==================== 其他常量 ====================
     GRI_MAX_50MM = 3290
     GRI_MAX_100MM = 3600
@@ -408,14 +423,18 @@ class DataParser:
     def _update_joint_state(self,
                         angles: Optional[List[float]] = None,
                         gripper: Optional[float] = None,
-                        run_status_text: Optional[str] = None):
+                        run_status_text: Optional[str] = None,
+                        velocities: Optional[List[float]] = None,
+                        torques: Optional[List[float]] = None):
         with self._lock:
             prev = self._joint_states
             self._joint_states = JointState(
                 angles=angles if angles is not None else prev.angles,
                 gripper=gripper if gripper is not None else prev.gripper,
                 timestamp=time.time(),
-                run_status_text=run_status_text if run_status_text is not None else prev.run_status_text
+                run_status_text=run_status_text if run_status_text is not None else prev.run_status_text,
+                velocities=velocities if velocities is not None else prev.velocities,
+                torques=torques if torques is not None else prev.torques,
             )
 
     # ==================== 辅助方法：解析 frame[2] 设备类型 ====================
@@ -651,47 +670,68 @@ class DataParser:
 
         # 解析 7 个电机（6 关节 + 1 夹爪）
         joint_values: List[float] = [0.0] * 6
+        velocity_values: Optional[List[float]] = None
+        torque_values: Optional[List[float]] = None
         gripper_value = 0.0
+
+        # 当 offset_count >= 2 时，每电机数据中包含速度（addr=0x01, 12-bit）
+        if offset_count >= 2:
+            velocity_values = [0.0] * 6
+        # 当 offset_count >= 3 时，还包含力矩（addr=0x02, 12-bit）
+        if offset_count >= 3:
+            torque_values = [0.0] * 6
 
         for i in range(7):
             idx = i * bytes_per_motor
             if idx + 2 > len(motor_bytes):
                 break
 
-            # 位置数据始终是每电机数据的前2字节（起始地址=0x00时）
-            chunk = motor_bytes[idx : idx + 2]
-            
+            # 位置数据始终是每电机数据的前2字节（addr=0x00, 16-bit）
+            pos_chunk = motor_bytes[idx : idx + 2]
+
             if i < 6:
-                # 关节 0-5
-                # Pass joint index to apply direction correction
-                joint_values[i] = self._bytes_to_radians(chunk, joint_index=i)
+                joint_values[i] = self._bytes_to_radians(pos_chunk, joint_index=i)
+
+                # 速度数据: 第3-4字节（addr=0x01, 12-bit, rad/s）
+                if velocity_values is not None and idx + 4 <= len(motor_bytes):
+                    vel_chunk = motor_bytes[idx + 2 : idx + 4]
+                    velocity_values[i] = round(self._bytes_to_12bit_value(
+                        vel_chunk, self.SPEED_MAPPING_RANGE, joint_index=i), 4)
+
+                # 力矩数据: 第5-6字节（addr=0x02, 12-bit, N·m）
+                if torque_values is not None and idx + 6 <= len(motor_bytes):
+                    torque_chunk = motor_bytes[idx + 4 : idx + 6]
+                    torque_values[i] = round(self._bytes_to_12bit_value(
+                        torque_chunk, self.TORQUE_MAPPING_RANGE, joint_index=i), 4)
             else:
-                # 夹爪（索引 6）
-                # 固件夹爪位置反馈使用 raw 值: 闭合≈0, 张开≈100
-                # 注意: 与控制路径的16-bit位置编码(GRI_VAL_CLOSE~GRI_VAL_OPEN)不同
-                gripper_low = chunk[0]
-                gripper_high = chunk[1]
+                # 夹爪（索引 6）— 16-bit LE
+                gripper_low = pos_chunk[0]
+                gripper_high = pos_chunk[1]
                 gripper_raw = (gripper_low & 0xFF) | ((gripper_high & 0xFF) << 8)
-                gripper_value = round(max(0.0, min(float(gripper_raw), 100.0)), 2)
-        
+                gripper_value = self._gripper_raw_to_sdk(gripper_raw)
+
         # 更新状态
         with self._lock:
             self._run_status = run_status
             self._run_status_text = run_status_text
             self._device_type = device_type
             self._device_code = device_code
-        
-        self._update_joint_state(angles=joint_values, gripper=gripper_value, run_status_text=run_status_text)
+
+        self._update_joint_state(
+            angles=joint_values, gripper=gripper_value,
+            run_status_text=run_status_text,
+            velocities=velocity_values, torques=torque_values
+        )
         self._joint_event.set()
-        
+
         if self.debug_mode:
             degrees = [round(rad * self.RAD_TO_DEG, 2) for rad in joint_values]
             logger.debug(
                 f"[Ask] Joint angles (deg): {degrees}, gripper={gripper_value}, "
                 f"run_status=0x{run_status:02X}({run_status_text})"
             )
-        
-        return {
+
+        result = {
             "type": "ask_joint_feedback",
             "device_type": device_type,
             "data_type": data_type,
@@ -702,6 +742,11 @@ class DataParser:
             "run_status_text": run_status_text,
             "timestamp": self._joint_states.timestamp,
         }
+        if velocity_values is not None:
+            result["velocities"] = velocity_values
+        if torque_values is not None:
+            result["torques"] = torque_values
+        return result
 
     # ==================== 写入数据解析 (Write 模式) ====================
     def _parse_write_joint_data(self, frame: List[int]) -> Optional[Dict]:
@@ -967,10 +1012,53 @@ class DataParser:
         # Apply direction correction if joint index is valid
         if 0 <= joint_index < 6:
             radians *= self.joint_directions[joint_index]
-            
+
         return radians
 
-    
+    def _bytes_to_12bit_value(self, byte_array: List[int], mapping_range: float, joint_index: int = -1) -> float:
+        """
+        Convert 2-byte array (little endian, 12-bit effective) to physical value.
+
+        协议规定: 12位数据采用2字节存储（高4位保留，低12位为有效数据）
+        Mapping: 0 -> -range, 2048 -> 0, 4095 -> +range
+
+        Args:
+            byte_array: List of 2 bytes [low, high]
+            mapping_range: Mapping range (e.g., 30.0 for [-30, +30] rad/s)
+            joint_index: Index of the joint (0-5) to apply direction correction.
+        """
+        if len(byte_array) != 2:
+            return 0.0
+
+        raw = (byte_array[0] & 0xFF) | ((byte_array[1] & 0xFF) << 8)
+        raw_12bit = raw & 0x0FFF  # 取低12位
+
+        # Map 0~4095 to [-range, +range]
+        value = (raw_12bit / 4095.0) * (2.0 * mapping_range) - mapping_range
+
+        # Apply direction correction
+        if 0 <= joint_index < 6:
+            value *= self.joint_directions[joint_index]
+
+        return value
+
+    def _gripper_raw_to_sdk(self, gripper_raw: int) -> float:
+        """
+        将夹爪反馈原始值转换为SDK值 (0~1000)。
+
+        固件夹爪反馈使用 0~99 整数值（非16-bit位置空间），
+        与关节电机的16-bit rad编码不同。
+        比例映射: 0(闭合) → 0, 99(张开) → 1000
+
+        :param gripper_raw: 16-bit LE原始值（实际有效范围 0~99）
+        :return: SDK夹爪值 0~1000
+        """
+        if gripper_raw <= 0:
+            return 0.0
+        if gripper_raw >= 99:
+            return 1000.0
+        return round(float(gripper_raw) / 99.0 * 1000.0, 1)
+
     def _value_to_radians(self, value: int) -> float:
         """
         Convert servo raw value to radians.

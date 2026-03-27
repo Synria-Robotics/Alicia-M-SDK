@@ -43,30 +43,37 @@ def main(args):
         end_link=args.end_link,
         control_aim=args.control_aim,
         control_mode=args.control_mode,
-        debug_mode=True  # 启用调试模式以打印发送和接收的数据包
     )
 
     try:
-        # 检查后台线程状态
-        thread_status = robot.servo_driver.get_update_thread_status()
-        print(f"\n后台线程状态: {thread_status}")
-        print(f"暂停标志状态: {robot.servo_driver._pause_update.is_set()}\n")
-        
-        # Set target joint positions in degrees
+        # Step 1: Go home
+        print("\n===== Step 1: 回到Home位置 =====")
+        robot.go_home(speed=args.speed)
+        time.sleep(2)
+
+        # Step 2: Move joints AND close gripper simultaneously
+        print("\n===== Step 2: 关节运动 + 夹爪张开（同时进行）=====")
         target_joints_deg = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
-        robot.go_home(speed_deg_s=args.speed_deg_s)
-        time.sleep(1)
-        # Use unified joint and gripper target interface
         robot.set_robot_state(
             target_joints=target_joints_deg,
+            gripper_value=1000,
             joint_format='deg',
-            speed_deg_s=args.speed_deg_s,
-            # speed_deg_s=[20, 20, 5, 20, 20, 20],
+            speed=args.speed,
             wait_for_completion=True,
             timeout=100
         )
-        time.sleep(1)
-        robot.go_home(speed_deg_s=args.speed_deg_s)
+        time.sleep(2)
+
+        # Step 3: Return home AND open gripper simultaneously
+        print("\n===== Step 3: 回Home + 夹爪闭合（同时进行）=====")
+        robot.set_robot_state(
+            target_joints=[0, 0, 0, 0, 0, 0],
+            gripper_value=0,
+            joint_format='deg',
+            speed=args.speed,
+            wait_for_completion=True,
+            timeout=100
+        )
 
     except KeyboardInterrupt:
         print("\n✗ Processing interrupted")
@@ -86,7 +93,7 @@ if __name__ == "__main__":
                         help='Control aim: teach (0x01示教臂) or operation (0x02操作臂) (默认: operation)')
     parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
                         help='Control mode: pv or mit (默认: pv)')
-    parser.add_argument('--speed_deg_s', type=int, default=20, help="关节运动速度 (单位: 度/秒，默认: 20，范围: 10-400度/秒)")
+    parser.add_argument('--speed', type=int, default=15, help="关节运动速度 (默认: 20，范围: 0-400)")
     
     args = parser.parse_args()
     main(args)

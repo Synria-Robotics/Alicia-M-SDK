@@ -159,14 +159,14 @@ class ServoDriver:
         
         self.disconnect()
 
-    def set_speed(self, speed_deg_s: float) -> bool:
+    def set_speed(self, speed: float) -> bool:
         """Set robot motion speed (placeholder for now).
         
-        :param speed_deg_s: Speed in degrees per second
+        :param speed: Speed in degrees per second
         :return: True
         """
         # Currently just a placeholder or store it if needed
-        # self.current_speed = speed_deg_s
+        # self.current_speed = speed
         return True
     
     def wait_for_valid_state(self, timeout: float = 1.5) -> bool:
@@ -357,7 +357,7 @@ class ServoDriver:
         if current_state and current_state.angles:
             current_angles = list(current_state.angles)
             current_gripper = current_state.gripper if current_state.gripper is not None else 0.0
-            logger.info(f"MIT init: using current positions (deg): {[round(a * 57.2958, 1) for a in current_angles]}, gripper: {current_gripper:.1f}%")
+            logger.info(f"MIT init: using current positions (deg): {[round(a * 57.2958, 1) for a in current_angles]}, gripper: {current_gripper:.1f}/1000")
         else:
             current_angles = [0.0] * 6
             current_gripper = 0.0
@@ -832,39 +832,53 @@ class ServoDriver:
     def _build_joint_request_frame(self, control_aim: int = None) -> List[int]:
         """
         构建请求关节信息的指令帧
-        
+
         Args:
             control_aim: 控制目标 (AIM_TEACH=0x01, AIM_OPERATION=0x02)
                         默认使用实例的 default_control_aim
-        
+
         Returns:
             List[int]: 请求关节信息的指令帧
-            
+
         Frame Structure:
-            [0xAA] [0x06] [func_id] [0x02] [0x00] [0x01] [checksum] [0xFF]
+            [0xAA] [0x06] [func_id] [0x02] [起始地址] [偏移数量] [checksum] [0xFF]
             其中 func_id = control_aim (请求模式，高位为0)
+
+        偏移数量决定返回的数据类型:
+            0x01: 仅位置 (addr=0x00, 16-bit, 2字节/电机)
+            0x03: 位置+速度+力矩 (addr=0x00~0x02, 6字节/电机)
         """
         if control_aim is None:
             control_aim = self.default_control_aim
-        
+
+        # 使用 _request_offset_count 控制请求范围
+        offset_count = getattr(self, '_request_offset_count', 0x01)
+
         # 构建请求帧
-        # frame[2] = control_aim (请求模式: 0x0x)
-        # frame[3] = 0x02 (数据长度)
-        # frame[4] = 0x00 (数据类型：位置数据)
-        # frame[5] = 0x01 (偏移数量)
-        frame = [0xAA, 0x06, control_aim, 0x02, 0x00, 0x01, 0x00, 0xFF]
-        
+        frame = [0xAA, 0x06, control_aim, 0x02, 0x00, offset_count, 0x00, 0xFF]
+
         # 计算校验位 (frame[1] 到 frame[-2] 之间的数据)
         frame[-2] = self.serial_comm.calculate_checksum(frame[1:-2])
-        
+
         if self.debug_mode:
-            logger.info(f"[_build_joint_request_frame] Built request with control_aim=0x{control_aim:02X}: {' '.join(f'{b:02X}' for b in frame)}")
-        
+            logger.info(f"[_build_joint_request_frame] Built request with control_aim=0x{control_aim:02X}, offset={offset_count}: {' '.join(f'{b:02X}' for b in frame)}")
+
         return frame
+
+    def set_extended_state(self, enabled: bool = True):
+        """启用/禁用扩展状态请求（速度+力矩）。
+
+        启用后，后台状态查询线程将请求位置+速度+力矩数据(offset_count=3)，
+        JointState中的velocities和torques字段将被填充。
+
+        :param enabled: True=请求位置+速度+力矩, False=仅请求位置
+        """
+        self._request_offset_count = 0x03 if enabled else 0x01
+        logger.info(f"Extended state {'enabled' if enabled else 'disabled'} (offset_count={self._request_offset_count})")
 
     def set_gripper(self, value: float, control_aim: int = None, control_mode: tuple = None) -> bool:
         """
-        Set gripper value (0-100).
+        Set gripper value (0-1000, 0=closed, 1000=fully open).
         Wrapper for set_joint_and_gripper to maintain compatibility.
         """
         return self.set_joint_and_gripper(gripper_value=value, control_aim=control_aim, control_mode=control_mode)
@@ -872,9 +886,9 @@ class ServoDriver:
     def set_joint_and_gripper(self, 
                               joint_angles: Optional[List[float]] = None,
                               gripper_value: Optional[float] = None,
-                              speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                              speed: Union[float, List[float], np.ndarray] = 40,
                               torque_nm: Union[float, List[float], np.ndarray] = 0.0,
-                              gripper_speed_deg_s: Optional[float] = None,
+                              gripper_speed: Optional[float] = None,
                               control_aim: int = None,
                               control_mode: tuple = None) -> bool:
         """
@@ -882,15 +896,15 @@ class ServoDriver:
         
         Args:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
-            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
-            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-50, +50] rad/s).
+            gripper_value: 夹爪目标值 (0-1000, 0=闭合, 1000=张开). None表示不控制夹爪
+            speed: 关节速度 (度/秒). 范围 [0, 400]（0=静止, 400=最大速度）.
                         可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
                       可以是单个值(所有关节相同)或列表/数组(每关节独立，长度为6)
-            gripper_speed_deg_s: 夹爪速度 (度/秒). 范围 [-573, +573] deg/s. None使用默认值57.3 deg/s
+            gripper_speed: 夹爪速度 (度/秒). 范围 [0, 400]. None使用默认值40
             control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂). None使用实例默认值
             control_mode: 控制模式元组. None使用实例默认值
-                - PATTERN_PV:  必须提供 joint_angles + speed_deg_s
+                - PATTERN_PV:  必须提供 joint_angles + speed
                 - PATTERN_MIT: MIT位置模式，提供 joint_angles
         """
         # 默认值
@@ -922,16 +936,16 @@ class ServoDriver:
                 return False
 
         # Basic validation for single float speed
-        if isinstance(speed_deg_s, (int, float)):
+        if isinstance(speed, (int, float)):
             # Relaxed check to allow negative values for the new mapping [-573, 573]
             pass
         
         frame = self._build_send_joint_frame(
             joint_angles=joint_angles,
             gripper_value=gripper_value,
-            speed_deg_s=speed_deg_s,
+            speed=speed,
             torque_nm=torque_nm,
-            gripper_speed_deg_s=gripper_speed_deg_s,
+            gripper_speed=gripper_speed,
             control_aim=control_aim,
             control_mode=control_mode
         )
@@ -966,9 +980,9 @@ class ServoDriver:
     def set_joint_and_gripper_sync(self, 
                                    joint_angles: Optional[List[float]] = None,
                                    gripper_value: Optional[float] = None,
-                                   speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                                   speed: Union[float, List[float], np.ndarray] = 40,
                                    torque_nm: Union[float, List[float], np.ndarray] = 0.0,
-                                   gripper_speed_deg_s: Optional[float] = None,
+                                   gripper_speed: Optional[float] = None,
                                    control_aim: int = None,
                                    control_mode: tuple = None,
                                    response_timeout: float = 0.003) -> Tuple[bool, Optional[List[int]], float]:
@@ -984,10 +998,10 @@ class ServoDriver:
         
         Args:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
-            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
-            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s
+            gripper_value: 夹爪目标值 (0-1000, 0=闭合, 1000=张开). None表示不控制夹爪
+            speed: 关节速度 (度/秒). 范围 [0, 400]
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm
-            gripper_speed_deg_s: 夹爪速度 (度/秒)
+            gripper_speed: 夹爪速度 (度/秒)
             control_aim: 控制目标 (0x01=示教臂, 0x02=操作臂)
             control_mode: 控制模式元组
             response_timeout: 等待响应的超时时间 (秒), 默认3ms
@@ -1003,7 +1017,7 @@ class ServoDriver:
             >>> while running:
             ...     success, response, latency = driver.set_joint_and_gripper_sync(
             ...         joint_angles=target_angles,
-            ...         speed_deg_s=50.0,
+            ...         speed=50.0,
             ...         response_timeout=0.003
             ...     )
             ...     if success and response:
@@ -1032,9 +1046,9 @@ class ServoDriver:
         frame = self._build_send_joint_frame(
             joint_angles=joint_angles,
             gripper_value=gripper_value,
-            speed_deg_s=speed_deg_s,
+            speed=speed,
             torque_nm=torque_nm,
-            gripper_speed_deg_s=gripper_speed_deg_s,
+            gripper_speed=gripper_speed,
             control_aim=control_aim,
             control_mode=control_mode
         )
@@ -1066,9 +1080,9 @@ class ServoDriver:
     def _build_send_joint_frame(self,
                            joint_angles: Optional[List[float]] = None,
                            gripper_value: Optional[float] = None,
-                                speed_deg_s: Union[float, List[float], np.ndarray] = 57.3,
+                                speed: Union[float, List[float], np.ndarray] = 40,
                                 torque_nm: Union[float, List[float], np.ndarray] = 0.0,
-                                gripper_speed_deg_s: Optional[float] = None,
+                                gripper_speed: Optional[float] = None,
                            control_aim: int = None,
                            control_mode: tuple = None,
                            mit_kp: Optional[List[float]] = None,
@@ -1081,8 +1095,8 @@ class ServoDriver:
         
         Args:
             joint_angles: 目标关节角度列表 (弧度). None表示不控制关节
-            gripper_value: 夹爪目标值 (0-100). None表示不控制夹爪
-            speed_deg_s: 关节速度 (度/秒). 范围 [-573, +573] deg/s (对应 [-50, +50] rad/s).
+            gripper_value: 夹爪目标值 (0-1000, 0=闭合, 1000=张开). None表示不控制夹爪
+            speed: 关节速度 (度/秒). 范围 [0, 400]（0=静止, 400=最大速度）.
                         可以是单个值(所有关节相同)或列表(每关节独立)
             torque_nm: 关节扭矩 (牛米). 范围 [-10.0, +10.0] Nm.
                       可以是单个值(所有关节相同)或列表(每关节独立)
@@ -1176,21 +1190,21 @@ class ServoDriver:
                 effective_joints = joint_angles
 
         # Handle speed (deg/s)
-        # If gripper_speed_deg_s is provided, use it; otherwise use default or extract from speed_deg_s list
-        if gripper_speed_deg_s is not None:
-            gripper_speed_val = gripper_speed_deg_s
+        # If gripper_speed is provided, use it; otherwise use default or extract from speed list
+        if gripper_speed is not None:
+            gripper_speed_val = gripper_speed
         else:
-            gripper_speed_val = 57.3  # 默认夹爪速度 (deg/s, 约1.0 rad/s)
+            gripper_speed_val = 40  # 默认夹爪速度 (SDK值40 ≈ 57.3 deg/s)
 
-        if isinstance(speed_deg_s, (list, tuple, np.ndarray)) or (hasattr(speed_deg_s, '__len__') and not isinstance(speed_deg_s, str)):
+        if isinstance(speed, (list, tuple, np.ndarray)) or (hasattr(speed, '__len__') and not isinstance(speed, str)):
             # Convert to list if it's a numpy array or other sequence
             try:
-                speed_array = list(speed_deg_s)
+                speed_array = list(speed)
             except TypeError:
-                speed_array = [speed_deg_s]
+                speed_array = [speed]
             
-            # If gripper_speed_deg_s is not provided and speed_array has 7 elements, use the 7th for gripper
-            if gripper_speed_deg_s is None and len(speed_array) == 7:
+            # If gripper_speed is not provided and speed_array has 7 elements, use the 7th for gripper
+            if gripper_speed is None and len(speed_array) == 7:
                 speed_list = speed_array[:6]
                 gripper_speed_val = speed_array[6]
             elif len(speed_array) != self.joint_count:
@@ -1199,10 +1213,10 @@ class ServoDriver:
             else:
                 speed_list = speed_array
         else:
-            speed_list = [speed_deg_s] * self.joint_count
-            # Only use speed_deg_s for gripper if gripper_speed_deg_s is not provided
-            if gripper_speed_deg_s is None:
-                gripper_speed_val = speed_deg_s
+            speed_list = [speed] * self.joint_count
+            # Only use speed for gripper if gripper_speed is not provided
+            if gripper_speed is None:
+                gripper_speed_val = speed
 
         # Handle torque (N·m) - only used in PVT mode
         gripper_torque_val = 0.0  # 默认夹爪扭矩 (N·m)
@@ -1373,27 +1387,27 @@ class ServoDriver:
     
     def _value_to_hardware_value_grip(self, value: float, type: str="100mm") -> int:
         """
-        :param value: Gripper value in 0-100
+        :param value: Gripper value in 0-1000 (0=closed, 1000=fully open)
         :return: Hardware value
         """
         # Range check
         if value < 0:
-            logger.warning(f"Gripper angle below range: {value:.2f}, will be clipped to 0")
+            logger.warning(f"Gripper value below range: {value:.2f}, will be clipped to 0")
             value = 0
-        elif value > 100.0:
-            logger.warning(f"Gripper angle above range: {value:.2f}, will be clipped to 100")
-            value = 100.0
+        elif value > 1000.0:
+            logger.warning(f"Gripper value above range: {value:.2f}, will be clipped to 1000")
+            value = 1000.0
 
-        # Mapping: 0% (Closed) -> GRI_VAL_CLOSE, 100% (Open) -> GRI_VAL_OPEN
-        # 0% -> 32768 (0 rad)
-        # 100% -> 39688 (2.64 rad)
-        
+        # Mapping: 0 (Closed) -> GRI_VAL_CLOSE, 1000 (Open) -> GRI_VAL_OPEN
+        # 0 -> 32768 (0 rad)
+        # 1000 -> 39688 (2.64 rad)
+
         open_val = self.GRI_VAL_OPEN
         close_val = self.GRI_VAL_CLOSE
-        
+
         # Calculate hardware value
-        # Formula: hw = close_val - (value/100.0) * (close_val - open_val)
-        ratio = (close_val - open_val) / 100.0
+        # Formula: hw = close_val - (value/1000.0) * (close_val - open_val)
+        ratio = (close_val - open_val) / 1000.0
         hw_value = int(close_val - (value * ratio))
         
         # 范围限制
@@ -1405,33 +1419,29 @@ class ServoDriver:
 
     #--------------------------------------------start-速度指令的转换--------------------------------
     
-    def _value_to_hardware_value_speed(self, speed_deg_s: float, direction: float = 1.0) -> int:
+    # SDK速度范围 [0, 400] → 固件 [0, 573] deg/s = [0, 10] rad/s
+    SPEED_SDK_MAX = 400.0
+    SPEED_DEG_S_MAX = 573.0  # 10 rad/s
+
+    def _value_to_hardware_value_speed(self, speed: float, direction: float = 1.0) -> int:
         """
-        将速度从度/秒转换为12位硬件值 [0, 4095]
+        将SDK速度值转换为12位硬件值 [0, 4095]
 
         转换流程:
-        1. 度/秒 -> 弧度/秒 (deg * π/180)
-        2. 弧度/秒映射到12位: [-10.0, +10.0] rad/s -> [0, 4095]
+        1. SDK速度 [0, 400] → deg/s [0, 573]
+        2. deg/s → rad/s
+        3. rad/s 映射到12位: [-10.0, +10.0] rad/s -> [0, 4095]
 
-        遵循右手定则：
-        - 大拇指指向电机输出轴方向
-        - 四指弯曲方向（逆时针）= 正速度方向
-
-        映射关系:
-        - -573 deg/s (-10.0 rad/s) -> 0
-        -    0 deg/s (  0.0 rad/s) -> 2048 (中间值)
-        - +573 deg/s (+10.0 rad/s) -> 4095
-
-        :param speed_deg_s: 目标速度值 (度/秒)，有效范围 [-573, +573] deg/s
+        :param speed: SDK速度值，有效范围 [0, 400]（0=静止, 400=最大速度）
         :param direction: 电机方向系数 (1.0 或 -1.0)，用于适配电机安装方向
         :return: 原始 12位整数速度值 (0-4095)
         """
-        # 确保输入是Python float类型，避免numpy数组导致的布尔值歧义
-        speed_deg_s = float(speed_deg_s)
+        speed = float(speed)
         direction = float(direction)
 
-        # 步骤1: 度/秒 -> 弧度/秒
-        speed_rad_s = speed_deg_s * self.DEG_TO_RAD
+        # 步骤1: SDK速度 → deg/s → rad/s
+        speed = speed * self.SPEED_DEG_S_MAX / self.SPEED_SDK_MAX
+        speed_rad_s = speed * self.DEG_TO_RAD
 
         # 应用方向系数
         speed_rad_s = speed_rad_s * direction
@@ -1441,10 +1451,9 @@ class ServoDriver:
         x_max = 10.0   # rad/s
         bits = 12
 
-        # 超出范围时进行裁剪（容差 0.01 rad/s ≈ 0.57 deg/s，避免边界值刷屏警告）
         tolerance = 0.01
         if speed_rad_s < x_min - tolerance or speed_rad_s > x_max + tolerance:
-            logger.warning(f"Speed out of range: {speed_deg_s:.1f} deg/s ({speed_rad_s:.3f} rad/s), valid range: [-573, +573] deg/s ([-10, +10] rad/s), will be clipped")
+            logger.warning(f"Speed out of range: {speed:.1f} (max {self.SPEED_SDK_MAX:.0f}), will be clipped")
         speed_rad_s = max(x_min, min(x_max, speed_rad_s))
 
         return self._float_to_uint(speed_rad_s, x_min, x_max, bits)
