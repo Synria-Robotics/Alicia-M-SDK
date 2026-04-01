@@ -1,0 +1,60 @@
+"""03_demo_read_states.py — 读取关节状态
+
+演示循环读取并打印关节角度（deg+rad）、夹爪开合度、关节速度、关节力矩。
+按 Ctrl+C 退出。
+"""
+
+import math
+import time
+import alicia_m_sdk
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+
+def main():
+    beauty_print("Demo: 读取关节状态（循环打印）", type="module")
+
+    # 创建并连接机器人
+    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    beauty_print("机器人连接成功", type="success")
+    beauty_print("按 Ctrl+C 退出循环", type="info")
+
+    try:
+        while True:
+            # --- 读取关节+夹爪状态 ---
+            state = robot.get_robot_state("all")
+            if state is None:
+                beauty_print("等待状态数据...", type="warning")
+                time.sleep(0.5)
+                continue
+
+            # 关节角度 (rad)
+            angles_rad = state.angles
+            angles_deg = [a * 180.0 / math.pi for a in angles_rad]
+
+            beauty_print("--- 关节状态 ---", type="module")
+            beauty_print(f"  关节角度 (deg): {beauty_print_array(angles_deg, precision=2)}", type="info")
+            beauty_print(f"  关节角度 (rad): {beauty_print_array(angles_rad, precision=4)}", type="info")
+
+            # 夹爪开合度 (0~1000)
+            beauty_print(f"  夹爪开合度:     {state.gripper:.0f} / 1000", type="info")
+
+            # 关节速度
+            if state.velocities is not None:
+                beauty_print(f"  关节速度 (rad/s): {beauty_print_array(state.velocities, precision=3)}", type="info")
+
+            # 关节力矩
+            if state.torques is not None:
+                beauty_print(f"  关节力矩 (N*m):  {beauty_print_array(state.torques, precision=3)}", type="info")
+
+            # 控制打印频率，约 5Hz
+            time.sleep(0.2)
+
+    except KeyboardInterrupt:
+        beauty_print("\n用户中断，退出循环", type="warning")
+    finally:
+        robot.disconnect()
+        beauty_print("已断开连接", type="info")
+
+
+if __name__ == "__main__":
+    main()

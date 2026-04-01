@@ -1,114 +1,128 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Demo: SparkVis UI bidirectional synchronization and data logging (Real Robot)
+"""12_demo_sparkvis.py — SparkVis 可视化
 
-Copyright (c) 2025 Synria Robotics Co., Ltd.
-Licensed under GPL v3.0
+演示通过 WebSocket 实时推送关节状态到 SparkVis 可视化界面。
+按 Ctrl+C 退出。
 
-Features:
-- Start WebSocket server for UI ↔ Robot bidirectional sync
-- UI → Robot: Receive joint_update and send directly to real robot
-- Robot → UI: Periodically broadcast current robot state to UI (toggleable)
-- Data logging: Record joint data from UI commands to CSV (optional)
+依赖: pip install websockets (可选依赖)
 
-Usage:
-1. Start SparkVis backend server:
-   cd SparkVis
-   python backend_server.py
-
-2. Start SparkVis web server:
-   cd SparkVis
-   python -m http.server 8080
-
-3. Run this demo (robot bridge):
-   cd Alicia-D-SDK/examples
-   python 10_demo_sparkvis.py --port /dev/ttyUSB0
-
-4. Open browser and visit:
-   http://localhost:8080
-
-Note: All three components must be running simultaneously for full functionality.
+使用方式:
+  1. 启动 SparkVis 后端:  cd SparkVis && python backend_server.py
+  2. 启动 SparkVis 前端:  cd SparkVis && python -m http.server 8080
+  3. 运行本脚本:          python 12_demo_sparkvis.py
+  4. 浏览器打开:          http://localhost:8080
 """
 
+import json
+import math
+import time
+import asyncio
 import alicia_m_sdk
-from alicia_m_sdk.hardware import ServoDriver
-from alicia_m_sdk.execution.sparkvis import SparkVisBridge
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+# WebSocket 服务配置
+WS_HOST = "localhost"
+WS_PORT = 8765
+PUSH_RATE_HZ = 50  # 推送频率 (Hz)
 
 
-def main(args):
-    """SparkVis WebSocket bridge demonstration.
-    
-    :param args: Command line arguments   
+async def _ws_push_loop(robot, host: str, port: int, rate_hz: float):
+    """WebSocket 推送循环：持续发送关节状态
+
+    Args:
+        robot: 机器人实例
+        host: WebSocket 主机地址
+        port: WebSocket 端口
+        rate_hz: 推送频率 (Hz)
     """
-    # Initialize robot instance with control_aim and control_mode
-    robot = alicia_m_sdk.create_robot(
-        port=args.port,
-        baudrate=args.baudrate,
-        version=args.version,
-        control_aim=args.control_aim,
-        control_mode=args.control_mode
-    )
+    try:
+        import websockets
+    except ImportError:
+        beauty_print("缺少 websockets 依赖，请安装: pip install websockets", type="error")
+        return
+
+    interval = 1.0 / rate_hz
+
+    beauty_print(f"启动 WebSocket 服务: ws://{host}:{port}", type="info")
+    beauty_print(f"推送频率: {rate_hz} Hz", type="info")
+    beauty_print("等待 SparkVis 连接...", type="info")
+
+    # 已连接的客户端集合
+    connected_clients = set()
+
+    async def _handler(websocket):
+        """处理 WebSocket 客户端连接"""
+        connected_clients.add(websocket)
+        client_addr = websocket.remote_address
+        beauty_print(f"SparkVis 客户端已连接: {client_addr}", type="success")
+        try:
+            # 保持连接，接收客户端消息（如果有）
+            async for message in websocket:
+                pass  # SparkVis -> Robot 的消息可在此处理
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            connected_clients.discard(websocket)
+            beauty_print(f"SparkVis 客户端已断开: {client_addr}", type="warning")
+
+    async def _broadcast_loop():
+        """广播关节状态到所有已连接的客户端"""
+        while True:
+            if connected_clients:
+                # 读取当前关节状态
+                state = robot.get_robot_state("all")
+                if state is not None:
+                    # 构建推送数据
+                    angles_deg = [a * 180.0 / math.pi for a in state.angles]
+                    data = {
+                        "type": "joint_state",
+                        "timestamp": time.time(),
+                        "joints_rad": state.angles,
+                        "joints_deg": angles_deg,
+                        "gripper": state.gripper,
+                    }
+                    # 添加速度和力矩（如果可用）
+                    if state.velocities is not None:
+                        data["velocities"] = state.velocities
+                    if state.torques is not None:
+                        data["torques"] = state.torques
+
+                    message = json.dumps(data)
+
+                    # 广播到所有客户端
+                    disconnected = set()
+                    for ws in connected_clients:
+                        try:
+                            await ws.send(message)
+                        except websockets.exceptions.ConnectionClosed:
+                            disconnected.add(ws)
+                    connected_clients.difference_update(disconnected)
+
+            await asyncio.sleep(interval)
+
+    # 启动 WebSocket 服务和广播循环
+    async with websockets.serve(_handler, host, port):
+        beauty_print(f"WebSocket 服务已启动: ws://{host}:{port}", type="success")
+        beauty_print("按 Ctrl+C 停止", type="info")
+        await _broadcast_loop()
+
+
+def main():
+    beauty_print("Demo: SparkVis 可视化 (WebSocket)", type="module")
+
+    # 创建并连接机器人
+    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    beauty_print("机器人连接成功", type="success")
 
     try:
-        # Connect to robot
-        if not robot.connect():
-            print("✗ 连接失败，请检查串口设置")
-            return
-
-        # Optional: Move to home position for safety
-        try:
-            robot.go_home()
-        except Exception as e:
-            print(f"✗ 移动到home位置失败: {e}")
-
-        # Create and start SparkVis bridge
-        bridge = SparkVisBridge(
-            robot=robot,
-            host=args.host,
-            port=args.websocket_port,
-            output_file=args.output_file or None,
-            enable_robot_sync=args.enable_robot_sync,
-            robot_sync_rate_hz=args.robot_sync_rate,
-            log_source=args.log_source,
-            # speed_rad_s=[0.0436, 0.0436, 0.0314, 0.0314, 0.0262, 0.0262, 0.0262],  # 关节速度设置（弧度/秒）
-        )
-        bridge.start_server()
+        # 启动 WebSocket 推送
+        asyncio.run(_ws_push_loop(robot, WS_HOST, WS_PORT, PUSH_RATE_HZ))
 
     except KeyboardInterrupt:
-        print("\n✗ Processing interrupted")
+        beauty_print("\n用户中断，停止 WebSocket 服务", type="warning")
     finally:
-        try:
-            robot.disconnect()
-        except Exception as e:
-            print(f"✗ 断开连接失败: {e}")
+        robot.disconnect()
+        beauty_print("已断开连接", type="info")
 
 
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description='SparkVis ↔ 真实机器人 同步与数据记录 Demo')
-    
-    # Robot connection settings
-    parser.add_argument('--port', type=str, default='/dev/ttyCH343USB0', help='串口设备，如 /dev/ttyUSB0 或 COM3')
-    parser.add_argument('--baudrate', type=int, default=1000000, help='串口波特率，默认1000000；若读取超时请尝试 921600')
-    parser.add_argument('--version', type=str, default='v1_1', help='机器人版本 (可选: v1_0, v1_1，默认: v1_1)')
-    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (默认: operation)')
-    parser.add_argument('--control-mode', type=str, default='pv',
-                        choices=['pv', 'mit'],
-                        help='Control mode (默认: pv)')
-
-    # WebSocket settings
-    parser.add_argument('--host', type=str, default='localhost', help='WebSocket主机')
-    parser.add_argument('--websocket-port', type=int, default=8765, help='WebSocket端口')
-    
-    # Data logging settings
-    parser.add_argument('--output-file', type=str, default='', help='CSV输出路径（留空不记录）')
-    parser.add_argument('--log-source', type=str, default='ui', choices=['ui','robot','both'], help='记录UI指令/机器人状态/二者')
-    # Robot sync settings
-    parser.add_argument('--enable-robot-sync', action='store_true', help='启用 机器人→UI 状态同步')
-    parser.add_argument('--robot-sync-rate', type=float, default=500.0, help='机器人状态广播频率 Hz (默认500Hz，建议范围50-500Hz)')
-    
-    args = parser.parse_args()
-    main(args)
-
+if __name__ == "__main__":
+    main()

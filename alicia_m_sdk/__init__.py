@@ -1,192 +1,150 @@
-# Copyright (c) 2025 Synria Robotics Co., Ltd.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
-# Author: Synria Robotics Team
-# Website: https://synriarobotics.ai
+"""Alicia-M-SDK: Synria 云擎系列机械臂 Python SDK
 
+提供对 Alicia-M 6-DOF 机械臂的完整控制能力，包括：
+- PV（位置-速度）模式：固件侧加减速插值
+- MIT（阻抗控制）模式：全参数逐帧控制
+- 正/逆运动学（基于 RoboCore）
+- 轨迹规划与执行
+- 拖动示教与回放
+
+快速开始::
+
+    import alicia_m_sdk
+
+    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    robot.set_robot_state(target_joints=[0, 30, 0, 0, -30, 0], speed=15)
+    robot.disconnect()
 """
-Alicia-M SDK v1.0.0 - Bridged with RoboCore
-
-Architecture Layers:
-- User Layer: SynriaRobotAPI (unified user interface)
-- Execution Layer: TrajectoryExecutor, DragTeaching (trajectory execution)
-- Hardware Layer: ServoDriver (low-level hardware drivers)
-- Kinematics Layer: RoboCore kinematics functions (FK/IK/Jacobian)
-- Planning Layer: RoboCore trajectory planning functions
-
-RoboCore Integration:
-- robocore.kinematics: Provides FK/IK/Jacobian calculations
-- robocore.planning: Provides trajectory planning functionality
-- robocore.modeling: Provides RobotModel for robot representation
-"""
-
-from alicia_m_sdk.api import SynriaRobotAPI
-from alicia_m_sdk.hardware import ServoDriver
-
-# Import from RoboCore for kinematics and modeling
-from robocore.modeling import RobotModel
-from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-from synriard import get_model_path
-import json
-from pathlib import Path
-from typing import Optional
-
 
 __version__ = "1.0.0"
-__author__ = "Synria Robotics"
-__description__ = "Alicia-M Robot Arm SDK v1.0.0 - Bridged with RoboCore"
 
-# Re-export RoboCore components for convenience
-__all__ = [
-    # Core API
-    "SynriaRobotAPI",
-    "create_robot",
-    
-    # Hardware Layer
-    "ServoDriver",
-    
-    # RoboCore - Modeling
-    "RobotModel",
-    
-    # RoboCore - Kinematics
-    "forward_kinematics",
-    "inverse_kinematics",
-    "jacobian",
-]
+# === 核心类型 ===
+from .api.robot_api import SynriaRobotAPI
+from .types.state import JointState, MitParams, RobotStatus, VersionInfo
+from .types.config import RobotConfig
+from .types.enums import ControlAim, ControlMode, GripperType
+from .types.exceptions import (
+    AliciaSDKError,
+    ConnectionError,
+    TimeoutError,
+    ProtocolError,
+    ValidationError,
+    RobotStateError,
+    HardwareFaultError,
+    MotionError,
+)
 
-
-def _get_variant_for_version(version: str) -> str:
-    """Get the default variant name for a given version.
-    
-    :param version: Version string (e.g., 'v1_0', 'v1_1')
-    :return: Default variant name for the version
-    """
-    # Version to variant mapping
-    version_variant_map = {
-        'v1_0': 'follower',  # v1_0 uses 'follower' variant
-        'v1_1': 'follower',  # v1_1 uses 'follower' variant
-    }
-    return version_variant_map.get(version, 'follower')
+# === RoboCore 转发（供用户直接使用）===
+try:
+    from robocore.modeling import RobotModel
+    from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
+except ImportError:
+    RobotModel = None
+    forward_kinematics = None
+    inverse_kinematics = None
+    jacobian = None
 
 
 def create_robot(
     port: str = "",
     version: str = "v1_1",
     variant: str = None,
-    model_format: str = "urdf",
+    control_aim: str = None,
+    control_mode: str = "pv",
+    baudrate: int = 1_000_000,
+    backend: str = "numpy",
     debug_mode: bool = False,
     auto_connect: bool = True,
-    base_link: str = "base_link",
-    end_link: str = "tool0",
-    backend: Optional[str] = None,
-    device: str = "cpu",
-    model_path: str = None,
-    # M-SDK specific parameters
-    baudrate: int = 1000000,
-    control_aim: str = None,
-    control_mode: str = None,
-    skip_mit_init: bool = False,
+    **kwargs,
 ) -> SynriaRobotAPI:
+    """创建机器人实例的工厂函数
+
+    初始化顺序（与 Alicia-D-SDK 保持一致）:
+    1. 设置 RoboCore 计算后端
+    2. 加载机器人 URDF 模型（立即初始化，避免首次调用延迟）
+    3. 创建 SynriaRobotAPI 实例
+    4. 自动连接（可选）
+
+    Args:
+        port: 串口端口路径，空字符串表示自动发现
+        version: 机器人硬件版本 ("v1_0", "v1_1")
+        variant: 变体标识（None=自动检测）
+        control_aim: 控制目标 ("leader"/"follower"/None=自动检测)
+        control_mode: 控制模式 ("pv"/"mit")
+        baudrate: 串口波特率
+        backend: RoboCore 计算后端 ("numpy"/"torch")
+        debug_mode: 调试模式（启用 DEBUG 级别日志）
+        auto_connect: 是否自动连接
+
+    Returns:
+        SynriaRobotAPI 实例
     """
-    Create robot instance.
+    import logging
 
-    :param port: Serial port
-    :param version: Version name, e.g., "v1_0", "v1_1", etc. Default is "v1_1".
-        The SDK will automatically select the appropriate URDF model from synriard package.
-    :param variant: Variant name, e.g., "follower", "leader", etc.
-        If not specified, defaults to "follower" for most versions.
-    :param model_format: Model format, 'urdf' or 'mjcf', default is 'urdf'
-    :param debug_mode: Debug mode
-    :param auto_connect: Automatically connect on initialization
-    :param base_link: Base link name in the robot model (default 'base_link')
-    :param end_link: End link name in the robot model (default 'tool0')
-    :param backend: Computation backend, 'numpy' or 'torch' (default: None, uses 'numpy')
-    :param device: Device for torch backend, 'cpu' or 'cuda' (default: 'cpu')
-    :param model_path: Model path, if None, use default model path from synriard
-    :param baudrate: Serial port baudrate (default: 1000000)
-    :param control_aim: Control aim string - "teach", "operation"
-    :param control_mode: Control mode string - "pv" or "mit"
-    :param skip_mit_init: Skip MIT Kp/Kd initialization, keep arm in current state (for read-only use)
-    :return: SynriaRobotAPI instance
-    """
-    # Get default variant for the specified version
-    if variant is None:
-        variant = _get_variant_for_version(version)
+    if debug_mode:
+        logging.basicConfig(level=logging.DEBUG)
 
-    # Determine control_aim: prioritize user's input, then infer from variant
-    if control_aim is not None:
-        # User explicitly specified control_aim
-        if isinstance(control_aim, str):
-            control_aim_lower = control_aim.lower()
-            aim_map = {
-                'teach': ServoDriver.AIM_TEACH,
-                'operation': ServoDriver.AIM_OPERATION,
-            }
-            control_aim_const = aim_map.get(control_aim_lower)
-            if control_aim_const is None:
-                raise ValueError(f"Unknown control_aim: {control_aim}. Valid values: {list(aim_map.keys())}")
-        else:
-            # Backward compatibility: accept constant directly
-            control_aim_const = control_aim
-    else:
-        # Auto-infer from variant: if variant contains "leader", it's a teach arm
-        if variant is not None and "leader" in variant.lower():
-            control_aim_const = ServoDriver.AIM_TEACH
-        else:
-            control_aim_const = ServoDriver.AIM_OPERATION
+    # 1. 设置 RoboCore 后端
+    robot_model = None
+    try:
+        import robocore as rc
+        rc.set_backend(backend)
 
-    servo_driver = ServoDriver(
-        port=port,
-        baudrate=baudrate,
-        debug_mode=debug_mode,
-        control_aim=control_aim_const
-    )
-
-    # Convert control_mode string to constant
-    control_mode_const = None
-    if control_mode is not None:
-        if isinstance(control_mode, str):
-            control_mode_lower = control_mode.lower()
-            mode_map = {
-                'pv': ServoDriver.PATTERN_PV,
-                'mit': ServoDriver.PATTERN_MIT,
-            }
-            control_mode_const = mode_map.get(control_mode_lower)
-            if control_mode_const is None:
-                raise ValueError(f"Unknown control_mode: {control_mode}. Valid values: {list(mode_map.keys())}")
-        else:
-            # Backward compatibility: accept tuple directly
-            control_mode_const = control_mode
-
-    if model_path is None:
+        # 2. 加载机器人模型
+        from synriard import get_model_path
+        # synriard 的 Alicia_M 模型必须指定 variant
+        model_variant = variant if variant else "follower"
         model_path = get_model_path(
-            "Alicia_M",
-            version=version,
-            variant=variant,
-            model_format=model_format
+            "Alicia_M", version=version,
+            variant=model_variant, model_format="urdf",
         )
-    robot_model = RobotModel(str(model_path), base_link=base_link, end_link=end_link)
+        robot_model = RobotModel(
+            str(model_path),
+            base_link="base_link",
+            end_link="tool0",
+        )
+    except ImportError:
+        # RoboCore 或 synriard 不可用时，运动学功能不可用
+        logging.getLogger(__name__).warning(
+            "RoboCore / synriard 未安装，运动学和规划功能不可用"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"机器人模型加载失败: {e}")
 
-    robot = SynriaRobotAPI(
-        servo_driver=servo_driver,
-        robot_model=robot_model,
+    # 3. 创建实例
+    config = RobotConfig(
+        port=port,
+        version=version,
+        variant=variant,
+        control_aim=control_aim,
+        control_mode=control_mode,
+        baudrate=baudrate,
         auto_connect=auto_connect,
         backend=backend,
-        device=device,
-        control_mode=control_mode_const,
-        skip_mit_init=skip_mit_init
+        debug_mode=debug_mode,
     )
+    robot = SynriaRobotAPI(config, robot_model=robot_model)
+
+    # 4. 自动连接
+    if auto_connect:
+        robot.connect()
 
     return robot
+
+
+__all__ = [
+    # 工厂函数
+    'create_robot',
+    # 核心类
+    'SynriaRobotAPI',
+    # 类型
+    'JointState', 'MitParams', 'RobotStatus', 'VersionInfo',
+    'RobotConfig',
+    'ControlAim', 'ControlMode', 'GripperType',
+    # 异常
+    'AliciaSDKError', 'ConnectionError', 'TimeoutError',
+    'ProtocolError', 'ValidationError', 'RobotStateError',
+    'HardwareFaultError', 'MotionError',
+    # RoboCore 转发
+    'RobotModel', 'forward_kinematics', 'inverse_kinematics', 'jacobian',
+]

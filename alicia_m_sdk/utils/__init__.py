@@ -1,34 +1,89 @@
-# Copyright (c) 2025 Synria Robotics Co., Ltd.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
-# Author: Synria Robotics Team
-# Website: https://synriarobotics.ai
+"""工具层：通用工具函数
 
-# utils/__init__.py
-from .vislab import *
-from .logger import *
-from .calculate import *
-from .fps_utils import precise_sleep
-from .trajectory_utils import *
-from .unit_conversion import (
-    deg_to_rad, 
+提供单位转换、参数校验、高精度定时、日志系统等通用能力。
+"""
+
+from .conversion import (
+    # 通用映射
+    float_to_uint,
+    uint_to_float,
+    # 位置
+    encode_position,
+    decode_position,
+    # 速度
+    encode_velocity,
+    decode_velocity,
+    # 力矩
+    encode_torque,
+    decode_torque,
+    # Kp / Kd
+    encode_kp,
+    decode_kp,
+    encode_kd,
+    decode_kd,
+    # 角度单位
+    deg_to_rad,
     rad_to_deg,
-    speed_deg_to_rad,
-    speed_rad_to_deg,
-    convert_and_validate_speed,
-    DEG_TO_RAD,
-    RAD_TO_DEG
+    # 用户/固件速度映射
+    speed_user_to_firmware,
+    speed_firmware_to_user,
+    # 夹爪量程
+    gripper_normalize,
+    gripper_denormalize,
 )
 
+from .validation import (
+    validate_joint_angles,
+    validate_speed,
+    validate_gripper_value,
+)
+
+from .timing import (
+    precise_sleep,
+    FPSCounter,
+)
+
+from .logger import (
+    get_logger,
+    print_info,
+    print_success,
+    print_warning,
+    print_error,
+    format_array,
+)
+
+__all__ = [
+    # conversion
+    "float_to_uint",
+    "uint_to_float",
+    "encode_position",
+    "decode_position",
+    "encode_velocity",
+    "decode_velocity",
+    "encode_torque",
+    "decode_torque",
+    "encode_kp",
+    "decode_kp",
+    "encode_kd",
+    "decode_kd",
+    "deg_to_rad",
+    "rad_to_deg",
+    "speed_user_to_firmware",
+    "speed_firmware_to_user",
+    "gripper_normalize",
+    "gripper_denormalize",
+    # validation
+    "validate_joint_angles",
+    "validate_speed",
+    "validate_gripper_value",
+    # timing
+    "precise_sleep",
+    "FPSCounter",
+    # logger
+    "get_logger",
+    "print_info",
+    "print_success",
+    "print_warning",
+    "print_error",
+    "format_array",
+]

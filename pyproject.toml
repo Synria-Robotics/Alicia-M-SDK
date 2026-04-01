@@ -27,22 +27,29 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
+    "synria-robocore @ git+https://github.com/Synria-Robotics/RoboCore.git@v2.0.0",
+    "synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git",
+]
+
+[project.optional-dependencies]
+planning = [
+    "scipy>=1.7.0",
+]
+visualization = [
+    "matplotlib>=3.3.0",
+]
+sparkvis = [
+    "websockets>=13.0",
+]
+all = [
     "scipy>=1.7.0",
     "matplotlib>=3.3.0",
-    "pyyaml>=6.0",
-    "omegaconf>=2.3.0",
-    "websockets==13.1",
-    "pythoncrc",
-    "pycrc",
-    "synria-robocore @ git+https://github.com/Synria-Robotics/RoboCore.git@v2.0.0",
-    "synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git", 
+    "websockets>=13.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Synria-Robotics/Alicia-M-SDK"
 
 [tool.setuptools]
-# Automatically find all packages and subpackages
 packages = {find = {}}
-# Include package data (same as original setup.py)
 include-package-data = true

@@ -1,82 +1,38 @@
-#!/usr/bin/env python3
-# Copyright (c) 2025 Synria Robotics Co., Ltd.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
-# Author: Synria Robotics Team
-# Website: https://synriarobotics.ai
+"""00_demo_read_version.py — 读取固件版本号
 
-"""
-Demo: Read robot firmware version
+演示如何连接机器人并读取版本信息（序列号、硬件版本、固件版本）。
 """
 
 import alicia_m_sdk
-from alicia_m_sdk.hardware import ServoDriver
-from alicia_m_sdk.utils.logger import logger
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
-def main(args):
-    """Read and print robot firmware version.
 
-    :param args: Command line arguments containing port
-    """
-    # Initialize robot instance
-    robot = alicia_m_sdk.create_robot(
-        port=args.port,
-        version=args.version,
-        base_link=args.base_link,
-        end_link=args.end_link,
-        control_aim=args.control_aim,
-        control_mode=args.control_mode
-    )
+def main():
+    beauty_print("Demo: 读取固件版本号", type="module")
+
+    # 创建并连接机器人（PV 模式，仅查询信息无需 MIT）
+    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    beauty_print("机器人连接成功", type="success")
 
     try:
-        robot_version = robot.get_robot_state("version")
-        if robot_version:
-            logger.info(
-                "Version info: "
-                f"Unique ID = {robot_version.get('serial_number')}, "
-                f"Hardware Version = {robot_version.get('hardware_version')}, "
-                f"Firmware Version = {robot_version.get('firmware_version')}"
-            )
-        
-        gripper_type = robot.get_robot_state("gripper_type")
-        if gripper_type:
-            logger.info(f"Gripper type: {gripper_type}")
+        # --- 查询版本信息 ---
+        version = robot.get_robot_state("version")
+        if version is not None:
+            beauty_print("版本信息:", type="info")
+            beauty_print(f"  序列号:     {version.serial_number}", type="info")
+            beauty_print(f"  硬件版本:   {version.hardware_version}", type="info")
+            beauty_print(f"  固件版本:   {version.firmware_version}", type="info")
+            beauty_print(f"  产品类别:   {version.product_type}", type="info")
+            beauty_print(f"  设备类型:   {version.device_type}", type="info")
+        else:
+            beauty_print("未能获取版本信息（固件可能未响应）", type="warning")
 
     except KeyboardInterrupt:
-        logger.info("\nOperation interrupted by user")
-
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
-
+        beauty_print("\n用户中断", type="warning")
     finally:
         robot.disconnect()
+        beauty_print("已断开连接", type="info")
 
 
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description="Read robot firmware version")
-
-    # Robot configuration
-    parser.add_argument('--port', type=str, default="", help="串口端口 (例如: /dev/ttyUSB0 或 COM3)")
-    parser.add_argument('--version', type=str, default="v1_1", help="机械臂版本 (可选: v1_0, v1_1，默认: v1_1)")
-    parser.add_argument('--base_link', type=str, default="base_link", help="基座链路名称")
-    parser.add_argument('--end_link', type=str, default="Link6", help="末端执行器链路名称")
-    parser.add_argument('--control-aim', type=str, default='operation', choices=['teach', 'operation'],
-                        help='Control aim: teach or operation (motor-specific, auto-detected if not specified)')
-    parser.add_argument('--control-mode', type=str, default='pv', choices=['pv', 'mit'],
-                        help='Control mode: pv or mit')
-    args = parser.parse_args()
-
-    main(args)
+if __name__ == "__main__":
+    main()
