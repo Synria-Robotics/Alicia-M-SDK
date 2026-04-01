@@ -50,7 +50,12 @@ class SynriaRobotAPI:
         self._serial_port = SerialPort(config.port, config.baudrate)
         self._codec = MessageCodec()
         self._device = Device(self._serial_port, self._codec)
-        self._joint_ctrl = JointController(self._device, config)
+        self._joint_ctrl = JointController(
+            self._device,
+            control_mode=config.control_mode,
+            joint_limits_lower=config.joint_limits_lower,
+            joint_limits_upper=config.joint_limits_upper,
+        )
         self._traj_executor = TrajectoryExecutor(self._device)
         self._teaching = DragTeaching(self._device, self._joint_ctrl)
         self._robot_model = robot_model
@@ -311,7 +316,10 @@ class SynriaRobotAPI:
         return self._joint_ctrl.disable()
 
     def switch_mode(self, mode: str) -> bool:
-        """切换控制模式（含安全序列）
+        """切换控制模式
+
+        注意: 切换瞬间固件会短暂失能再使能，机械臂会因重力下坠。
+        切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
 
         Args:
             mode: "pv" / "mit"

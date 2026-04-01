@@ -44,7 +44,7 @@ def main():
         if result:
             beauty_print("零位标定成功!", type="success")
         else:
-            beauty_print("零位标定失败!", type="error")
+            beauty_print("零位标定失败!", type="warning")
 
         # --- 恢复力矩 ---
         beauty_print("正在恢复力矩...", type="info")
@@ -58,7 +58,7 @@ def main():
             robot.torque_control('on')
             beauty_print("已安全恢复力矩", type="info")
         except Exception:
-            beauty_print("恢复力矩失败，请手动检查机械臂状态", type="error")
+            beauty_print("恢复力矩失败，请手动检查机械臂状态", type="warning")
     finally:
         robot.disconnect()
         beauty_print("已断开连接", type="info")

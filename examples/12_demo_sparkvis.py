@@ -37,7 +37,7 @@ async def _ws_push_loop(robot, host: str, port: int, rate_hz: float):
     try:
         import websockets
     except ImportError:
-        beauty_print("缺少 websockets 依赖，请安装: pip install websockets", type="error")
+        beauty_print("缺少 websockets 依赖，请安装: pip install websockets", type="warning")
         return
 
     interval = 1.0 / rate_hz

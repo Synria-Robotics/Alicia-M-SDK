@@ -16,18 +16,12 @@ from typing import Optional, List, Dict, Any
 from .serial_port import SerialPort
 from ..protocol.frame import Frame
 from ..protocol.codec import MessageCodec
-from ..protocol.messages import (
-    JointStateRequest, JointStateResponse, JointControlRequest,
-    VersionResponse, TorqueRequest, ZeroResetRequest,
-    EnableRequest, MotorParamRequest,
-)
+from ..protocol.messages import JointStateRequest
 from ..protocol.constants import (
-    CMD_VERSION, CMD_JOINT_STATE, CMD_ZERO_RESET, CMD_TORQUE,
-    CMD_ENABLE, CMD_MOTOR_PARAM, CMD_ERROR,
-    AIM_FOLLOWER, FUNC_WRITE_BIT, NUM_MOTORS,
+    CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR,
+    AIM_FOLLOWER, NUM_MOTORS,
 )
 from ..types.state import JointState, MitParams, RobotStatus, VersionInfo
-from ..types.exceptions import ProtocolError, TimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +114,7 @@ class Device:
         self._poll_thread: Optional[threading.Thread] = None
         self._last_write_time: float = 0.0
         self._aim: int = AIM_FOLLOWER
+        self._poll_paused = threading.Event()  # 轮询暂停控制
 
     # ========== 属性 ==========
 
@@ -136,6 +131,14 @@ class Device:
     def set_aim(self, aim: int) -> None:
         """设置控制目标部位（connect 自动检测后调用）"""
         self._aim = aim
+
+    def pause_polling(self) -> None:
+        """暂停轮询线程（模式切换等操作期间使用）"""
+        self._poll_paused.set()
+
+    def resume_polling(self) -> None:
+        """恢复轮询线程"""
+        self._poll_paused.clear()
 
     # ========== 生命周期 ==========
 
@@ -277,6 +280,11 @@ class Device:
         WRITE_COOLDOWN = 0.003   # 3ms 写冷却
 
         while not self._stop_event.is_set():
+            # 暂停检查
+            if self._poll_paused.is_set():
+                self._stop_event.wait(POLL_INTERVAL)
+                continue
+
             elapsed = time.perf_counter() - self._last_write_time
             if elapsed > WRITE_COOLDOWN:
                 try:
@@ -305,7 +313,6 @@ class Device:
         if cmd_id == CMD_JOINT_STATE:
             self._handle_joint_state(frame)
         elif cmd_id == CMD_VERSION:
-            # print(f"收到版本响应: {frame.data.hex()}")
             self._handle_version(frame)
         elif cmd_id == CMD_ERROR:
             self._handle_error(frame)
@@ -322,14 +329,16 @@ class Device:
             if response.motor_data is None or len(response.motor_data) == 0:
                 return
 
-            # 解码为物理量字典
+            # 解码为物理量字典（codec 已处理 M6 夹爪的特殊映射）
             phys = self._codec.decode_joint_state_physical(response)
 
             positions = phys.get('positions', [0.0] * NUM_MOTORS)
             velocities = phys.get('velocities')
             torques = phys.get('torques')
 
-            # 构造 JointState（前 6 个为关节角度，第 7 个为夹爪）
+            # 构造 JointState
+            # positions[0:6] = 关节角度 (rad)
+            # positions[6] = 夹爪值 [0, 1000]（codec 已用 decode_gripper 转换）
             joint_state = JointState(
                 angles=positions[:6] if len(positions) >= 6 else positions,
                 gripper=positions[6] if len(positions) >= 7 else 0.0,

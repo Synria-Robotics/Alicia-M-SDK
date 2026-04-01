@@ -37,7 +37,11 @@ from alicia_m_sdk.utils.conversion import (
     encode_torque, decode_torque,
     encode_kp, decode_kp,
     encode_kd, decode_kd,
+    encode_gripper, decode_gripper,
 )
+
+# 夹爪电机索引
+_GRIPPER_INDEX = NUM_MOTORS - 1  # M6 = index 6
 
 
 class MessageCodec:
@@ -392,7 +396,11 @@ class MessageCodec:
 
         motor_data: List[List[int]] = []
         for i in range(NUM_MOTORS):
-            pos_raw = encode_position(positions[i])
+            # M6（夹爪）: [0, 1000] → [0, 65535]，关节: [-12.5, +12.5] rad → [0, 65535]
+            if i == _GRIPPER_INDEX:
+                pos_raw = encode_gripper(positions[i])
+            else:
+                pos_raw = encode_position(positions[i])
             vel_raw = encode_velocity(velocities[i])
             motor_data.append([pos_raw, vel_raw])
 
@@ -436,7 +444,11 @@ class MessageCodec:
 
         motor_data: List[List[int]] = []
         for i in range(NUM_MOTORS):
-            pos_raw = encode_position(positions[i])
+            # M6（夹爪）: [0, 1000] → [0, 65535]，关节: [-12.5, +12.5] rad → [0, 65535]
+            if i == _GRIPPER_INDEX:
+                pos_raw = encode_gripper(positions[i])
+            else:
+                pos_raw = encode_position(positions[i])
             vel_raw = encode_velocity(velocities[i])
             tor_raw = encode_torque(torques[i], motor_index=i)
             kp_raw = encode_kp(kps[i])
@@ -447,6 +459,38 @@ class MessageCodec:
             aim=aim,
             start_addr=ADDR_POSITION,
             addr_count=5,
+            motor_data=motor_data,
+        ))
+
+    def encode_linear_velocity(
+        self,
+        aim: int,
+        velocities: List[float],
+    ) -> Frame:
+        """编码线性轨迹速度帧（addr=0x05）
+
+        MIT 模式下的线性插值速度控制。
+        addr_count=1, 每电机 2 字节 (12bit 速度)。
+
+        Args:
+            aim: 目标部位
+            velocities: 7 个电机的线性轨迹速度 (rad/s)
+
+        Returns:
+            编码后的 Frame 对象
+        """
+        from .constants import ADDR_LINEAR_VEL
+        self._validate_motor_list(velocities, "velocities")
+
+        motor_data: List[List[int]] = []
+        for i in range(NUM_MOTORS):
+            vel_raw = encode_velocity(velocities[i])
+            motor_data.append([vel_raw])
+
+        return self.encode_joint_control(JointControlRequest(
+            aim=aim,
+            start_addr=ADDR_LINEAR_VEL,
+            addr_count=1,
             motor_data=motor_data,
         ))
 
@@ -474,8 +518,9 @@ class MessageCodec:
 
         # 地址索引到物理量字段的映射
         # 索引 0: 位置, 1: 速度, 2: 力矩, 3: Kp, 4: Kd
+        # M6（夹爪）位置使用 decode_gripper 而非 decode_position
         addr_decoders = [
-            ("positions", lambda raw, i: decode_position(raw)),
+            ("positions", lambda raw, i: decode_gripper(raw) if i == _GRIPPER_INDEX else decode_position(raw)),
             ("velocities", lambda raw, i: decode_velocity(raw)),
             ("torques", lambda raw, i: decode_torque(raw, motor_index=i)),
             ("kps", lambda raw, i: decode_kp(raw)),

@@ -55,7 +55,7 @@ def main():
             T_fk = forward_kinematics(robot_model, joints_rad, return_end=True)
             _print_pose("  当前末端位姿", T_fk)
         else:
-            beauty_print("  无法获取当前关节角度", type="error")
+            beauty_print("  无法获取当前关节角度", type="warning")
 
         # --- 2. 预设关节角度的 FK ---
         beauty_print("2. 预设关节角度的正运动学", type="module")

@@ -17,7 +17,7 @@ def _print_joints(robot, label: str):
         beauty_print(f"{label} (deg): {beauty_print_array(angles_deg, precision=2)}", type="info")
         beauty_print(f"{label} (rad): {beauty_print_array(joints, precision=4)}", type="info")
     else:
-        beauty_print("无法读取关节角度", type="error")
+        beauty_print("无法读取关节角度", type="warning")
 
 
 def main():
@@ -39,7 +39,7 @@ def main():
             beauty_print("已失能，电机自由", type="success")
             beauty_print("请手动移动机械臂到新位置", type="info")
         else:
-            beauty_print("失能操作失败", type="error")
+            beauty_print("失能操作失败", type="warning")
 
         # --- 重新使能 ---
         input("\n按 Enter 在当前位置重新使能...")
@@ -47,7 +47,7 @@ def main():
         if result:
             beauty_print("已在当前位置使能（无突跳）", type="success")
         else:
-            beauty_print("使能操作失败", type="error")
+            beauty_print("使能操作失败", type="warning")
 
         # --- 打印新的关节角度 ---
         _print_joints(robot, "新的关节角度")

@@ -144,14 +144,17 @@ class JointController:
         )
         speeds = validate_speed(speed, NUM_JOINTS)
 
-        # 读取当前位置用于计算速度方向
-        current = self._get_current_angles()
+        # 读取当前位置（固件坐标系）
+        current_fw = self._get_current_angles()
 
-        # 构建 7 电机的位置和速度列表（含夹爪）
-        positions = self._apply_direction_map(target_joints)
+        # 目标角度转固件坐标系
+        target_fw = self._apply_direction_map(target_joints)
+
+        # 在固件坐标系下计算有符号速度
         velocities = self._compute_signed_velocities(
-            target_joints, current, speeds
+            target_fw, current_fw, speeds
         )
+        positions = list(target_fw)
 
         # 夹爪处理
         if gripper is not None:
@@ -270,12 +273,13 @@ class JointController:
         )
         speeds = validate_speed(speed, NUM_JOINTS)
 
-        # 读取当前位置用于计算速度方向
-        current = self._get_current_angles()
+        # 读取当前位置（固件坐标系），目标转固件坐标系
+        current_fw = self._get_current_angles()
+        target_fw = self._apply_direction_map(target_joints)
 
-        # 步骤1: 计算有符号线性轨迹速度并发送
+        # 步骤1: 在固件坐标系下计算有符号线性轨迹速度
         linear_vels = self._compute_signed_velocities(
-            target_joints, current, speeds
+            target_fw, current_fw, speeds
         )
         # 夹爪线性速度
         if gripper is not None:
@@ -365,15 +369,15 @@ class JointController:
         current = self._get_current_angles()
 
         if self._mode == ControlMode.PV:
-            # PV: 发送当前位置（不移动关节），仅控制夹爪
-            positions = self._apply_direction_map(current)
-            velocities = [0.0] * NUM_JOINTS  # 关节速度为 0
+            # PV: 关节保持当前位置（固件坐标系直接发回），仅控制夹爪
+            positions = list(current)
+            velocities = [0.0] * NUM_JOINTS
             # 夹爪
             positions.append(value)
             state = self._device.joint_state
             current_gripper = state.gripper if state else 0.0
             g_sign = 1.0 if value > current_gripper else -1.0
-            velocities.append(g_sign * speed_user_to_firmware(200.0))
+            velocities.append(g_sign * speed_user_to_firmware(40.0))
             self._device.send_pv(self._device.aim, positions, velocities)
         else:
             # MIT: 发送全参数帧，关节保持当前位置
@@ -413,13 +417,13 @@ class JointController:
         if self._mode != ControlMode.MIT:
             self.switch_mode(ControlMode.MIT)
 
-        # 确定卸力关节范围
+        # 确定卸力关节范围（固件使用 1-indexed: 1~7）
         if joints is None:
-            start_joint = 0
-            joint_count = NUM_MOTORS  # 包含夹爪
+            start_joint = 1
+            joint_count = NUM_MOTORS
         else:
-            start_joint = min(joints)
-            joint_count = max(joints) - start_joint + 1
+            start_joint = min(joints) + 1  # 0-indexed → 1-indexed
+            joint_count = max(joints) - min(joints) + 1
 
         # 发送 0x05 卸力指令
         frame = self._device.codec.encode_torque_request(TorqueRequest(
@@ -427,10 +431,8 @@ class JointController:
             start_joint=start_joint,
             joint_count=joint_count,
         ))
-        resp = self._device.send_and_wait(frame, CMD_TORQUE, timeout=1.0)
-        if resp is None:
-            logger.warning("卸力指令响应超时")
-            return False
+        self._device.send_frame(frame)
+        time.sleep(0.05)
 
         logger.info("卸力完成: joints=%s", joints or "全部")
         return True
@@ -452,23 +454,21 @@ class JointController:
         # 步骤1: 读取当前位置
         current = self._get_current_angles()
 
-        # 步骤2: 发送 0x05 恢复力矩指令
+        # 步骤2: 发送 0x05 恢复力矩指令（固件 1-indexed: 1~7）
         if joints is None:
-            start_joint = 0
+            start_joint = 1
             joint_count = NUM_MOTORS
         else:
-            start_joint = min(joints)
-            joint_count = max(joints) - start_joint + 1
+            start_joint = min(joints) + 1
+            joint_count = max(joints) - min(joints) + 1
 
         frame = self._device.codec.encode_torque_request(TorqueRequest(
             aim=self._device.aim,
             start_joint=start_joint,
             joint_count=joint_count,
         ))
-        resp = self._device.send_and_wait(frame, CMD_TORQUE, timeout=1.0)
-        if resp is None:
-            logger.warning("恢复力矩指令响应超时")
-            return False
+        self._device.send_frame(frame)
+        time.sleep(0.05)
 
         # 步骤3: 安全序列 — 以当前位置发送首帧（防止突跳）
         self._send_position_latch_mit(current)
@@ -528,12 +528,11 @@ class JointController:
     def switch_mode(self, mode: Union[str, ControlMode]) -> bool:
         """切换控制模式（发送 0x11 指令, addr=0x0B）
 
-        安全序列:
-        1. 读取当前关节位置
-        2. 发送 0x11 切换模式
-        3. 以当前位置发送首帧（防止突跳）
-           - 切到 MIT: 发送 pos=当前位置, kp=默认, kd=默认 的全参数帧
-           - 切到 PV: 发送 pos=当前位置, vel=0 的 PV 帧
+        注意: 模式切换瞬间固件会短暂失能再使能，机械臂会因重力瞬间下坠。
+
+        行为差异:
+        - 切到 MIT: 固件进入自由状态（关节可自由活动），不发安全首帧
+        - 切到 PV: 发送安全首帧（pos=当前, vel=0）防止跑到旧目标
 
         Args:
             mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
@@ -548,29 +547,41 @@ class JointController:
             logger.debug("已处于 %s 模式，无需切换", mode.value)
             return True
 
-        # 步骤1: 读取当前位置
-        current = self._get_current_angles()
+        logger.warning(
+            "即将切换控制模式: %s → %s（切换瞬间机械臂会短暂卸力）",
+            self._mode.value, mode.value,
+        )
 
-        # 步骤2: 发送 0x11 模式切换指令
-        ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
-        frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
-            aim=self._device.aim,
-            start_motor=0,
-            motor_count=NUM_MOTORS,
-            param_addr=MOTOR_PARAM_CTRL_MODE,
-            param_value=ctrl_mode_value,
-        ))
-        resp = self._device.send_and_wait(frame, CMD_MOTOR_PARAM, timeout=1.0)
-        if resp is None:
-            logger.warning("模式切换指令响应超时")
-            return False
+        # 暂停轮询，避免与模式切换指令交叉
+        self._device.pause_polling()
 
-        # 更新内部模式
-        old_mode = self._mode
-        self._mode = mode
+        try:
+            # 逐电机发送 0x11 模式切换指令（固件使用 1-indexed 电机编号: 1~7）
+            ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
+            for motor_id in range(1, NUM_MOTORS + 1):
+                frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
+                    aim=self._device.aim,
+                    start_motor=motor_id,
+                    motor_count=1,
+                    param_addr=MOTOR_PARAM_CTRL_MODE,
+                    param_value=ctrl_mode_value,
+                ))
+                self._device.send_frame(frame)
+                time.sleep(0.01)
+            # 等待固件处理全部电机的模式切换
+            time.sleep(2.0)
 
-        # 步骤3: 安全首帧（根据新模式格式发送）
-        self._send_safety_first_frame(current)
+            # 更新内部模式
+            old_mode = self._mode
+            self._mode = mode
+
+            # 切到 PV 时发安全首帧（pos=当前, vel=0）防止跑到旧目标
+            # 切到 MIT 无需额外帧（固件自动进入自由状态）
+            if mode == ControlMode.PV:
+                current = self._get_current_angles()
+                self._send_position_latch_pv(current)
+        finally:
+            self._device.resume_polling()
 
         logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
         return True
@@ -583,13 +594,11 @@ class JointController:
         """
         frame = self._device.codec.encode_zero_reset(ZeroResetRequest(
             aim=self._device.aim,
-            start_joint=0,
+            start_joint=1,       # 固件 1-indexed
             joint_count=NUM_MOTORS,
         ))
-        resp = self._device.send_and_wait(frame, CMD_ZERO_RESET, timeout=1.0)
-        if resp is None:
-            logger.warning("零位标定指令响应超时")
-            return False
+        self._device.send_frame(frame)
+        time.sleep(0.1)  # 等待固件处理零位标定
 
         logger.info("零位标定完成")
         return True
@@ -668,27 +677,26 @@ class JointController:
     ) -> List[float]:
         """计算有符号速度列表（仅关节，不含夹爪）
 
-        用户速度 [0, 400] → 固件速度 [0, 10] rad/s → 加方向符号
+        要求 target 和 current 在同一坐标系（固件坐标系）下。
+        用户速度 [0, 400] → 固件速度 [0, 10] rad/s → 加方向符号。
 
         Args:
-            target: 目标角度 (rad), 6 个关节
-            current: 当前角度 (rad), 6 个关节
+            target: 目标角度 (rad), 固件坐标系, 6 个关节
+            current: 当前角度 (rad), 固件坐标系, 6 个关节
             speeds: 用户速度列表 [0, 400], 6 个关节
 
         Returns:
-            有符号速度列表 (rad/s), 6 个元素
+            有符号速度列表 (rad/s), 6 个元素, 固件坐标系
         """
         velocities = []
         for i in range(NUM_JOINTS):
             magnitude = speed_user_to_firmware(speeds[i])
-            # 方向符号: 根据目标与当前的差值决定
             diff = target[i] - current[i]
             if abs(diff) < 1e-6:
                 sign = 1.0
             else:
                 sign = 1.0 if diff > 0 else -1.0
-            # 应用方向映射（电机正方向可能与关节正方向相反）
-            velocities.append(sign * magnitude * DIRECTION_MAP[i])
+            velocities.append(sign * magnitude)
         return velocities
 
     def _build_hold_position_mit(
@@ -707,8 +715,9 @@ class JointController:
         params = []
         for i in range(NUM_JOINTS):
             kp, kd = _fill_mit_defaults(i, None, None)
+            # current_angles 来自固件解码，已是固件坐标系，直接发回无需方向映射
             params.append(MitParams(
-                pos_ref=current_angles[i] * DIRECTION_MAP[i],
+                pos_ref=current_angles[i],
                 vel_ref=0.0,
                 t_ref=0.0,
                 kp=kp,
@@ -747,9 +756,10 @@ class JointController:
         用于使能、模式切换后防止关节突跳。
 
         Args:
-            current_angles: 当前 6 个关节角度 (rad)
+            current_angles: 当前 6 个关节角度 (rad)，固件坐标系
         """
-        positions = self._apply_direction_map(current_angles)
+        # current_angles 来自固件解码，已是固件坐标系，直接发回无需方向映射
+        positions = list(current_angles)
         velocities = [0.0] * NUM_JOINTS
         # 夹爪
         state = self._device.joint_state

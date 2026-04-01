@@ -70,7 +70,7 @@ def main():
             beauty_print(f"  姿态误差: {ik_result.get('ori_err', 'N/A')}", type="info")
             beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
         else:
-            beauty_print("  无法获取当前位姿", type="error")
+            beauty_print("  无法获取当前位姿", type="warning")
 
         # === 2. 给定目标位姿 -> IK -> 可选执行 ===
         beauty_print("2. 给定目标位姿的逆运动学求解", type="module")
