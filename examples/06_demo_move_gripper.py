@@ -17,22 +17,29 @@ def main():
     beauty_print("机器人连接成功", type="success")
 
     try:
+        # --- 半开夹爪 (500) ---
+        beauty_print("移动夹爪到半开 (500)...", type="info")
+        robot.set_robot_state(gripper_value=500, wait_for_completion=True)
+        beauty_print("夹爪已半开", type="success")
+        time.sleep(1.0)
+
         # --- 打开夹爪 (1000 = 全开) ---
         beauty_print("打开夹爪 (1000)...", type="info")
         robot.set_robot_state(gripper_value=1000, wait_for_completion=True)
         beauty_print("夹爪已打开", type="success")
         time.sleep(1.0)
 
-        # --- 关闭夹爪 (0 = 全闭) ---
-        beauty_print("关闭夹爪 (0)...", type="info")
-        robot.set_robot_state(gripper_value=0, wait_for_completion=True)
-        beauty_print("夹爪已关闭", type="success")
-        time.sleep(1.0)
-
         # --- 半开夹爪 (500) ---
         beauty_print("移动夹爪到半开 (500)...", type="info")
         robot.set_robot_state(gripper_value=500, wait_for_completion=True)
         beauty_print("夹爪已半开", type="success")
+        time.sleep(1.0)
+
+        # --- 关闭夹爪 (0 = 全闭) ---
+        beauty_print("关闭夹爪 (0)...", type="info")
+        robot.set_robot_state(gripper_value=0, wait_for_completion=True)
+        beauty_print("夹爪已关闭", type="success")
+        time.sleep(2.0)
 
         # --- 读取当前夹爪值 ---
         state = robot.get_robot_state("joint_gripper")

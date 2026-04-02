@@ -295,20 +295,20 @@ def speed_firmware_to_user(speed_rad: float) -> float:
 # ============================================================
 
 def encode_gripper(value: float) -> int:
-    """夹爪值 [0, 1000] → 16bit 协议值 [0, 65535]
+    """夹爪值 [0, 1000] → 16bit 协议值
 
-    夹爪使用与关节相同的 16-bit 位置字段，但物理含义不同：
-    - 关节: [-12.5, +12.5] rad
-    - 夹爪: [0, 1000] 开合度
+    编码路径: [0, 1000] → 线性映射到 [32768, 39688]（对应固件 0~2.64 rad）。
+    固件将夹爪视为普通电机，命令帧中的位置字段按弧度编码。
 
     Args:
         value: 夹爪值 [0=闭合, 1000=完全打开]
 
     Returns:
-        16bit 协议原始值 [0, 65535]
+        16bit 协议原始值
     """
     clamped = max(0.0, min(1000.0, value))
-    return int(clamped / 1000.0 * 65535)
+    # 0 → 32768 (0 rad), 1000 → 39688 (2.64 rad)
+    return int(32768 + clamped / 1000.0 * (39688 - 32768))
 
 
 def decode_gripper(raw: int) -> float:

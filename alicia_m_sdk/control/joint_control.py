@@ -353,12 +353,20 @@ class JointController:
         else:
             return self.move_mit(zero_joints, speed=speed, gripper=None)
 
-    def move_gripper(self, value: float, wait: bool = True) -> bool:
+    def move_gripper(
+        self,
+        value: float,
+        speed: float = 40.0,
+        wait: bool = True,
+        timeout: float = 5.0,
+    ) -> bool:
         """控制夹爪
 
         Args:
             value: 夹爪目标值 [0=关闭, 1000=打开]
+            speed: 夹爪速度 [0, 400]
             wait: 是否阻塞等待到达
+            timeout: 等待超时 (秒)
 
         Returns:
             True=到达目标 / False=超时
@@ -370,14 +378,18 @@ class JointController:
 
         if self._mode == ControlMode.PV:
             # PV: 关节保持当前位置（固件坐标系直接发回），仅控制夹爪
-            positions = list(current)
+            # 裁剪关节位置至安全范围，防止 decode→encode 量化误差触发固件限位
+            positions = [
+                max(lo, min(hi, c))
+                for c, lo, hi in zip(current, self._joint_limits_lower, self._joint_limits_upper)
+            ]
             velocities = [0.0] * NUM_JOINTS
             # 夹爪
             positions.append(value)
             state = self._device.joint_state
             current_gripper = state.gripper if state else 0.0
             g_sign = 1.0 if value > current_gripper else -1.0
-            velocities.append(g_sign * speed_user_to_firmware(40.0))
+            velocities.append(g_sign * speed_user_to_firmware(speed))
             self._device.send_pv(self._device.aim, positions, velocities)
         else:
             # MIT: 发送全参数帧，关节保持当前位置
@@ -394,9 +406,37 @@ class JointController:
             self._device.send_mit(self._device.aim, mit_params)
 
         if wait:
-            # 等待夹爪到达（简单延时，夹爪无精确位置反馈）
-            time.sleep(1.0)
+            return self._wait_for_gripper(value, timeout=timeout)
         return True
+
+    def _wait_for_gripper(
+        self,
+        target: float,
+        tolerance: float = 50.0,
+        timeout: float = 5.0,
+    ) -> bool:
+        """轮询状态缓存等待夹爪到达目标
+
+        Args:
+            target: 夹爪目标值 [0, 1000]
+            tolerance: 到达判定阈值
+            timeout: 超时时间 (秒)
+
+        Returns:
+            True=到达目标 / False=超时
+        """
+        POLL_INTERVAL = 0.02
+        deadline = time.perf_counter() + timeout
+
+        while time.perf_counter() < deadline:
+            state = self._device.joint_state
+            if state is not None:
+                if abs(state.gripper - target) < tolerance:
+                    return True
+            time.sleep(POLL_INTERVAL)
+
+        logger.warning("等待夹爪到达目标超时 (%.1fs)", timeout)
+        return False
 
     # ========== 力矩与使能 ==========
 

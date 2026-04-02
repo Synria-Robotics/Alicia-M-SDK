@@ -6,7 +6,8 @@
       "Bash(wc -l /home/wavelix/Synria/Alicia-M-SDK/alicia_m_sdk/**/*.py)",
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:docs.sparklingrobo.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(curl -s -L \"https://docs.sparklingrobo.com/docs/alicia-m-series/protocol/doc_00_intro\")"
     ]
   }
 }

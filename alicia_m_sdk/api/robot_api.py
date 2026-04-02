@@ -228,6 +228,14 @@ class SynriaRobotAPI:
         if target_joints is not None and joint_format == 'deg':
             target_joints = [math.radians(a) for a in target_joints]
 
+        # 仅控制夹爪（无关节目标）→ 走专用夹爪路径
+        if target_joints is None:
+            if gripper_value is not None:
+                return self._joint_ctrl.move_gripper(
+                    gripper_value, wait=wait_for_completion,
+                )
+            return True  # 无目标，无操作
+
         mode = self._joint_ctrl._mode
 
         if mode == ControlMode.PV or mode == "pv":
