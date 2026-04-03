@@ -61,6 +61,11 @@ class SynriaRobotAPI:
         self._robot_model = robot_model
         self._connected = False
 
+    @property
+    def robot_model(self):
+        """获取 RoboCore 机器人模型实例"""
+        return self._robot_model
+
     # ========== 连接管理 ==========
 
     def connect(self, timeout: float = 5.0) -> bool:
@@ -232,7 +237,8 @@ class SynriaRobotAPI:
         if target_joints is None:
             if gripper_value is not None:
                 return self._joint_ctrl.move_gripper(
-                    gripper_value, wait=wait_for_completion,
+                    gripper_value, speed=gripper_speed,
+                    wait=wait_for_completion,
                 )
             return True  # 无目标，无操作
 

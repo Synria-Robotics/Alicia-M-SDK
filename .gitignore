@@ -208,3 +208,9 @@ __marimo__/
 
 # vibe coding assistant
 .claude/
+
+# dev
+examples/09_demo_move_gripper_mit.py
+examples/10_demo_move_joint_mit.py
+examples/11_demo_move_full_arm_mit.py
+examples/serial_joint_control_06.py

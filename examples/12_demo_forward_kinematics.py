@@ -1,4 +1,4 @@
-"""09_demo_forward_kinematics.py — 正运动学
+"""12_demo_forward_kinematics.py — 正运动学
 
 演示正运动学（FK）计算：
   1. 读取当前关节角度 -> 计算 FK -> 打印末端位姿

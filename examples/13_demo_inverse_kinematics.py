@@ -1,4 +1,4 @@
-"""10_demo_inverse_kinematics.py — 逆运动学
+"""13_demo_inverse_kinematics.py — 逆运动学
 
 演示逆运动学（IK）求解：
   1. 读取当前末端位姿 -> IK 求解 -> 打印关节角度
@@ -17,7 +17,7 @@ from robocore.utils.backend import to_numpy
 
 
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
-DEFAULT_TARGET_POSE = [0.1, 0.0, 0.42, 0.0, 0.707, 0.0, 0.707]
+DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
 
 
 def main():
@@ -92,8 +92,8 @@ def main():
             None,  # 无初始猜测，使用多起点
             method='dls',
             max_iters=500,
-            pos_tol=1e-3,
-            ori_tol=1e-3,
+            pos_tol=1e-2,
+            ori_tol=1e-2,
             num_initial_guesses=10,
             initial_guess_strategy='random',
             use_analytic_jacobian=True,

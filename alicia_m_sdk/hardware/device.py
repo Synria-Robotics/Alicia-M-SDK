@@ -168,9 +168,15 @@ class Device:
 
     # ========== 写入路径（非阻塞）==========
 
+    # 连续写入最小间隔 (秒): 防止轮询帧与控制帧背靠背到达固件引发 CRC 错误
+    _MIN_WRITE_GAP = 0.001
+
     def send_frame(self, frame: Frame) -> None:
         """发送原始帧（fire-and-forget，不等待响应）"""
         with self._write_lock:
+            gap = time.perf_counter() - self._last_write_time
+            if gap < self._MIN_WRITE_GAP:
+                time.sleep(self._MIN_WRITE_GAP - gap)
             self._port.write(frame.encode())
             self._last_write_time = time.perf_counter()
 
