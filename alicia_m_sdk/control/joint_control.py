@@ -103,6 +103,15 @@ class JointController:
         """获取当前控制模式"""
         return self._mode
 
+    @mode.setter
+    def mode(self, value: ControlMode) -> None:
+        """同步内部模式标记（仅更新状态，不发送切换指令）
+
+        用于 connect() 阶段将 SDK 内部状态与固件实际模式对齐。
+        如需实际切换固件模式，请使用 switch_mode()。
+        """
+        self._mode = value
+
     # ========== PV 模式 ==========
 
     def move_pv(
@@ -576,6 +585,10 @@ class JointController:
         - 切到 MIT: 固件进入自由状态（关节可自由活动），不发安全首帧
         - 切到 PV: 发送安全首帧（pos=当前, vel=0）防止跑到旧目标
 
+        实现要点:
+        - 单指令切换全部电机（避免逐电机切换导致混合模式）
+        - 切换后读回验证，失败则重试一次
+
         Args:
             mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
 
@@ -598,20 +611,17 @@ class JointController:
         self._device.pause_polling()
 
         try:
-            # 逐电机发送 0x11 模式切换指令（固件使用 1-indexed 电机编号: 1~7）
             ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
-            for motor_id in range(1, NUM_MOTORS + 1):
-                frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
-                    aim=self._device.aim,
-                    start_motor=motor_id,
-                    motor_count=1,
-                    param_addr=MOTOR_PARAM_CTRL_MODE,
-                    param_value=ctrl_mode_value,
-                ))
-                self._device.send_frame(frame)
-                time.sleep(0.01)
-            # 等待固件处理全部电机的模式切换
+
+            # 单指令切换全部电机（motor 1~7）
+            self._send_mode_switch_command(ctrl_mode_value)
             time.sleep(2.0)
+
+            # 读回验证：确认所有电机都已切换成功
+            if not self._verify_mode_switch(ctrl_mode_value):
+                logger.warning("模式切换未完全生效，重试一次")
+                self._send_mode_switch_command(ctrl_mode_value)
+                time.sleep(2.0)
 
             # 更新内部模式
             old_mode = self._mode
@@ -626,6 +636,31 @@ class JointController:
             self._device.resume_polling()
 
         logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
+        return True
+
+    def _send_mode_switch_command(self, ctrl_mode_value: int) -> None:
+        """发送模式切换指令（单指令覆盖全部电机）"""
+        frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
+            aim=self._device.aim,
+            start_motor=1,
+            motor_count=NUM_MOTORS,
+            param_addr=MOTOR_PARAM_CTRL_MODE,
+            param_value=ctrl_mode_value,
+        ))
+        self._device.send_frame(frame)
+
+    def _verify_mode_switch(self, expected_value: int) -> bool:
+        """读回验证所有电机的控制模式是否与预期一致"""
+        values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
+        if values is None:
+            logger.warning("模式验证失败: 读取超时")
+            return False
+        for i, v in enumerate(values):
+            if v != expected_value:
+                label = f"M{i}" if i < NUM_JOINTS else "夹爪"
+                logger.warning("电机 %s 模式未切换: 期望 0x%02X, 实际 0x%02X",
+                               label, expected_value, v)
+                return False
         return True
 
     def set_zero_position(self) -> bool:

@@ -21,6 +21,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 | **双控制模式** | PV（位置-速度，固件插值）/ MIT（阻抗控制，全参数逐帧） |
 | **统一 API** | `set_robot_state()` 自动适配当前模式，屏蔽底层差异 |
 | **安全序列** | 使能/模式切换自动发送位置锁定帧，防止关节突跳 |
+| **模式同步** | 连接时自动检测固件控制模式，按需切换到目标模式 |
 | **异步轮询** | 200Hz 后台状态轮询，缓存读取微秒级返回 |
 | **自动发现** | 串口自动扫描、设备类型自动检测（示教臂/操作臂） |
 
@@ -55,8 +56,11 @@ pip install -e .
 ```python
 import alicia_m_sdk
 
-# 创建并自动连接（默认 PV 模式，串口自动发现）
+# 创建并自动连接（自动检测控制模式，串口自动发现）
 robot = alicia_m_sdk.create_robot()
+
+# 指定控制模式（若固件当前模式不匹配则自动切换）
+robot = alicia_m_sdk.create_robot(control_mode="pv")
 
 # 关节运动（度）
 robot.set_robot_state(target_joints=[90, -90, -90, 90, 0, 0], speed=15)

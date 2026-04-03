@@ -10,8 +10,8 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 def main():
     beauty_print("Demo: 读取固件版本号", type="module")
 
-    # 创建并连接机器人（PV 模式，仅查询信息无需 MIT）
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    # 创建并连接机器人（自动检测控制模式，仅查询信息无需指定模式）
+    robot = alicia_m_sdk.create_robot()
     beauty_print("机器人连接成功", type="success")
 
     try:

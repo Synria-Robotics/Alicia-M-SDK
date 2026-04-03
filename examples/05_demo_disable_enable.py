@@ -24,7 +24,7 @@ def main():
     beauty_print("Demo: 失能/使能交互", type="module")
 
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    robot = alicia_m_sdk.create_robot()
     beauty_print("机器人连接成功", type="success")
 
     try:

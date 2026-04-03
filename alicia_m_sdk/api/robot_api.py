@@ -23,7 +23,7 @@ from ..types.exceptions import (
 from ..protocol.codec import MessageCodec
 from ..protocol.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
-    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES,
+    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
@@ -51,9 +51,10 @@ class SynriaRobotAPI:
         self._serial_port = SerialPort(config.port, config.baudrate)
         self._codec = MessageCodec()
         self._device = Device(self._serial_port, self._codec)
+        # control_mode 为 None 时暂用 PV，connect() 中会检测固件模式并同步
         self._joint_ctrl = JointController(
             self._device,
-            control_mode=config.control_mode,
+            control_mode=config.control_mode or "pv",
             joint_limits_lower=config.joint_limits_lower,
             joint_limits_upper=config.joint_limits_upper,
         )
@@ -66,6 +67,11 @@ class SynriaRobotAPI:
     def robot_model(self):
         """获取 RoboCore 机器人模型实例"""
         return self._robot_model
+
+    @property
+    def control_mode(self) -> ControlMode:
+        """获取当前控制模式"""
+        return self._joint_ctrl.mode
 
     # ========== 连接管理 ==========
 
@@ -111,6 +117,9 @@ class SynriaRobotAPI:
         # 5. 查询固件版本
         remaining = max(deadline - time.time(), 0.5)
         self.get_firmware_version(timeout=remaining)
+
+        # 6. 检测固件控制模式并同步 SDK 内部状态
+        self._sync_control_mode()
 
         self._connected = True
         logger.info("机器人连接成功")
@@ -255,9 +264,9 @@ class SynriaRobotAPI:
                 )
             return True  # 无目标，无操作
 
-        mode = self._joint_ctrl._mode
+        mode = self._joint_ctrl.mode
 
-        if mode == ControlMode.PV or mode == "pv":
+        if mode == ControlMode.PV:
             return self._joint_ctrl.move_pv(
                 target_joints=target_joints,
                 speed=speed,
@@ -559,6 +568,53 @@ class SynriaRobotAPI:
             {"value": v, "name": CTRL_MODE_NAMES.get(v, f"未知({v})")}
             for v in values
         ]
+
+    def _detect_firmware_mode(self) -> Optional[ControlMode]:
+        """通过 0x11 查询固件实际控制模式
+
+        检查所有电机模式是否一致。若不一致（旧版 SDK 遗留的混合状态），
+        返回 None 以触发后续强制切换。
+
+        Returns:
+            所有电机一致时返回该模式，不一致或查询失败返回 None
+        """
+        _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
+        values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
+        if values is None or len(values) == 0:
+            return None
+        # 检查所有电机模式一致性
+        if any(v != values[0] for v in values):
+            logger.warning("检测到混合控制模式状态: %s，将强制同步", values)
+            return None
+        return _MODE_MAP.get(values[0])
+
+    def _sync_control_mode(self) -> None:
+        """检测固件控制模式并同步 SDK 内部状态
+
+        根据 config.control_mode:
+        - None: 跟随固件当前模式（不发送切换指令）
+        - "pv"/"mit": 若与固件不一致则自动切换
+        """
+        firmware_mode = self._detect_firmware_mode()
+        requested = self._config.control_mode
+        desired = ControlMode(requested.lower()) if requested else firmware_mode
+
+        if desired is None:
+            # 查询失败且未指定模式 → 保持初始化时的默认 PV
+            logger.warning("无法检测固件控制模式，保持默认 PV 模式")
+            return
+
+        if firmware_mode == desired:
+            # 固件已是目标模式，同步 SDK 状态即可
+            self._joint_ctrl.mode = desired
+            logger.info("固件控制模式: %s", desired.value.upper())
+        else:
+            # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
+            # 设为对端模式确保 switch_mode 不会因 mode == desired 而跳过
+            opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
+            self._joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
+            logger.info("切换固件模式 → %s", desired.value.upper())
+            self._joint_ctrl.switch_mode(desired)
 
     def _auto_detect_aim(self, timeout: float) -> None:
         """自动检测控制目标（示教臂/操作臂）"""

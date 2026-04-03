@@ -14,8 +14,8 @@ def main():
     beauty_print("Demo: 读取关节状态（循环打印）", type="module")
 
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
-    beauty_print("机器人连接成功", type="success")
+    robot = alicia_m_sdk.create_robot()
+    beauty_print(f"机器人连接成功（{robot.control_mode.value.upper()} 模式）", type="success")
     beauty_print("按 Ctrl+C 退出循环", type="info")
 
     try:

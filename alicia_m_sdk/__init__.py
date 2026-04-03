@@ -11,7 +11,7 @@
 
     import alicia_m_sdk
 
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
+    robot = alicia_m_sdk.create_robot()
     robot.set_robot_state(target_joints=[0, 30, 0, 0, -30, 0], speed=15)
     robot.disconnect()
 """
@@ -50,7 +50,7 @@ def create_robot(
     version: str = "v1_1",
     variant: str = None,
     control_aim: str = None,
-    control_mode: str = "pv",
+    control_mode: str = None,
     baudrate: int = 1_000_000,
     backend: str = "numpy",
     debug_mode: bool = False,
@@ -70,7 +70,7 @@ def create_robot(
         version: 机器人硬件版本 ("v1_0", "v1_1")
         variant: 变体标识（None=自动检测）
         control_aim: 控制目标 ("leader"/"follower"/None=自动检测)
-        control_mode: 控制模式 ("pv"/"mit")
+        control_mode: 控制模式 ("pv"/"mit"/None=检测固件当前模式)
         baudrate: 串口波特率
         backend: RoboCore 计算后端 ("numpy"/"torch")
         debug_mode: 调试模式（启用 DEBUG 级别日志）
