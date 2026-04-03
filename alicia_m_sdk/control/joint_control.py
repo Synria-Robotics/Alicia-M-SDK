@@ -636,7 +636,7 @@ class JointController:
         """
         frame = self._device.codec.encode_zero_reset(ZeroResetRequest(
             aim=self._device.aim,
-            start_joint=1,       # 固件 1-indexed
+            start_joint=0,
             joint_count=NUM_MOTORS,
         ))
         self._device.send_frame(frame)

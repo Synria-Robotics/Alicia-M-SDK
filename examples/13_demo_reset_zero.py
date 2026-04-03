@@ -1,64 +1,44 @@
 """13_demo_reset_zero.py — 零位标定
 
-演示零位标定流程（MIT 模式）：
-  连接 MIT -> 卸载力矩 -> 用户手动摆到零位 -> 执行标定 -> 恢复力矩。
-
-警告: 此操作将永久更改零位，无法恢复出厂零位！
-      如需恢复，需要购买校准工具。
+流程:
+1. 连接机械臂，运行本脚本
+2. 提示用户通过机械臂按键切换到 MIT 模式（非重力补偿）
+3. 用户手动将机械臂移动到期望零点位置，夹爪闭合
+4. 用户通过机械臂按键切换回 PV 模式
+5. 用户按 Enter 确认
+6. SDK 发送零位标定指令（0x03）
 """
 
 import alicia_m_sdk
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from robocore.utils.beauty_logger import beauty_print
 
 
 def main():
-    beauty_print("Demo: 零位标定 (MIT 模式)", type="module")
+    beauty_print("Demo: 零位标定", type="module")
 
-    # 以 MIT 模式连接（零位标定需要力矩控制能力）
-    robot = alicia_m_sdk.create_robot(control_mode="mit")
-    beauty_print("机器人连接成功（MIT 模式）", type="success")
+    # 创建并连接机器人
+    robot = alicia_m_sdk.create_robot()
+    beauty_print("机器人连接成功", type="success")
 
     try:
-        # --- 安全警告 ---
-        beauty_print("=" * 60, type="warning")
-        beauty_print("  警告: 此操作将永久更改零位!", type="warning")
-        beauty_print("  一旦设置新零位，无法恢复至出厂零位!", type="warning")
-        beauty_print("  如需恢复，需要购买校准工具!", type="warning")
-        beauty_print("=" * 60, type="warning")
-        beauty_print("请用手扶住机械臂，防止卸力后坠落", type="warning")
+        # --- 引导用户手动调零 ---
+        beauty_print("=" * 50)
+        beauty_print("零位标定操作步骤:", type="module")
+        beauty_print("  1. 通过机械臂按键切换到 MIT 模式（非重力补偿）", type="info")
+        beauty_print("  2. 手动将机械臂各关节移动到期望的零点位置", type="info")
+        beauty_print("  3. 确保夹爪完全闭合", type="info")
+        beauty_print("  4. 通过机械臂按键切换回 PV 模式", type="info")
+        beauty_print("=" * 50)
 
-        # --- 卸载力矩 ---
-        input("\n按 Enter 卸载力矩（Kp=0, Kd=0）...")
-        beauty_print("正在卸载力矩...", type="info")
-        robot.torque_control('off')
-        beauty_print("力矩已卸载，电机可自由运动", type="success")
+        input("\n完成以上步骤后，按 Enter 发送零位标定指令...")
 
-        # --- 用户摆到零位 ---
-        beauty_print("请手动将机械臂摆到目标零位位置", type="info")
-        beauty_print("确认所有关节都在正确的零位后，按 Enter 继续", type="info")
-        input("\n按 Enter 执行零位标定...")
-
-        # --- 执行零位标定 ---
-        beauty_print("正在执行零位标定...", type="info")
-        result = robot.set_zero_position()
-        if result:
-            beauty_print("零位标定成功!", type="success")
-        else:
-            beauty_print("零位标定失败!", type="warning")
-
-        # --- 恢复力矩 ---
-        beauty_print("正在恢复力矩...", type="info")
-        robot.torque_control('on')
-        beauty_print("力矩已恢复", type="success")
+        # --- 发送零位标定指令 ---
+        beauty_print("正在发送零位标定指令...", type="info")
+        robot.set_zero_position()
+        beauty_print("零位标定完成！当前位置已设为新零点", type="success")
 
     except KeyboardInterrupt:
-        beauty_print("\n用户中断，操作已取消", type="warning")
-        # 安全恢复: 尝试恢复力矩
-        try:
-            robot.torque_control('on')
-            beauty_print("已安全恢复力矩", type="info")
-        except Exception:
-            beauty_print("恢复力矩失败，请手动检查机械臂状态", type="warning")
+        beauty_print("\n用户取消", type="warning")
     finally:
         robot.disconnect()
         beauty_print("已断开连接", type="info")
