@@ -176,7 +176,7 @@ class MotorParamRequest:
 
     Attributes:
         aim: 目标部位
-        start_motor: 起始电机编号（从 0 开始）
+        start_motor: 起始电机编号（1-based）
         motor_count: 电机数量
         param_addr: 参数地址（如 MOTOR_PARAM_CTRL_MODE=0x0B）
         param_value: 参数值（4 字节，小端序写入）
@@ -186,6 +186,22 @@ class MotorParamRequest:
     motor_count: int
     param_addr: int
     param_value: int
+
+
+@dataclass
+class MotorParamReadRequest:
+    """电机驱动参数读取请求
+
+    Attributes:
+        aim: 目标部位
+        start_motor: 起始电机编号（1-based）
+        motor_count: 电机数量
+        param_addr: 参数地址（如 MOTOR_PARAM_CTRL_MODE=0x0B）
+    """
+    aim: int
+    start_motor: int
+    motor_count: int
+    param_addr: int
 
 
 # ============================================================

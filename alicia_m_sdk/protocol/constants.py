@@ -37,6 +37,7 @@ ADDR_TORQUE        = 0x02      # 当前力矩/额外力矩  12bit  N/m
 ADDR_KP            = 0x03      # 位置环 kp          16bit  0~500
 ADDR_KD            = 0x04      # 速度环 kd          16bit  0~5
 ADDR_LINEAR_VEL    = 0x05      # 线性轨迹速度       12bit  rad/s
+ADDR_TEMPERATURE   = 0x06      # 线圈温度           16bit  只读
 
 # === 0x11 指令：电机参数地址表 ===
 MOTOR_PARAM_ACCEL       = 0x05  # 加速度 (float)
@@ -55,6 +56,16 @@ MOTOR_PARAM_POS_KI      = 0x1D  # 位置环 Ki (float)
 # === 0x11 控制模式值 ===
 CTRL_MODE_MIT      = 0x01      # MIT 阻抗控制模式
 CTRL_MODE_PV       = 0x02      # PV 位置速度模式
+CTRL_MODE_SPD      = 0x03      # SPD 速度模式
+CTRL_MODE_PSI      = 0x04      # PSI 模式
+
+# 控制模式描述映射
+CTRL_MODE_NAMES = {
+    CTRL_MODE_MIT: "MIT",
+    CTRL_MODE_PV:  "PV (位置速度)",
+    CTRL_MODE_SPD: "SPD (速度)",
+    CTRL_MODE_PSI: "PSI",
+}
 
 # === 0xEE 错误类型 ===
 ERR_FRAME_HEADER    = 0x00     # 帧头/帧尾校验错误

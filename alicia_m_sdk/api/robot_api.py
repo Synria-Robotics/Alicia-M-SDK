@@ -23,6 +23,7 @@ from ..types.exceptions import (
 from ..protocol.codec import MessageCodec
 from ..protocol.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
+    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
@@ -131,18 +132,25 @@ class SynriaRobotAPI:
     def get_robot_state(self, info_type: str = "joint_gripper") -> Any:
         """获取机器人状态
 
+        缓存类（从轮询状态缓存读取，微秒级返回）:
+            - "joint": 6个关节角度 (rad)
+            - "joint_gripper": 关节角度 + 夹爪值
+            - "velocity": 关节速度
+            - "torque": 关节力矩
+            - "linear_vels": 插补速度
+            - "temperatures": 线圈温度
+            - "all": 完整 JointState 对象
+            - "version": 版本信息
+            - "status": 运行状态
+
+        一次性查询（发送请求等待响应）:
+            - "control_mode": 各电机控制模式 (0x11)
+
         Args:
             info_type: 查询类型
-                - "joint": 6个关节角度 (rad)
-                - "joint_gripper": 关节角度 + 夹爪值
-                - "velocity": 关节速度
-                - "torque": 关节力矩
-                - "all": 完整 JointState 对象
-                - "version": 版本信息
-                - "status": 运行状态
 
         Returns:
-            对应类型的状态数据
+            对应类型的状态数据，不可用时返回 None
         """
         state = self._device.joint_state
 
@@ -161,12 +169,17 @@ class SynriaRobotAPI:
             return list(state.torques) if state and state.torques else None
         elif info_type == "all":
             return state
+        elif info_type == "linear_vels":
+            return list(state.linear_vels) if state and state.linear_vels else None
+        elif info_type == "temperatures":
+            return list(state.temperatures) if state and state.temperatures else None
+        elif info_type == "control_mode":
+            return self._query_control_modes()
         elif info_type == "version":
             return self._device.version_info
         elif info_type == "status":
             return self._device.robot_status
         else:
-            # 未实现的类型（预留扩展）
             logger.warning(f"未实现的状态查询类型: {info_type}")
             return None
 
@@ -536,6 +549,16 @@ class SynriaRobotAPI:
         return self.set_pose(**kwargs)
 
     # ========== 内部方法 ==========
+
+    def _query_control_modes(self) -> Optional[List[dict]]:
+        """读取各电机控制模式 (0x11 addr=0x0B)"""
+        values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
+        if values is None:
+            return None
+        return [
+            {"value": v, "name": CTRL_MODE_NAMES.get(v, f"未知({v})")}
+            for v in values
+        ]
 
     def _auto_detect_aim(self, timeout: float) -> None:
         """自动检测控制目标（示教臂/操作臂）"""

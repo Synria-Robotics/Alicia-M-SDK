@@ -323,6 +323,24 @@ def decode_gripper(raw: int) -> float:
     return max(0, min(65535, raw)) / 65535.0 * 1000.0
 
 
+# ============================================================
+# 线圈温度解码
+# ============================================================
+
+def decode_temperature(raw: int) -> float:
+    """16bit 协议值 → 线圈温度 (°C)
+
+    映射: [0, 65535] → [0, 120] °C
+
+    Args:
+        raw: 16bit 协议原始值
+
+    Returns:
+        线圈温度 (°C)
+    """
+    return max(0, min(65535, raw)) / 65535.0 * 120.0
+
+
 def gripper_normalize(raw: int, gripper_range: int) -> float:
     """夹爪原始值 → 归一化值
 

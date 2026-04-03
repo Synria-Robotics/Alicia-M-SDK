@@ -16,9 +16,9 @@ from typing import Optional, List, Dict, Any
 from .serial_port import SerialPort
 from ..protocol.frame import Frame
 from ..protocol.codec import MessageCodec
-from ..protocol.messages import JointStateRequest
+from ..protocol.messages import JointStateRequest, MotorParamReadRequest
 from ..protocol.constants import (
-    CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR,
+    CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR, CMD_MOTOR_PARAM,
     AIM_FOLLOWER, NUM_MOTORS,
 )
 from ..types.state import JointState, MitParams, RobotStatus, VersionInfo
@@ -240,6 +240,31 @@ class Device:
         event.wait(max(timeout, 0))
         return self._state_cache.get_pending_response(expected_cmd)
 
+    # ========== 一次性查询 ==========
+
+    def query_motor_params(
+        self, param_addr: int, timeout: float = 1.0
+    ) -> Optional[List[int]]:
+        """读取所有电机的指定参数
+
+        Args:
+            param_addr: 参数地址 (如 MOTOR_PARAM_CTRL_MODE=0x0B)
+            timeout: 等待超时 (秒)
+
+        Returns:
+            各电机的参数值列表（uint32），超时返回 None
+        """
+        query = self._codec.encode_motor_param_read(MotorParamReadRequest(
+            aim=self._aim,
+            start_motor=1,
+            motor_count=NUM_MOTORS,
+            param_addr=param_addr,
+        ))
+        resp = self.send_and_wait(query, CMD_MOTOR_PARAM, timeout=timeout)
+        if resp is None:
+            return None
+        return self._codec.decode_motor_param_read_response(resp)
+
     # ========== 状态访问（读缓存，无 I/O）==========
 
     @property
@@ -298,7 +323,7 @@ class Device:
                         JointStateRequest(
                             aim=self._aim,
                             start_addr=0x00,
-                            addr_count=3,  # pos + vel + torque
+                            addr_count=7,  # pos + vel + torque + kp + kd + linear_vel + temperature
                         )
                     )
                     self.send_frame(query)
@@ -341,17 +366,20 @@ class Device:
             positions = phys.get('positions', [0.0] * NUM_MOTORS)
             velocities = phys.get('velocities')
             torques = phys.get('torques')
+            linear_vels = phys.get('linear_vels')
+            temperatures = phys.get('temperatures')
 
-            # 构造 JointState
-            # positions[0:6] = 关节角度 (rad)
-            # positions[6] = 夹爪值 [0, 1000]（codec 已用 decode_gripper 转换）
+            # 构造 JointState（positions[0:6]=关节角度, positions[6]=夹爪值）
+            _trim6 = lambda v: v[:6] if v and len(v) >= 6 else v
             joint_state = JointState(
                 angles=positions[:6] if len(positions) >= 6 else positions,
                 gripper=positions[6] if len(positions) >= 7 else 0.0,
                 timestamp=time.time(),
                 run_status=phys.get('run_status', 0),
-                velocities=velocities[:6] if velocities and len(velocities) >= 6 else velocities,
-                torques=torques[:6] if torques and len(torques) >= 6 else torques,
+                velocities=_trim6(velocities),
+                torques=_trim6(torques),
+                linear_vels=_trim6(linear_vels),
+                temperatures=_trim6(temperatures),
             )
             self._state_cache.update_joint_state(joint_state)
 

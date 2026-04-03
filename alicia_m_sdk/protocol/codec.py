@@ -17,6 +17,7 @@ from .constants import (
     FUNC_VERSION_REQ, FUNC_VERSION_RESP,
     AIM_LEADER, AIM_FOLLOWER,
     ADDR_POSITION, ADDR_VELOCITY, ADDR_TORQUE, ADDR_KP, ADDR_KD,
+    ADDR_LINEAR_VEL, ADDR_TEMPERATURE,
     PLACEHOLDER, ENABLE_ON, ENABLE_OFF, FEEDBACK_BIT,
     NUM_MOTORS,
     VERSION_SERIAL_LEN, VERSION_HARDWARE_LEN, VERSION_FIRMWARE_LEN,
@@ -28,7 +29,7 @@ from .messages import (
     JointStateRequest, JointStateResponse,
     JointControlRequest, JointControlResponse,
     TorqueRequest, ZeroResetRequest,
-    EnableRequest, MotorParamRequest,
+    EnableRequest, MotorParamRequest, MotorParamReadRequest,
     ErrorResponse,
 )
 from alicia_m_sdk.utils.conversion import (
@@ -38,6 +39,7 @@ from alicia_m_sdk.utils.conversion import (
     encode_kp, decode_kp,
     encode_kd, decode_kd,
     encode_gripper, decode_gripper,
+    decode_temperature,
 )
 
 # 夹爪电机索引
@@ -348,6 +350,48 @@ class MessageCodec:
             data=bytes(data),
         )
 
+    def encode_motor_param_read(self, msg: MotorParamReadRequest) -> Frame:
+        """编码电机参数读取请求
+
+        帧格式: [start_motor][motor_count][param_addr]
+        读取时 func_code 不带 FUNC_WRITE_BIT。
+
+        Args:
+            msg: MotorParamReadRequest 消息对象
+
+        Returns:
+            编码后的 Frame 对象
+        """
+        data = bytes([msg.start_motor, msg.motor_count, msg.param_addr])
+        return Frame(
+            cmd_id=CMD_MOTOR_PARAM,
+            func_code=msg.aim,
+            data=data,
+        )
+
+    def decode_motor_param_read_response(self, frame: Frame) -> List[int]:
+        """解码电机参数读取响应
+
+        响应格式: [保留字节(3)][参数值(4字节LE)] × N 个电机
+        前 3 字节为保留字段，后续按电机顺序返回 uint32 值。
+
+        Args:
+            frame: 接收到的 Frame 对象
+
+        Returns:
+            各电机的参数值列表
+        """
+        self._check_cmd(frame, CMD_MOTOR_PARAM)
+        data = frame.data
+        if len(data) < 3:
+            return []
+        values = []
+        offset = 3  # 跳过保留字节
+        while offset + 4 <= len(data):
+            values.append(struct.unpack_from('<I', data, offset)[0])
+            offset += 4
+        return values
+
     # ============================================================
     # 0xEE — 错误反馈解码
     # ============================================================
@@ -495,44 +539,45 @@ class MessageCodec:
             motor_data=motor_data,
         ))
 
+    # 0x06 地址 → (字段名, 解码函数) 映射
+    # 按物理地址索引，支持任意 start_addr 的响应解码
+    _ADDR_DECODERS = {
+        ADDR_POSITION:   ("positions",   lambda raw, i: decode_gripper(raw) if i == _GRIPPER_INDEX else decode_position(raw)),
+        ADDR_VELOCITY:   ("velocities",  lambda raw, i: decode_velocity(raw)),
+        ADDR_TORQUE:     ("torques",     lambda raw, i: decode_torque(raw, motor_index=i)),
+        ADDR_KP:         ("kps",         lambda raw, i: decode_kp(raw)),
+        ADDR_KD:         ("kds",         lambda raw, i: decode_kd(raw)),
+        ADDR_LINEAR_VEL: ("linear_vels", lambda raw, i: decode_velocity(raw)),
+        ADDR_TEMPERATURE:("temperatures",lambda raw, i: decode_temperature(raw)),
+    }
+
     def decode_joint_state_physical(
         self,
         response: JointStateResponse,
     ) -> dict:
         """将关节状态响应的原始数据转换为物理量
 
-        根据 addr_count 自动解析对应的数据字段。
+        根据 start_addr 和 addr_count 自动选择对应的解码器。
 
         Args:
             response: JointStateResponse 消息对象
 
         Returns:
-            字典，包含以下字段（按 addr_count 递增）:
-            - "positions": List[float]  — 各电机位置 (rad)
-            - "velocities": List[float] — 各电机速度 (rad/s)（addr_count >= 2）
-            - "torques": List[float]    — 各电机力矩 (N·m)（addr_count >= 3）
-            - "kps": List[float]        — 各电机 Kp（addr_count >= 4）
-            - "kds": List[float]        — 各电机 Kd（addr_count >= 5）
-            - "run_status": int         — 运行状态字节
+            字典，键为字段名（positions / velocities / torques / kps / kds /
+            linear_vels / temperatures），值为各电机的物理量列表。
+            附加 "run_status" 字段。
         """
         result: dict = {"run_status": response.run_status}
 
-        # 地址索引到物理量字段的映射
-        # 索引 0: 位置, 1: 速度, 2: 力矩, 3: Kp, 4: Kd
-        # M6（夹爪）位置使用 decode_gripper 而非 decode_position
-        addr_decoders = [
-            ("positions", lambda raw, i: decode_gripper(raw) if i == _GRIPPER_INDEX else decode_position(raw)),
-            ("velocities", lambda raw, i: decode_velocity(raw)),
-            ("torques", lambda raw, i: decode_torque(raw, motor_index=i)),
-            ("kps", lambda raw, i: decode_kp(raw)),
-            ("kds", lambda raw, i: decode_kd(raw)),
-        ]
-
-        for addr_idx in range(min(response.addr_count, len(addr_decoders))):
-            field_name, decoder = addr_decoders[addr_idx]
+        for data_idx in range(response.addr_count):
+            addr = response.start_addr + data_idx
+            entry = self._ADDR_DECODERS.get(addr)
+            if entry is None:
+                continue
+            field_name, decoder = entry
             values = []
             for motor_idx in range(len(response.motor_data)):
-                raw = response.motor_data[motor_idx][addr_idx]
+                raw = response.motor_data[motor_idx][data_idx]
                 values.append(decoder(raw, motor_idx))
             result[field_name] = values
 

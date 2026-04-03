@@ -1,6 +1,6 @@
 """03_demo_read_states.py — 读取关节状态
 
-演示循环读取并打印关节角度（deg+rad）、夹爪开合度、关节速度、关节力矩。
+演示循环读取并打印关节角度、夹爪、速度、力矩、插补速度、线圈温度。
 按 Ctrl+C 退出。
 """
 
@@ -45,6 +45,14 @@ def main():
             # 关节力矩
             if state.torques is not None:
                 beauty_print(f"  关节力矩 (N*m):  {beauty_print_array(state.torques, precision=3)}", type="info")
+
+            # 插补速度
+            if state.linear_vels is not None:
+                beauty_print(f"  插补速度 (rad/s): {beauty_print_array(state.linear_vels, precision=3)}", type="info")
+
+            # 线圈温度
+            if state.temperatures is not None:
+                beauty_print(f"  线圈温度 (°C):    {beauty_print_array(state.temperatures, precision=1)}", type="info")
 
             # 控制打印频率，约 5Hz
             time.sleep(0.2)
