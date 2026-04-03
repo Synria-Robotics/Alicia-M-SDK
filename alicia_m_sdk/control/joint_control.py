@@ -35,9 +35,6 @@ from ..utils.validation import (
 
 logger = logging.getLogger(__name__)
 
-# 方向映射: 电机正方向与关节正方向的对应关系
-DIRECTION_MAP = [1, -1, 1, 1, -1, 1, 1]
-
 # MIT 默认增益查表（按电机索引）
 # M0~M2 大关节, M3~M6 小关节（含夹爪）
 _DEFAULT_KP = [DEFAULT_KP_LARGE] * 3 + [DEFAULT_KP_SMALL] * 4
@@ -144,17 +141,14 @@ class JointController:
         )
         speeds = validate_speed(speed, NUM_JOINTS)
 
-        # 读取当前位置（固件坐标系）
-        current_fw = self._get_current_angles()
+        # 读取当前位置
+        current = self._get_current_angles()
 
-        # 目标角度转固件坐标系
-        target_fw = self._apply_direction_map(target_joints)
-
-        # 在固件坐标系下计算有符号速度
+        # 计算有符号速度
         velocities = self._compute_signed_velocities(
-            target_fw, current_fw, speeds
+            target_joints, current, speeds
         )
-        positions = list(target_fw)
+        positions = list(target_joints)
 
         # 夹爪处理
         if gripper is not None:
@@ -179,9 +173,15 @@ class JointController:
         self._device.send_pv(self._device.aim, positions, velocities)
         logger.debug("PV 帧已发送: pos=%s, vel=%s", positions, velocities)
 
-        # 等待到达
         if wait:
-            return self._wait_for_target(target_joints, timeout=timeout)
+            t0 = time.perf_counter()
+            joint_ok = self._wait_for_target(target_joints, timeout=timeout)
+            if gripper is not None:
+                # 关节与夹爪并行运动，用剩余超时（至少 1s）等待夹爪
+                remaining = max(timeout - (time.perf_counter() - t0), 1.0)
+                gripper_ok = self._wait_for_gripper(gripper, timeout=remaining)
+                return joint_ok and gripper_ok
+            return joint_ok
         return True
 
     # ========== MIT 模式 ==========
@@ -205,14 +205,12 @@ class JointController:
                 f"MIT 参数数量错误: 期望 {NUM_MOTORS}, 实际 {len(joint_params)}"
             )
 
-        # 填充默认 Kp/Kd 并应用方向映射
+        # 填充默认 Kp/Kd
         filled_params = []
         for i, p in enumerate(joint_params):
             kp, kd = _fill_mit_defaults(i, p.kp, p.kd)
-            # 对关节（非夹爪）应用方向映射
-            pos = p.pos_ref * DIRECTION_MAP[i] if i < NUM_JOINTS else p.pos_ref
             filled_params.append(MitParams(
-                pos_ref=pos,
+                pos_ref=p.pos_ref,
                 vel_ref=p.vel_ref,
                 t_ref=p.t_ref,
                 kp=kp,
@@ -273,13 +271,12 @@ class JointController:
         )
         speeds = validate_speed(speed, NUM_JOINTS)
 
-        # 读取当前位置（固件坐标系），目标转固件坐标系
-        current_fw = self._get_current_angles()
-        target_fw = self._apply_direction_map(target_joints)
+        # 读取当前位置
+        current = self._get_current_angles()
 
-        # 步骤1: 在固件坐标系下计算有符号线性轨迹速度
+        # 步骤1: 计算有符号线性轨迹速度
         linear_vels = self._compute_signed_velocities(
-            target_fw, current_fw, speeds
+            target_joints, current, speeds
         )
         # 夹爪线性速度
         if gripper is not None:
@@ -301,7 +298,7 @@ class JointController:
         for i in range(NUM_JOINTS):
             kp, kd = _fill_mit_defaults(i, None, None)
             mit_params.append(MitParams(
-                pos_ref=target_joints[i] * DIRECTION_MAP[i],
+                pos_ref=target_joints[i],
                 vel_ref=0.0,
                 t_ref=0.0,
                 kp=kp,
@@ -327,7 +324,12 @@ class JointController:
         # 步骤3: 等待到达
         reached = True
         if wait:
+            t0 = time.perf_counter()
             reached = self._wait_for_target(target_joints, timeout=timeout)
+            if gripper is not None:
+                remaining = max(timeout - (time.perf_counter() - t0), 1.0)
+                gripper_ok = self._wait_for_gripper(gripper, timeout=remaining)
+                reached = reached and gripper_ok
 
         # 步骤4: 清零线性轨迹速度（防止残留影响后续运动）
         zero_vels = [0.0] * NUM_MOTORS
@@ -698,17 +700,6 @@ class JointController:
             )
         return list(state.angles[:NUM_JOINTS])
 
-    def _apply_direction_map(self, joints: List[float]) -> List[float]:
-        """对 6 个关节角度应用方向映射
-
-        Args:
-            joints: 6 个关节角度 (rad)
-
-        Returns:
-            应用方向映射后的角度列表（仅关节，不含夹爪）
-        """
-        return [joints[i] * DIRECTION_MAP[i] for i in range(NUM_JOINTS)]
-
     def _compute_signed_velocities(
         self,
         target: List[float],
@@ -717,16 +708,16 @@ class JointController:
     ) -> List[float]:
         """计算有符号速度列表（仅关节，不含夹爪）
 
-        要求 target 和 current 在同一坐标系（固件坐标系）下。
+        根据目标与当前位置的差值确定运动方向，
         用户速度 [0, 400] → 固件速度 [0, 10] rad/s → 加方向符号。
 
         Args:
-            target: 目标角度 (rad), 固件坐标系, 6 个关节
-            current: 当前角度 (rad), 固件坐标系, 6 个关节
+            target: 目标角度 (rad), 6 个关节
+            current: 当前角度 (rad), 6 个关节
             speeds: 用户速度列表 [0, 400], 6 个关节
 
         Returns:
-            有符号速度列表 (rad/s), 6 个元素, 固件坐标系
+            有符号速度列表 (rad/s), 6 个元素
         """
         velocities = []
         for i in range(NUM_JOINTS):
@@ -755,7 +746,6 @@ class JointController:
         params = []
         for i in range(NUM_JOINTS):
             kp, kd = _fill_mit_defaults(i, None, None)
-            # current_angles 来自固件解码，已是固件坐标系，直接发回无需方向映射
             params.append(MitParams(
                 pos_ref=current_angles[i],
                 vel_ref=0.0,
@@ -796,9 +786,8 @@ class JointController:
         用于使能、模式切换后防止关节突跳。
 
         Args:
-            current_angles: 当前 6 个关节角度 (rad)，固件坐标系
+            current_angles: 当前 6 个关节角度 (rad)
         """
-        # current_angles 来自固件解码，已是固件坐标系，直接发回无需方向映射
         positions = list(current_angles)
         velocities = [0.0] * NUM_JOINTS
         # 夹爪

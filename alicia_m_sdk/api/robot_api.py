@@ -488,7 +488,7 @@ class SynriaRobotAPI:
             if state is None:
                 beauty_print("未获取到状态数据", type="warning")
                 return
-            angles = state.angles
+            angles = list(state.angles)
             if output_format == "deg":
                 angles_display = [math.degrees(a) for a in angles]
                 unit = "deg"

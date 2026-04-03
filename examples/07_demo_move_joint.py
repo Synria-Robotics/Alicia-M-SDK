@@ -35,6 +35,26 @@ def main():
     robot = alicia_m_sdk.create_robot(control_mode=args.control_mode)
     beauty_print(f"机器人连接成功（{args.control_mode.upper()} 模式）", type="success")
 
+    """ >>> 调试: 拦截第一帧 PV/MIT 写入指令，打印原始十六进制"""
+    _orig_send = robot._device.send_frame
+    _debug_fired = [False]
+
+    def _debug_send(frame):
+        if not _debug_fired[0]:
+            raw = frame.encode()
+            beauty_print(
+                f"[DEBUG] 原始帧 ({len(raw)}B): {raw.hex(' ')}", type="info"
+            )
+            beauty_print(
+                f"[DEBUG] cmd=0x{frame.cmd_id:02X} func=0x{frame.func_code:02X} "
+                f"data({len(frame.data)}B)={frame.data.hex(' ')}", type="info"
+            )
+            _debug_fired[0] = True
+        _orig_send(frame)
+
+    robot._device.send_frame = _debug_send
+    """ <<< 调试结束 """
+
     try:
         # --- 回零位 ---
         beauty_print("回零位...", type="info")
@@ -44,6 +64,7 @@ def main():
 
         # --- 移动到位置 A ---
         beauty_print(f"移动到位置 A: {POSITION_A} (deg)...", type="info")
+        _debug_fired[0] = False  # 重置，捕获位置A的帧
         robot.set_robot_state(
             target_joints=POSITION_A,
             joint_format="deg",

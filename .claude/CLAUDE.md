@@ -15,6 +15,5 @@
 https://docs.sparklingrobo.com/docs/alicia-m-series/protocol/doc_00_intro
 ## 参考项目：
 - 项目架构/文件目录参考https://github.com/Synria-Robotics/Alicia-D-SDK/tree/v6.1.0
-- 功能实现参考https://github.com/agilexrobotics/piper_sdk
 - 废弃的原项目（尽量保留api中的方法和方法名，但更改/优化其实现方式）https://github.com/Synria-Robotics/Alicia-M-SDK/tree/v1.0.0-deprecated
 - RoboCore库https://github.com/Synria-Robotics/RoboCore

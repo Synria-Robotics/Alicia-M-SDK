@@ -18,10 +18,6 @@ from ..utils.timing import precise_sleep
 
 logger = logging.getLogger(__name__)
 
-# 方向映射（与 joint_control 保持一致）
-DIRECTION_MAP = [1, -1, 1, 1, -1, 1, 1]
-
-
 class TrajectoryExecutor:
     """轨迹回放执行器
 
@@ -102,18 +98,9 @@ class TrajectoryExecutor:
                 if target_time > now:
                     precise_sleep(target_time - now)
 
-                # 构建该帧数据（应用方向映射）
-                pos_frame = []
-                vel_frame = []
-                for motor_idx in range(NUM_MOTORS):
-                    pos = float(positions[frame_idx, motor_idx])
-                    vel = float(velocities[frame_idx, motor_idx])
-                    # 对关节应用方向映射（夹爪不映射）
-                    if motor_idx < NUM_JOINTS:
-                        pos *= DIRECTION_MAP[motor_idx]
-                        vel *= DIRECTION_MAP[motor_idx]
-                    pos_frame.append(pos)
-                    vel_frame.append(vel)
+                # 构建该帧数据
+                pos_frame = [float(positions[frame_idx, m]) for m in range(NUM_MOTORS)]
+                vel_frame = [float(velocities[frame_idx, m]) for m in range(NUM_MOTORS)]
 
                 # 发送 PV 帧
                 self._device.send_pv(
@@ -142,10 +129,7 @@ class TrajectoryExecutor:
         # 读取当前位置并发送零速度帧（尽快停止）
         state = self._device.joint_state
         if state is not None:
-            positions = []
-            for i in range(NUM_JOINTS):
-                positions.append(state.angles[i] * DIRECTION_MAP[i])
-            positions.append(state.gripper)
+            positions = list(state.angles[:NUM_JOINTS]) + [state.gripper]
             velocities = [0.0] * NUM_MOTORS
             self._device.send_pv(self._device.aim, positions, velocities)
             logger.info("紧急停止: 已发送零速度帧")

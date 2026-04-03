@@ -34,11 +34,6 @@ _DEFAULT_JOINT_LIMITS_UPPER: List[float] = [
     math.pi,       # J5
 ]
 
-# === 默认方向映射 ===
-# 电机正方向与关节正方向的对应关系（7 个电机，含夹爪）
-_DEFAULT_DIRECTION_MAP: List[int] = [1, -1, 1, 1, -1, 1, 1]
-
-
 @dataclass
 class RobotConfig:
     """机器人配置
@@ -62,7 +57,6 @@ class RobotConfig:
         backend: RoboCore 计算后端 ("numpy"/"torch")
         joint_limits_lower: 关节下限位 (rad)，长度等于 num_joints
         joint_limits_upper: 关节上限位 (rad)，长度等于 num_joints
-        direction_map: 电机方向映射，长度等于 num_motors
         debug_mode: 调试模式开关
     """
 
@@ -93,11 +87,6 @@ class RobotConfig:
     )
     joint_limits_upper: List[float] = field(
         default_factory=lambda: list(_DEFAULT_JOINT_LIMITS_UPPER)
-    )
-
-    # --- 方向映射 ---
-    direction_map: List[int] = field(
-        default_factory=lambda: list(_DEFAULT_DIRECTION_MAP)
     )
 
     # --- 调试 ---

@@ -19,7 +19,7 @@ from ..protocol.constants import NUM_JOINTS, NUM_MOTORS
 from ..types.state import MitParams
 from ..types.exceptions import RobotStateError
 from ..utils.timing import precise_sleep
-from .joint_control import JointController, _fill_mit_defaults, DIRECTION_MAP
+from .joint_control import JointController, _fill_mit_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +162,8 @@ class DragTeaching:
             params = []
             for motor_idx in range(NUM_JOINTS):
                 kp, kd = _fill_mit_defaults(motor_idx, None, None)
-                pos = wp[motor_idx] * DIRECTION_MAP[motor_idx]
                 params.append(MitParams(
-                    pos_ref=pos,
+                    pos_ref=wp[motor_idx],
                     vel_ref=0.0,
                     t_ref=0.0,
                     kp=kp,

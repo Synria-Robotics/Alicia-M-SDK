@@ -11,8 +11,8 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
-POSE_A = [0, 30, 0, 0, -30, 0]
-POSE_B = [0, -30, 0, 0, 30, 0]
+POSE_A = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
+POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
 
 def main():
@@ -73,9 +73,16 @@ def main():
         time.sleep(1.0)
 
         # --- 回零位 ---
-        beauty_print("回零位...", type="info")
-        robot.go_home(speed=15)
-        beauty_print("已到达零位", type="success")
+        beauty_print("回零位，夹爪闭合...", type="info")
+        robot.set_robot_state(
+            target_joints=[0, 0, 0, 0, 0, 0],
+            gripper_value=0,
+            joint_format="deg",
+            speed=15,
+            wait_for_completion=True,
+        )
+        beauty_print("初始化完成", type="success")
+        time.sleep(1.0)
 
     except KeyboardInterrupt:
         beauty_print("\n用户中断", type="warning")
