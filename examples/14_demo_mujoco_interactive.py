@@ -18,18 +18,13 @@
 # Website: https://synriarobotics.ai
 
 """
-Demo: Bridge MuJoCo interactive dual-arm IK to Alicia-M SDK
+Demo: Bridge MuJoCo interactive dual-arm IK to Alicia-M SDK.
 
-This demo links the MuJoCo interactive bimanual controller with two real arms:
-- MuJoCo solves left/right IK in real time
-- The demo subscribes to MuJoCo's current joint solutions every frame
-- Joint targets are streamed to the left/right SDK robot instances
-
-Typical flow:
-1. Read current left/right arm joints from hardware
-2. Use those joints to initialize the MuJoCo interactive scene
-3. Drag MuJoCo targets
-4. Stream the resulting joint values to the real bimanual arms
+Features:
+- MuJoCo interactive dual-arm IK for left/right arm motion
+- Separate left/right gripper slider control alongside the MuJoCo viewer
+- MuJoCo finger-joint visualization for gripper open/close
+- XML-based joint limit clipping before SDK transmission
 """
 
 import argparse
@@ -137,88 +132,21 @@ def create_control_robot(port, args):
     return robot
 
 
-class DualArmSDKStreamer:
-    """Stream MuJoCo joint targets to the real left/right arms."""
+def read_initial_gripper_value(robot, label):
+    """Read one gripper's current hardware value for safer UI startup."""
+    try:
+        value = robot.get_robot_state("gripper")
+    except Exception as exc:
+        logger.warning(f"Failed to read {label} gripper state: {exc}")
+        return None
 
-    def __init__(self, left_robot, right_robot, args, left_limits, right_limits):
-        self.left_robot = left_robot
-        self.right_robot = right_robot
-        self.args = args
-        self.left_limits = left_limits
-        self.right_limits = right_limits
-        self.last_send_time = 0.0
-        self.last_left = None
-        self.last_right = None
-        self.executor = ThreadPoolExecutor(max_workers=2)
+    if value is None:
+        logger.warning(f"Could not read {label} gripper state; slider starts idle until moved")
+        return None
 
-    def _send_one(self, robot, target_joints):
-        return robot.set_robot_state(
-            target_joints=target_joints,
-            gripper_value=None,
-            joint_format="rad",
-            speed=self.args.speed,
-            gripper_speed=self.args.gripper_speed,
-            wait_for_completion=False,
-            timeout=self.args.timeout,
-        )
-
-    def maybe_send(self, left_target, right_target):
-        """Rate-limit and stream new joint commands to both arms."""
-        now = time.time()
-        min_interval = 1.0 / self.args.send_hz if self.args.send_hz > 0 else 0.0
-
-        left_target = np.asarray(left_target[:6], dtype=float)
-        right_target = np.asarray(right_target[:6], dtype=float)
-        left_clipped = np.clip(left_target, self.left_limits[:, 0], self.left_limits[:, 1])
-        right_clipped = np.clip(right_target, self.right_limits[:, 0], self.right_limits[:, 1])
-
-        if np.any(np.abs(left_clipped - left_target) > 1e-9):
-            logger.warning("Left target exceeded XML joint limits, clipped before SDK send")
-        if np.any(np.abs(right_clipped - right_target) > 1e-9):
-            logger.warning("Right target exceeded XML joint limits, clipped before SDK send")
-
-        changed = (
-            self.last_left is None
-            or self.last_right is None
-            or np.max(np.abs(left_clipped - self.last_left)) >= self.args.joint_epsilon
-            or np.max(np.abs(right_clipped - self.last_right)) >= self.args.joint_epsilon
-        )
-
-        if not changed:
-            return
-
-        if min_interval > 0 and (now - self.last_send_time) < min_interval:
-            return
-
-        left_future = self.executor.submit(self._send_one, self.left_robot, left_clipped.tolist())
-        right_future = self.executor.submit(self._send_one, self.right_robot, right_clipped.tolist())
-        left_ok = left_future.result()
-        right_ok = right_future.result()
-
-        if not left_ok or not right_ok:
-            raise RuntimeError(f"failed to stream joints (left={left_ok}, right={right_ok})")
-
-        self.last_send_time = now
-        self.last_left = left_clipped.copy()
-        self.last_right = right_clipped.copy()
-
-    def close(self):
-        """Release worker threads used for command streaming."""
-        self.executor.shutdown(wait=True)
-
-
-class InteractiveDualArmSDKBridge(InteractiveDualArmIK):
-    """MuJoCo interactive dual-arm controller with SDK streaming."""
-
-    def __init__(self, *args, streamer=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.streamer = streamer
-
-    def step(self):
-        """Run one MuJoCo step, then publish solved joints to hardware."""
-        super().step()
-        if self.streamer is not None:
-            self.streamer.maybe_send(self.q_left, self.q_right)
+    value = float(np.clip(value, 0.0, 1000.0))
+    logger.info(f"Using current {label} gripper state: {value:.1f}/1000")
+    return value
 
 
 def load_arm_joint_limits_from_mjcf(mjcf_path):
@@ -254,6 +182,117 @@ def load_arm_joint_limits_from_mjcf(mjcf_path):
     return np.asarray(left, dtype=float), np.asarray(right, dtype=float)
 
 
+class DualArmSDKStreamer:
+    """Stream MuJoCo joint and gripper targets to the real left/right arms."""
+
+    def __init__(self, left_robot, right_robot, args, left_limits, right_limits):
+        self.left_robot = left_robot
+        self.right_robot = right_robot
+        self.args = args
+        self.left_limits = left_limits
+        self.right_limits = right_limits
+        self.last_send_time = 0.0
+        self.last_left = None
+        self.last_right = None
+        self._missing_gripper = object()
+        self.last_left_gripper = self._missing_gripper
+        self.last_right_gripper = self._missing_gripper
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+    def _normalize_gripper(self, gripper_value):
+        if gripper_value is None:
+            return None
+        return int(np.clip(round(float(gripper_value)), 0, 1000))
+
+    def _send_one(self, robot, target_joints, gripper_value):
+        return robot.set_robot_state(
+            target_joints=target_joints,
+            gripper_value=gripper_value,
+            joint_format="rad",
+            speed=self.args.speed,
+            gripper_speed=self.args.gripper_speed,
+            wait_for_completion=False,
+            timeout=self.args.timeout,
+        )
+
+    def maybe_send(self, left_target, right_target, left_gripper=None, right_gripper=None):
+        """Rate-limit and stream new joint commands to both arms."""
+        now = time.time()
+        min_interval = 1.0 / self.args.send_hz if self.args.send_hz > 0 else 0.0
+
+        left_target = np.asarray(left_target[:6], dtype=float)
+        right_target = np.asarray(right_target[:6], dtype=float)
+        left_gripper = self._normalize_gripper(left_gripper)
+        right_gripper = self._normalize_gripper(right_gripper)
+        left_clipped = np.clip(left_target, self.left_limits[:, 0], self.left_limits[:, 1])
+        right_clipped = np.clip(right_target, self.right_limits[:, 0], self.right_limits[:, 1])
+
+        if np.any(np.abs(left_clipped - left_target) > 1e-9):
+            logger.warning("Left target exceeded XML joint limits, clipped before SDK send")
+        if np.any(np.abs(right_clipped - right_target) > 1e-9):
+            logger.warning("Right target exceeded XML joint limits, clipped before SDK send")
+
+        changed = (
+            self.last_left is None
+            or self.last_right is None
+            or np.max(np.abs(left_clipped - self.last_left)) >= self.args.joint_epsilon
+            or np.max(np.abs(right_clipped - self.last_right)) >= self.args.joint_epsilon
+            or self.last_left_gripper is self._missing_gripper
+            or self.last_right_gripper is self._missing_gripper
+            or left_gripper != self.last_left_gripper
+            or right_gripper != self.last_right_gripper
+        )
+
+        if not changed:
+            return
+
+        if min_interval > 0 and (now - self.last_send_time) < min_interval:
+            return
+
+        left_future = self.executor.submit(
+            self._send_one,
+            self.left_robot,
+            left_clipped.tolist(),
+            left_gripper,
+        )
+        right_future = self.executor.submit(
+            self._send_one,
+            self.right_robot,
+            right_clipped.tolist(),
+            right_gripper,
+        )
+        left_ok = left_future.result()
+        right_ok = right_future.result()
+
+        if not left_ok or not right_ok:
+            raise RuntimeError(f"failed to stream joints (left={left_ok}, right={right_ok})")
+
+        self.last_send_time = now
+        self.last_left = left_clipped.copy()
+        self.last_right = right_clipped.copy()
+        self.last_left_gripper = left_gripper
+        self.last_right_gripper = right_gripper
+
+    def close(self):
+        """Release worker threads used for command streaming."""
+        self.executor.shutdown(wait=True)
+
+
+class InteractiveDualArmSDKBridge(InteractiveDualArmIK):
+    """MuJoCo interactive dual-arm controller with SDK streaming."""
+
+    def __init__(self, *args, streamer=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.streamer = streamer
+
+    def step(self):
+        """Run one MuJoCo step, then publish solved joints to hardware."""
+        super().step()
+        if self.streamer is not None:
+            left_gripper, right_gripper = self.get_gripper_targets_for_streaming()
+            self.streamer.maybe_send(self.q_left, self.q_right, left_gripper, right_gripper)
+
+
 def main(args):
     """Run interactive MuJoCo dual-arm control and stream it to real hardware."""
     left_port, right_port = resolve_ports(args)
@@ -279,6 +318,10 @@ def main(args):
         )
         left_limits, right_limits = load_arm_joint_limits_from_mjcf(mjcf_path)
         logger.info("Loaded joint1..joint6 limits from MJCF and enabled clipping before SDK send")
+        initial_gripper_values = {
+            "left": read_initial_gripper_value(left_robot, "left"),
+            "right": read_initial_gripper_value(right_robot, "right"),
+        }
 
         streamer = DualArmSDKStreamer(left_robot, right_robot, args, left_limits, right_limits)
         controller = InteractiveDualArmSDKBridge(
@@ -286,11 +329,13 @@ def main(args):
             args.left_end,
             args.right_end,
             initial_joint_state=initial_joint_state,
+            initial_gripper_values=initial_gripper_values,
+            enable_gripper_ui=not args.no_gripper_ui,
             streamer=streamer,
         )
 
-        # Push the initial state once so SDK and MuJoCo start from the same command source.
-        streamer.maybe_send(controller.q_left, controller.q_right)
+        left_gripper, right_gripper = controller.get_gripper_targets_for_streaming()
+        streamer.maybe_send(controller.q_left, controller.q_right, left_gripper, right_gripper)
         controller.run(mode=args.mode)
 
     except KeyboardInterrupt:
@@ -337,6 +382,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--speed", type=int, default=15, help="joint speed sent to SDK")
     parser.add_argument("--gripper-speed", type=int, default=40, help="gripper speed sent to SDK")
+    parser.add_argument(
+        "--no-gripper-ui",
+        action="store_true",
+        help="disable the separate left/right gripper slider window",
+    )
     parser.add_argument("--timeout", type=float, default=2.0, help="SDK command timeout")
     parser.add_argument("--send-hz", type=float, default=20.0, help="joint streaming rate to hardware")
     parser.add_argument(
