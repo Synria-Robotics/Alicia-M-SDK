@@ -208,6 +208,7 @@ __marimo__/
 
 # vibe coding assistant
 .claude/
+.vscode/
 
 # dev
 examples/09_demo_move_gripper_mit.py

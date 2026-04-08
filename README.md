@@ -43,11 +43,29 @@ alicia_m_sdk/
 
 ### 安装
 
-```bash
-git clone https://github.com/Synria-Robotics/Alicia-M-SDK.git
-cd Alicia-M-SDK
+获取代码：
+
+```
+git clone https://github.com/Synria-Robotics/Alicia-D-SDK.git
+cd Alicia-D-SDK
+```
+
+创建虚拟环境：
+
+```
 conda create -n msdk python=3.10
 conda activate msdk
+```
+
+**方法一：从PyPI安装：**
+
+```bash
+pip install alicia_m_sdk
+```
+
+**方法二：从源码安装（开发模式）：**
+
+```bash
 pip install -e .
 ```
 
@@ -86,7 +104,7 @@ robot.disconnect()
 | 编号 | 文件 | 说明 |
 |------|------|------|
 | 00 | `demo_read_version.py` | 读取固件版本与设备信息 |
-| 01 | `demo_diagnostic.py` | 通信诊断 |
+| 01 | `demo_diagnostic.py` | 自检（待开发） |
 | 02 | `demo_read_status.py` | 读取控制模式与运行状态 |
 | 03 | `demo_read_states.py` | 循环读取关节角度、速度、力矩、温度 |
 | 04 | `demo_switch_mode.py` | PV / MIT 模式切换 |
@@ -94,13 +112,13 @@ robot.disconnect()
 | 06 | `demo_move_gripper.py` | 夹爪控制（PV） |
 | 07 | `demo_move_joint.py` | 关节运动（PV） |
 | 08 | `demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
-| 09 | `demo_move_gripper_mit.py` | 夹爪控制（MIT） |
-| 10 | `demo_move_joint_mit.py` | 关节运动（MIT） |
-| 11 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT） |
+| 09 | `demo_move_gripper_mit.py` | 夹爪控制（MIT）（待开发） |
+| 10 | `demo_move_joint_mit.py` | 关节运动（MIT）（待开发） |
+| 11 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT）（待开发） |
 | 12 | `demo_forward_kinematics.py` | 正运动学计算 |
 | 13 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
 | 14 | `demo_drag_teaching.py` | 拖动示教录制与 PV 回放 |
-| 15 | `demo_sparkvis.py` | SparkVis WebSocket 可视化 |
+| 15 | `demo_sparkvis.py` | SparkVis WebSocket 可视化（待开发） |
 | 16 | `demo_reset_zero.py` | 零位标定 |
 
 运行示例：

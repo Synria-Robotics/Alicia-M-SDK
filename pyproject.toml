@@ -27,8 +27,8 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
-    "synria-robocore @ git+https://github.com/Synria-Robotics/RoboCore.git@v2.0.0",
-    "synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git",
+    "synria-robocore>=2.0.0alpha1",
+    "synriard>=1.2.1",
 ]
 
 [project.optional-dependencies]
@@ -51,5 +51,5 @@ all = [
 Homepage = "https://github.com/Synria-Robotics/Alicia-M-SDK"
 
 [tool.setuptools]
-packages = {find = {}}
+packages = {find = {exclude = ["examples*"]}}
 include-package-data = true
