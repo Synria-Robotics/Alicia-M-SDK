@@ -9,5 +9,6 @@
 from .joint_control import JointController
 from .trajectory_executor import TrajectoryExecutor
 from .teaching import DragTeaching
+from .teleoperation import Teleoperation
 
-__all__ = ['JointController', 'TrajectoryExecutor', 'DragTeaching']
+__all__ = ['JointController', 'TrajectoryExecutor', 'DragTeaching', 'Teleoperation']
