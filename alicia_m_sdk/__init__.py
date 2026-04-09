@@ -16,7 +16,7 @@
     robot.disconnect()
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 # === 核心类型 ===
 from .api.robot_api import SynriaRobotAPI
