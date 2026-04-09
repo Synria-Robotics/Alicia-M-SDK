@@ -3,10 +3,14 @@
 使用 Alicia-D 伺服示教臂（leader）实时控制
 Alicia-M 电机操作臂（follower）跟随运动。
 
+支持 PV 和 MIT 两种控制模式，由 follower 当前模式自动决定:
+- PV: 每帧发送 pos+vel，固件做插值
+- MIT: 每帧发送 MIT 全参数帧（不使用线性轨迹插值），PD 控制器跟随
+
 控制循环在后台线程以固定频率运行，每帧:
     1. 读取 leader 关节/夹爪状态
     2. 经符号/偏移映射转换
-    3. 通过 PV 模式发送到 follower
+    3. 发送到 follower（不等待到达）
 """
 
 import time
@@ -22,16 +26,17 @@ logger = logging.getLogger(__name__)
 class Teleoperation:
     """实时主从遥操作控制器
 
-    从 leader 臂读取关节状态，经符号/偏移映射后以 PV 模式发送到 follower 臂。
+    从 leader 臂读取关节状态，经符号/偏移映射后发送到 follower 臂。
+    自动适配 follower 当前控制模式（PV / MIT）。
 
     Args:
         leader: 示教臂实例（Alicia-D SynriaRobotAPI），需提供
             ``get_robot_state("joint_gripper")``（返回含 ``.angles``、``.gripper`` 属性的对象）
             和 ``torque_control("off"/"on")``
-        follower: 操作臂实例（Alicia-M SynriaRobotAPI）
+        follower: 操作臂实例（Alicia-M SynriaRobotAPI），PV 或 MIT 模式均可
         frequency_hz: 控制循环频率 (Hz)
         follower_speed: follower 运动速度 [0, 400]，映射到 [0, 10] rad/s。
-            默认 400（最大速度，实时跟随）
+            默认 400（最大速度，实时跟随）。MIT 模式下该参数不生效
         gripper_scale: leader → follower 夹爪缩放系数。
             两臂均为 0-1000 量程时使用默认 1.0
         joint_signs: 6 个关节的符号乘数 (+1/-1)，补偿 leader/follower 关节方向差异
@@ -90,10 +95,11 @@ class Teleoperation:
     def _control_loop(self) -> None:
         """后台控制循环主体"""
         interval = 1.0 / self.frequency_hz
+        mode_str = self.follower.control_mode.value.upper()
 
         logger.info(
-            "遥操作控制循环启动: %.0f Hz, PV 模式 (speed=%s)",
-            self.frequency_hz, self.follower_speed,
+            "遥操作控制循环启动: %.0f Hz, %s 模式",
+            self.frequency_hz, mode_str,
         )
 
         while self._running.is_set():
@@ -109,7 +115,7 @@ class Teleoperation:
                 follower_joints = self._map_joints(state.angles)
                 follower_gripper = self._map_gripper(state.gripper)
 
-                # PV 模式发送
+                # 发送到 follower（PV/MIT 由 follower 当前模式自动路由）
                 self.follower.set_robot_state(
                     target_joints=follower_joints,
                     gripper_value=follower_gripper,
@@ -117,6 +123,7 @@ class Teleoperation:
                     speed=self.follower_speed,
                     gripper_speed=self.follower_speed,
                     wait_for_completion=False,
+                    use_interpolation=False,
                 )
 
                 self._loop_count += 1

@@ -249,22 +249,26 @@ class JointController:
         gripper_speed: Optional[float] = None,
         wait: bool = True,
         timeout: float = 10.0,
+        use_interpolation: bool = False,
     ) -> bool:
-        """MIT 模式点位运动（简易接口，通过线性轨迹速度实现）
+        """MIT 模式点位运动
 
-        在 MIT 模式下实现类似 PV 的「发后等待」体验:
-        1. 设定线性轨迹速度 (addr=0x05)
-        2. 发送全参数 MIT 帧 (pos=目标, vel=0, t=0, kp=默认, kd=默认)
-        3. 等待到达目标
-        4. 清零线性轨迹速度（防止残留）
+        支持两种运动方式:
+        - 直接 PD 控制 (use_interpolation=False, 默认):
+          发送 MIT 全参数帧 (pos=目标, kp/kd=默认)，
+          由 PD 控制器驱动关节趋近目标，发送后立即返回（不等待到达）。
+        - 线性轨迹插值 (use_interpolation=True):
+          先设定线性轨迹速度 (addr=0x05)，再发送 MIT 帧，
+          固件按指定速度做线性插值到达目标，可等待到达。
 
         Args:
             target_joints: 目标角度 (rad), 6 个关节
-            speed: 运动速度，无量纲 [0, 400]
+            speed: 运动速度 [0, 400]，仅 use_interpolation=True 时生效
             gripper: 夹爪目标值 [0, 1000]，None 表示不控制
-            gripper_speed: 夹爪速度 [0, 400]
-            wait: 是否阻塞等待到达
+            gripper_speed: 夹爪速度 [0, 400]，仅 use_interpolation=True 时生效
+            wait: 是否阻塞等待到达，仅 use_interpolation=True 时生效
             timeout: 等待超时 (秒)
+            use_interpolation: 是否使用线性轨迹插值
 
         Returns:
             True=到达目标 / False=超时
@@ -278,29 +282,28 @@ class JointController:
         target_joints = validate_joint_angles(
             target_joints, self._joint_limits_lower, self._joint_limits_upper
         )
-        speeds = validate_speed(speed, NUM_JOINTS)
-
-        # 读取当前位置
-        current = self._get_current_angles()
-
-        # 步骤1: 计算有符号线性轨迹速度
-        linear_vels = self._compute_signed_velocities(
-            target_joints, current, speeds
-        )
-        # 夹爪线性速度
         if gripper is not None:
             gripper = validate_gripper_value(gripper)
-            state = self._device.joint_state
-            current_gripper = state.gripper if state else 0.0
-            g_speed = gripper_speed if gripper_speed is not None else speed
-            g_speeds = validate_speed(g_speed, 1)
-            g_sign = 1.0 if gripper > current_gripper else -1.0
-            g_mag = speed_user_to_firmware(g_speeds[0])
-            linear_vels.append(g_sign * g_mag)
-        else:
-            linear_vels.append(0.0)
 
-        self._device.send_linear_velocity(self._device.aim, linear_vels)
+        # 步骤1: 设定线性轨迹速度（仅插值模式）
+        if use_interpolation:
+            speeds = validate_speed(speed, NUM_JOINTS)
+            current = self._get_current_angles()
+            linear_vels = self._compute_signed_velocities(
+                target_joints, current, speeds
+            )
+            # 夹爪线性速度
+            if gripper is not None:
+                state = self._device.joint_state
+                current_gripper = state.gripper if state else 0.0
+                g_speed = gripper_speed if gripper_speed is not None else speed
+                g_speeds = validate_speed(g_speed, 1)
+                g_sign = 1.0 if gripper > current_gripper else -1.0
+                g_mag = speed_user_to_firmware(g_speeds[0])
+                linear_vels.append(g_sign * g_mag)
+            else:
+                linear_vels.append(0.0)
+            self._device.send_linear_velocity(self._device.aim, linear_vels)
 
         # 步骤2: 构建全参数 MIT 帧 (pos=目标, vel=0, t=0, kp=默认, kd=默认)
         mit_params = []
@@ -327,12 +330,12 @@ class JointController:
             kd=gripper_kd,
         ))
         self._device.send_mit(self._device.aim, mit_params)
-        logger.debug("MIT 线性速度运动已启动: target=%s, vel=%s",
-                     target_joints, linear_vels)
+        logger.debug("MIT 帧已发送: target=%s, interpolation=%s",
+                     target_joints, use_interpolation)
 
-        # 步骤3: 等待到达
+        # 步骤3: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
         reached = True
-        if wait:
+        if use_interpolation and wait:
             t0 = time.perf_counter()
             reached = self._wait_for_target(target_joints, timeout=timeout)
             if gripper is not None:
@@ -340,10 +343,11 @@ class JointController:
                 gripper_ok = self._wait_for_gripper(gripper, timeout=remaining)
                 reached = reached and gripper_ok
 
-        # 步骤4: 清零线性轨迹速度（防止残留影响后续运动）
-        zero_vels = [0.0] * NUM_MOTORS
-        self._device.send_linear_velocity(self._device.aim, zero_vels)
-        logger.debug("MIT 线性速度已清零")
+        # 步骤4: 清零线性轨迹速度（仅插值模式，防止残留影响后续运动）
+        if use_interpolation:
+            zero_vels = [0.0] * NUM_MOTORS
+            self._device.send_linear_velocity(self._device.aim, zero_vels)
+            logger.debug("MIT 线性速度已清零")
 
         return reached
 

@@ -232,13 +232,15 @@ class SynriaRobotAPI:
         speed: float = 15,
         gripper_speed: float = 40,
         wait_for_completion: bool = True,
+        use_interpolation: bool = False,
         **kwargs,
     ) -> bool:
         """点位运动：设置关节角度和/或夹爪位置
 
         自动根据当前模式选择实现：
         - PV: 发送 pos+vel 帧，固件自行到达
-        - MIT: 通过线性轨迹速度 + 全参数帧
+        - MIT: 发送全参数帧，由 PD 控制器驱动到达；
+          若 use_interpolation=True 则额外设定线性轨迹速度实现匀速插值
 
         Args:
             target_joints: 目标角度，6 个关节
@@ -247,6 +249,7 @@ class SynriaRobotAPI:
             speed: 运动速度 [0, 400]
             gripper_speed: 夹爪速度 [0, 400]
             wait_for_completion: 是否等待到达
+            use_interpolation: MIT 模式是否使用线性轨迹插值（PV 模式忽略）
 
         Returns:
             是否成功到达目标
@@ -281,6 +284,7 @@ class SynriaRobotAPI:
                 gripper=gripper_value,
                 gripper_speed=gripper_speed,
                 wait=wait_for_completion,
+                use_interpolation=use_interpolation,
             )
 
     def go_home(self, speed: float = 15, gripper_speed: float = 40) -> bool:
