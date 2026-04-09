@@ -9,6 +9,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 - **关节控制**：6 关节位置/速度控制，支持平滑插值运动
 - **夹爪操作**：开合度控制（0~1000），支持独立或协同控制
 - **力矩管理**：MIT 模式下的力矩卸载/恢复，支持自由拖动示教
+- **遥操作**：Alicia-D 示教臂实时控制 Alicia-M 操作臂（PV / MIT 双模式）
 - **状态监测**：实时读取关节角度、速度、力矩、线圈温度等
 - **运动学**：正/逆运动学求解（基于 RoboCore）
 - **轨迹规划**：关节空间与笛卡尔空间轨迹规划与执行
@@ -18,7 +19,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 
 | 特性 | 说明 |
 |------|------|
-| **双控制模式** | PV（位置-速度，固件插值）/ MIT（阻抗控制，全参数逐帧） |
+| **双控制模式** | PV（位置-速度，固件插值）/ MIT（阻抗控制，支持直接 PD / 线性轨迹插值） |
 | **统一 API** | `set_robot_state()` 自动适配当前模式，屏蔽底层差异 |
 | **安全序列** | 使能/模式切换自动发送位置锁定帧，防止关节突跳 |
 | **模式同步** | 连接时自动检测固件控制模式，按需切换到目标模式 |
@@ -32,7 +33,7 @@ alicia_m_sdk/
 ├── api/            # 用户 API 层（SynriaRobotAPI 门面类）
 ├── protocol/       # 协议层（帧结构、编解码、常量定义）
 ├── hardware/       # 硬件层（串口驱动、设备抽象、状态缓存）
-├── control/        # 控制层（关节控制、轨迹执行、示教）
+├── control/        # 控制层（关节控制、轨迹执行、示教、遥操作）
 ├── types/          # 类型定义（状态、配置、枚举、异常）
 ├── utils/          # 工具层（单位转换、参数校验）
 ├── kinematics.py   # 运动学接口（RoboCore 封装）
@@ -112,14 +113,15 @@ robot.disconnect()
 | 06 | `demo_move_gripper.py` | 夹爪控制（PV） |
 | 07 | `demo_move_joint.py` | 关节运动（PV） |
 | 08 | `demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
-| 09 | `demo_move_gripper_mit.py` | 夹爪控制（MIT）（待开发） |
-| 10 | `demo_move_joint_mit.py` | 关节运动（MIT）（待开发） |
-| 11 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT）（待开发） |
+| 09 | `demo_move_gripper_mit.py` | 夹爪控制（MIT） |
+| 10 | `demo_move_joint_mit.py` | 关节运动（MIT） |
+| 11 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT） |
 | 12 | `demo_forward_kinematics.py` | 正运动学计算 |
 | 13 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
 | 14 | `demo_drag_teaching.py` | 拖动示教录制与 PV 回放 |
 | 15 | `demo_sparkvis.py` | SparkVis WebSocket 可视化（待开发） |
-| 16 | `demo_reset_zero.py` | 零位标定 |
+| 16 | `demo_teleop.py` | 遥操作：Alicia-D 示教臂控制 Alicia-M（PV / MIT） |
+| 17 | `demo_reset_zero.py` | 零位标定 |
 
 运行示例：
 
