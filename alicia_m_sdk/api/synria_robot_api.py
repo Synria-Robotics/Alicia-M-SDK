@@ -206,9 +206,9 @@ class SynriaRobotAPI:
 
         # Joint, gripper, velocity, torque data are continuously updated by background thread
         # Just read from cache (no need to send query command)
-        if info_type in ("joint_gripper", "joint", "gripper", "velocity", "torque"):
-            # velocity/torque requires extended state mode
-            if info_type in ("velocity", "torque"):
+        if info_type in ("joint_gripper", "joint", "gripper", "velocity", "torque", "gripper_torque"):
+            # velocity/torque/gripper_torque requires extended state mode
+            if info_type in ("velocity", "torque", "gripper_torque"):
                 joint_state = self.data_parser.get_joint_state()
                 if joint_state is None:
                     time.sleep(0.05)
@@ -217,6 +217,8 @@ class SynriaRobotAPI:
                     return None
                 if info_type == "velocity":
                     return joint_state.velocities
+                elif info_type == "gripper_torque":
+                    return joint_state.gripper_torque
                 else:
                     return joint_state.torques
 
@@ -1276,6 +1278,9 @@ class SynriaRobotAPI:
                     logger.info(f"关节速度（rad/s）：{vel_out}")
             if torques is not None:
                 torque_out = [round(t, 3) for t in torques]
+                gripper_torque = self.get_robot_state("gripper_torque")
+                if gripper_torque is not None:
+                    torque_out.append(round(gripper_torque, 3))
                 logger.info(f"关节力矩（N·m）：{torque_out}")
 
             if robot_type != "follower":

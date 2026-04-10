@@ -14,6 +14,7 @@ class JointState(NamedTuple):
     run_status_text: str # Run status text
     velocities: Optional[List[float]] = None  # Six joint velocities (rad/s), available in extended mode
     torques: Optional[List[float]] = None     # Six joint torques (N·m), available in extended mode
+    gripper_torque: Optional[float] = None    # 夹爪力矩 (N·m), available in extended mode
 
 
 class DataParser:
@@ -425,7 +426,8 @@ class DataParser:
                         gripper: Optional[float] = None,
                         run_status_text: Optional[str] = None,
                         velocities: Optional[List[float]] = None,
-                        torques: Optional[List[float]] = None):
+                        torques: Optional[List[float]] = None,
+                        gripper_torque: Optional[float] = None):
         with self._lock:
             prev = self._joint_states
             self._joint_states = JointState(
@@ -435,6 +437,7 @@ class DataParser:
                 run_status_text=run_status_text if run_status_text is not None else prev.run_status_text,
                 velocities=velocities if velocities is not None else prev.velocities,
                 torques=torques if torques is not None else prev.torques,
+                gripper_torque=gripper_torque if gripper_torque is not None else prev.gripper_torque,
             )
 
     # ==================== 辅助方法：解析 frame[2] 设备类型 ====================
@@ -673,6 +676,7 @@ class DataParser:
         velocity_values: Optional[List[float]] = None
         torque_values: Optional[List[float]] = None
         gripper_value = 0.0
+        gripper_torque_value: Optional[float] = None
 
         # 当 offset_count >= 2 时，每电机数据中包含速度（addr=0x01, 12-bit）
         if offset_count >= 2:
@@ -710,6 +714,12 @@ class DataParser:
                 gripper_raw = (gripper_low & 0xFF) | ((gripper_high & 0xFF) << 8)
                 gripper_value = self._gripper_raw_to_sdk(gripper_raw)
 
+                # 夹爪力矩数据: 第5-6字节（addr=0x02, 12-bit, N·m）
+                if torque_values is not None and idx + 6 <= len(motor_bytes):
+                    torque_chunk = motor_bytes[idx + 4 : idx + 6]
+                    gripper_torque_value = round(self._bytes_to_12bit_value(
+                        torque_chunk, self.TORQUE_MAPPING_RANGE), 4)
+
         # 更新状态
         with self._lock:
             self._run_status = run_status
@@ -720,7 +730,8 @@ class DataParser:
         self._update_joint_state(
             angles=joint_values, gripper=gripper_value,
             run_status_text=run_status_text,
-            velocities=velocity_values, torques=torque_values
+            velocities=velocity_values, torques=torque_values,
+            gripper_torque=gripper_torque_value
         )
         self._joint_event.set()
 
