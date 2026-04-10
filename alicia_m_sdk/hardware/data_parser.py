@@ -96,7 +96,7 @@ class DataParser:
     TORQUE_MAPPING_RANGE = 20.0
 
     # ==================== 夹爪常量 ====================
-    GRI_RAW_MAX = 99  # 固件夹爪反馈最大值（闭合=0, 张开≈99）
+    GRI_RAW_MAX = 100  # 固件夹爪反馈最大值（闭合=0, 张开=100）
 
     # ==================== 其他常量 ====================
     GRI_MAX_50MM = 3290
@@ -1046,18 +1046,18 @@ class DataParser:
         """
         将夹爪反馈原始值转换为SDK值 (0~1000)。
 
-        固件夹爪反馈使用 0~99 整数值（非16-bit位置空间），
+        固件夹爪反馈使用 0~100 整数值（非16-bit位置空间），
         与关节电机的16-bit rad编码不同。
-        比例映射: 0(闭合) → 0, 99(张开) → 1000
+        比例映射: 0(闭合) → 0, 100(张开) → 1000
 
-        :param gripper_raw: 16-bit LE原始值（实际有效范围 0~99）
+        :param gripper_raw: 16-bit LE原始值（实际有效范围 0~100）
         :return: SDK夹爪值 0~1000
         """
         if gripper_raw <= 0:
             return 0.0
-        if gripper_raw >= 99:
+        if gripper_raw >= 100:
             return 1000.0
-        return round(float(gripper_raw) / 99.0 * 1000.0, 1)
+        return round(float(gripper_raw) / 100.0 * 1000.0, 1)
 
     def _value_to_radians(self, value: int) -> float:
         """
