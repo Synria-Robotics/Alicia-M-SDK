@@ -5,7 +5,7 @@ Alicia-M 电机操作臂（follower）跟随运动。
 
 支持 PV 和 MIT 两种控制模式，由 follower 当前模式自动决定:
 - PV: 每帧发送 pos+vel，固件做插值
-- MIT: 每帧发送 MIT 全参数帧（不使用线性轨迹插值），PD 控制器跟随
+- MIT: 每帧发送 6 地址单帧（含线性轨迹插值速度），固件按指定速度平滑跟随
 
 控制循环在后台线程以固定频率运行，每帧:
     1. 读取 leader 关节/夹爪状态
@@ -36,11 +36,14 @@ class Teleoperation:
         follower: 操作臂实例（Alicia-M SynriaRobotAPI），PV 或 MIT 模式均可
         frequency_hz: 控制循环频率 (Hz)
         follower_speed: follower 运动速度 [0, 400]，映射到 [0, 10] rad/s。
-            默认 400（最大速度，实时跟随）。MIT 模式下该参数不生效
+            默认 400（最大速度，实时跟随）。PV 模式作为关节速度，
+            MIT 插值模式作为线性轨迹插值速度
         gripper_scale: leader → follower 夹爪缩放系数。
             两臂均为 0-1000 量程时使用默认 1.0
         joint_signs: 6 个关节的符号乘数 (+1/-1)，补偿 leader/follower 关节方向差异
         joint_offsets_rad: 6 个关节的弧度偏移量，加到映射后的 follower 关节值上
+        use_interpolation: MIT 模式是否使用线性轨迹插值（默认 False）。
+            启用时发送 6 地址帧，运动更平滑但可能降低重力负载关节的刚度
     """
 
     def __init__(
@@ -52,6 +55,7 @@ class Teleoperation:
         gripper_scale: float = 1.0,
         joint_signs: Optional[List[float]] = None,
         joint_offsets_rad: Optional[List[float]] = None,
+        use_interpolation: bool = False,
     ):
         self.leader = leader
         self.follower = follower
@@ -60,6 +64,7 @@ class Teleoperation:
         self.gripper_scale = gripper_scale
         self.joint_signs = joint_signs or [1.0] * 6
         self.joint_offsets_rad = joint_offsets_rad or [0.0] * 6
+        self.use_interpolation = use_interpolation
 
         self._running = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -93,13 +98,19 @@ class Teleoperation:
     # ========== 控制循环 ==========
 
     def _control_loop(self) -> None:
-        """后台控制循环主体"""
+        """后台控制循环主体
+
+        插值模式策略：首帧发送 6 地址帧设定固件线性插值速度，
+        后续帧仅发送 5 地址帧更新目标位置，固件保留插值速度持续生效，
+        避免每帧重置插值状态导致 PD 刚度丧失。
+        """
         interval = 1.0 / self.frequency_hz
         mode_str = self.follower.control_mode.value.upper()
+        interp_sent = False  # 插值首帧是否已发送
 
         logger.info(
-            "遥操作控制循环启动: %.0f Hz, %s 模式",
-            self.frequency_hz, mode_str,
+            "遥操作控制循环启动: %.0f Hz, %s 模式, 插值=%s",
+            self.frequency_hz, mode_str, self.use_interpolation,
         )
 
         while self._running.is_set():
@@ -115,6 +126,13 @@ class Teleoperation:
                 follower_joints = self._map_joints(state.angles)
                 follower_gripper = self._map_gripper(state.gripper)
 
+                # 插值模式：首帧发 6 地址帧设速度，后续 5 地址帧更新位置
+                if self.use_interpolation and not interp_sent:
+                    use_interp_this_frame = True
+                    interp_sent = True
+                else:
+                    use_interp_this_frame = False
+
                 # 发送到 follower（PV/MIT 由 follower 当前模式自动路由）
                 self.follower.set_robot_state(
                     target_joints=follower_joints,
@@ -123,7 +141,7 @@ class Teleoperation:
                     speed=self.follower_speed,
                     gripper_speed=self.follower_speed,
                     wait_for_completion=False,
-                    use_interpolation=False,
+                    use_interpolation=use_interp_this_frame,
                 )
 
                 self._loop_count += 1

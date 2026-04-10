@@ -1,4 +1,4 @@
-"""15_demo_sparkvis.py — SparkVis 可视化
+"""14_demo_sparkvis.py — SparkVis 可视化
 
 演示通过 WebSocket 实时推送关节状态到 SparkVis 可视化界面。
 按 Ctrl+C 退出。

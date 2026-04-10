@@ -1,4 +1,4 @@
-"""13_demo_inverse_kinematics.py — 逆运动学
+"""12_demo_inverse_kinematics.py — 逆运动学
 
 演示逆运动学（IK）求解：
   1. 读取当前末端位姿 -> IK 求解 -> 打印关节角度

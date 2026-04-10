@@ -1,8 +1,7 @@
-"""08_demo_move_full_arm.py — 关节+夹爪协同控制
+"""10_demo_move_full_arm_mit.py — 关节+夹爪协同控制 (MIT)
 
-演示关节与夹爪的独立控制及协同控制：
+演示 MIT 模式下关节与夹爪的独立控制及协同控制：
   回零+夹爪打开 -> 仅关节运动 -> 仅夹爪运动 -> 同时控制 -> 回零。
-PV 和 MIT 模式下均可运行。
 """
 
 import time
@@ -16,11 +15,11 @@ POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
 
 def main():
-    beauty_print("Demo: 关节+夹爪协同控制", type="module")
+    beauty_print("Demo: 关节+夹爪协同控制 (MIT)", type="module")
 
-    # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
-    beauty_print("机器人连接成功", type="success")
+    # 创建并连接机器人（MIT 模式）
+    robot = alicia_m_sdk.create_robot(control_mode="mit")
+    beauty_print("机器人连接成功（MIT 模式）", type="success")
 
     try:
         # --- 初始化：回零位 + 夹爪打开 ---
@@ -29,7 +28,7 @@ def main():
             target_joints=[0, 0, 0, 0, 0, 0],
             gripper_value=1000,
             joint_format="deg",
-            speed=15,
+            speed=30,
             gripper_speed=100,
             wait_for_completion=True,
         )
@@ -43,7 +42,7 @@ def main():
             target_joints=POSE_A,
             gripper_value=None,
             joint_format="deg",
-            speed=15,
+            speed=30,
             wait_for_completion=True,
         )
         beauty_print("关节运动完成", type="success")
@@ -68,7 +67,7 @@ def main():
             target_joints=POSE_B,
             gripper_value=1000,
             joint_format="deg",
-            speed=15,
+            speed=30,
             gripper_speed=100,
             wait_for_completion=True,
         )
@@ -81,7 +80,7 @@ def main():
             target_joints=[0, 0, 0, 0, 0, 0],
             gripper_value=0,
             joint_format="deg",
-            speed=15,
+            speed=30,
             gripper_speed=100,
             wait_for_completion=True,
         )

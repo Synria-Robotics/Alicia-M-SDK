@@ -1,4 +1,4 @@
-"""14_demo_drag_teaching.py — 拖动示教与回放
+"""13_demo_drag_teaching.py — 拖动示教与回放
 
 流程:
 1. PV 模式连接 -> Enter 切换 MIT（关节自由活动，夹爪固件锁定 MIT）
