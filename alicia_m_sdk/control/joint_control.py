@@ -26,7 +26,7 @@ from ..protocol.messages import (
     TorqueRequest, EnableRequest, MotorParamRequest, ZeroResetRequest,
 )
 from ..types.enums import ControlMode
-from ..types.state import JointState, MitParams
+from ..types.state import MitParams
 from ..types.exceptions import RobotStateError, ValidationError
 from ..utils.conversion import speed_user_to_firmware
 from ..utils.validation import (
@@ -121,7 +121,7 @@ class JointController:
         gripper: Optional[float] = None,
         gripper_speed: Optional[float] = None,
         wait: bool = True,
-        timeout: float = 10.0,
+        timeout: float = 15.0,
     ) -> bool:
         """PV 模式点位运动
 
@@ -248,18 +248,18 @@ class JointController:
         gripper: Optional[float] = None,
         gripper_speed: Optional[float] = None,
         wait: bool = True,
-        timeout: float = 10.0,
-        use_interpolation: bool = False,
+        timeout: float = 15.0,
+        use_interpolation: bool = True,
     ) -> bool:
         """MIT 模式点位运动
 
         支持两种运动方式:
-        - 直接 PD 控制 (use_interpolation=False, 默认):
+        - 线性轨迹插值 (use_interpolation=True, 默认):
+          发送 6 地址单帧 (pos+vel+torque+kp+kd+linear_vel)，
+          vel=0，由 linear_vel 指定插值速度，固件按该速度线性到达目标。
+        - 直接 PD 控制 (use_interpolation=False):
           发送 MIT 全参数帧 (pos=目标, kp/kd=默认)，
           由 PD 控制器驱动关节趋近目标，发送后立即返回（不等待到达）。
-        - 线性轨迹插值 (use_interpolation=True):
-          先设定线性轨迹速度 (addr=0x05)，再发送 MIT 帧，
-          固件按指定速度做线性插值到达目标，可等待到达。
 
         Args:
             target_joints: 目标角度 (rad), 6 个关节
@@ -285,27 +285,22 @@ class JointController:
         if gripper is not None:
             gripper = validate_gripper_value(gripper)
 
-        # 步骤1: 设定线性轨迹速度（仅插值模式）
+        # 步骤1: 计算线性轨迹插值速度（仅插值模式）
+        # 所有电机始终设正值插值速度，禁止设 0（固件将 0 视为"不插值、直接跳到
+        # 目标位置"，在阶段切换时因 PD 稳态误差引起的微小位置差会导致瞬间跳变抖动）
+        linear_vels = None
         if use_interpolation:
             speeds = validate_speed(speed, NUM_JOINTS)
-            current = self._get_current_angles()
-            linear_vels = self._compute_signed_velocities(
-                target_joints, current, speeds
-            )
+            linear_vels = [speed_user_to_firmware(speeds[i])
+                           for i in range(NUM_JOINTS)]
             # 夹爪线性速度
-            if gripper is not None:
-                state = self._device.joint_state
-                current_gripper = state.gripper if state else 0.0
-                g_speed = gripper_speed if gripper_speed is not None else speed
-                g_speeds = validate_speed(g_speed, 1)
-                g_sign = 1.0 if gripper > current_gripper else -1.0
-                g_mag = speed_user_to_firmware(g_speeds[0])
-                linear_vels.append(g_sign * g_mag)
-            else:
-                linear_vels.append(0.0)
-            self._device.send_linear_velocity(self._device.aim, linear_vels)
+            g_speed = gripper_speed if gripper_speed is not None else speed
+            g_speeds = validate_speed(g_speed, 1)
+            linear_vels.append(speed_user_to_firmware(g_speeds[0]))
 
-        # 步骤2: 构建全参数 MIT 帧 (pos=目标, vel=0, t=0, kp=默认, kd=默认)
+        # 步骤2: 构建 MIT 帧 (pos=目标, vel=0, t=0, kp=默认, kd=默认)
+        #   插值模式: 合并线性速度为单帧 (addr_count=6)
+        #   直接 PD:  不含线性速度 (addr_count=5)
         mit_params = []
         for i in range(NUM_JOINTS):
             kp, kd = _fill_mit_defaults(i, None, None)
@@ -329,31 +324,30 @@ class JointController:
             kp=gripper_kp,
             kd=gripper_kd,
         ))
-        self._device.send_mit(self._device.aim, mit_params)
+        self._device.send_mit(
+            self._device.aim, mit_params, linear_velocities=linear_vels,
+        )
         logger.debug("MIT 帧已发送: target=%s, interpolation=%s",
                      target_joints, use_interpolation)
 
         # 步骤3: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
+        # MIT PD 控制器存在稳态误差，容差需大于 PV 模式
         reached = True
         if use_interpolation and wait:
             t0 = time.perf_counter()
-            reached = self._wait_for_target(target_joints, timeout=timeout)
+            reached = self._wait_for_target(
+                target_joints, tolerance=0.15, timeout=timeout,
+            )
             if gripper is not None:
                 remaining = max(timeout - (time.perf_counter() - t0), 1.0)
                 gripper_ok = self._wait_for_gripper(gripper, timeout=remaining)
                 reached = reached and gripper_ok
 
-        # 步骤4: 清零线性轨迹速度（仅插值模式，防止残留影响后续运动）
-        if use_interpolation:
-            zero_vels = [0.0] * NUM_MOTORS
-            self._device.send_linear_velocity(self._device.aim, zero_vels)
-            logger.debug("MIT 线性速度已清零")
-
         return reached
 
     # ========== 通用方法 ==========
 
-    def go_home(self, speed: float = 15.0) -> bool:
+    def go_home(self, speed: float = 40.0) -> bool:
         """回零位（自动适配当前模式）
 
         Args:
@@ -371,14 +365,16 @@ class JointController:
     def move_gripper(
         self,
         value: float,
-        speed: float = 40.0,
+        speed: float = 100.0,
         wait: bool = True,
         timeout: float = 5.0,
     ) -> bool:
         """控制夹爪
 
         夹爪电机固件锁定为 MIT 模式，始终通过 MIT 全参数帧控制。
-        关节保持当前位置不动（PV 模式关节忽略 MIT 专属参数，仅使用 pos+vel）。
+        关节保持当前位置不动，夹爪通过 6 地址单帧线性轨迹插值到达目标。
+
+        注意: 后续固件版本可能不支持夹爪线性轨迹插值，届时需改回 5 地址帧。
 
         Args:
             value: 夹爪目标值 [0=关闭, 1000=打开]
@@ -404,7 +400,15 @@ class JointController:
             kp=gripper_kp,
             kd=gripper_kd,
         )
-        self._device.send_mit(self._device.aim, mit_params)
+
+        # 线性轨迹插值：所有电机始终设正值速度，禁止设 0（防止阶段切换抖动）
+        g_speeds = validate_speed(speed, 1)
+        g_vel = speed_user_to_firmware(g_speeds[0])
+        linear_vels = [g_vel] * NUM_JOINTS + [g_vel]
+
+        self._device.send_mit(
+            self._device.aim, mit_params, linear_velocities=linear_vels,
+        )
 
         if wait:
             return self._wait_for_gripper(value, timeout=timeout)

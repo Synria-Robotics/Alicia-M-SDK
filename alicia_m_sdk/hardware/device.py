@@ -194,12 +194,19 @@ class Device:
         frame = self._codec.encode_pv_control(aim, positions, velocities)
         self.send_frame(frame)
 
-    def send_mit(self, aim: int, params: List[MitParams]) -> None:
+    def send_mit(
+        self,
+        aim: int,
+        params: List[MitParams],
+        linear_velocities: Optional[List[float]] = None,
+    ) -> None:
         """发送 MIT 全参数帧（fire-and-forget）
 
         Args:
             aim: 目标部位
             params: 7 个电机的 MIT 参数
+            linear_velocities: 线性轨迹插值速度 (rad/s)，
+                提供时合并为 6 地址单帧 (pos+vel+tor+kp+kd+linear_vel)
         """
         # 解包 MitParams 为 codec 所需的独立列表
         positions = [p.pos_ref for p in params]
@@ -207,17 +214,10 @@ class Device:
         torques = [p.t_ref for p in params]
         kps = [p.kp if p.kp is not None else 0.0 for p in params]
         kds = [p.kd if p.kd is not None else 0.0 for p in params]
-        frame = self._codec.encode_mit_control(aim, positions, velocities, torques, kps, kds)
-        self.send_frame(frame)
-
-    def send_linear_velocity(self, aim: int, velocities: List[float]) -> None:
-        """发送线性轨迹速度帧（addr=0x05）
-
-        Args:
-            aim: 目标部位
-            velocities: 7 个电机的线性轨迹速度 (rad/s)
-        """
-        frame = self._codec.encode_linear_velocity(aim, velocities)
+        frame = self._codec.encode_mit_control(
+            aim, positions, velocities, torques, kps, kds,
+            linear_velocities=linear_velocities,
+        )
         self.send_frame(frame)
 
     def send_and_wait(self, frame: Frame, expected_cmd: int,

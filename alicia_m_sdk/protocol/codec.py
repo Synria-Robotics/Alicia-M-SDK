@@ -464,11 +464,12 @@ class MessageCodec:
         torques: List[float],
         kps: List[float],
         kds: List[float],
+        linear_velocities: Optional[List[float]] = None,
     ) -> Frame:
         """编码 MIT 模式控制帧（物理量输入，全参数）
 
-        MIT 帧: addr_count=5, 每电机 10 字节 (pos + vel + torque + kp + kd)
-        总数据长度: 2(前缀) + 7*10(电机数据) = 72 字节
+        无线性速度时: addr_count=5, 每电机 10 字节 (pos + vel + torque + kp + kd)
+        含线性速度时: addr_count=6, 每电机 12 字节 (pos + vel + torque + kp + kd + linear_vel)
 
         Args:
             aim: 目标部位
@@ -477,6 +478,8 @@ class MessageCodec:
             torques: 7 个电机的前馈力矩 (N·m)
             kps: 7 个电机的 Kp 增益
             kds: 7 个电机的 Kd 增益
+            linear_velocities: 7 个电机的线性轨迹插值速度 (rad/s)，
+                None 时不含线性速度（addr_count=5）
 
         Returns:
             编码后的 Frame 对象
@@ -486,6 +489,8 @@ class MessageCodec:
         self._validate_motor_list(torques, "torques")
         self._validate_motor_list(kps, "kps")
         self._validate_motor_list(kds, "kds")
+        if linear_velocities is not None:
+            self._validate_motor_list(linear_velocities, "linear_velocities")
 
         motor_data: List[List[int]] = []
         for i in range(NUM_MOTORS):
@@ -498,44 +503,16 @@ class MessageCodec:
             tor_raw = encode_torque(torques[i], motor_index=i)
             kp_raw = encode_kp(kps[i])
             kd_raw = encode_kd(kds[i])
-            motor_data.append([pos_raw, vel_raw, tor_raw, kp_raw, kd_raw])
+            data = [pos_raw, vel_raw, tor_raw, kp_raw, kd_raw]
+            if linear_velocities is not None:
+                data.append(encode_velocity(linear_velocities[i]))
+            motor_data.append(data)
 
+        addr_count = 6 if linear_velocities is not None else 5
         return self.encode_joint_control(JointControlRequest(
             aim=aim,
             start_addr=ADDR_POSITION,
-            addr_count=5,
-            motor_data=motor_data,
-        ))
-
-    def encode_linear_velocity(
-        self,
-        aim: int,
-        velocities: List[float],
-    ) -> Frame:
-        """编码线性轨迹速度帧（addr=0x05）
-
-        MIT 模式下的线性插值速度控制。
-        addr_count=1, 每电机 2 字节 (12bit 速度)。
-
-        Args:
-            aim: 目标部位
-            velocities: 7 个电机的线性轨迹速度 (rad/s)
-
-        Returns:
-            编码后的 Frame 对象
-        """
-        from .constants import ADDR_LINEAR_VEL
-        self._validate_motor_list(velocities, "velocities")
-
-        motor_data: List[List[int]] = []
-        for i in range(NUM_MOTORS):
-            vel_raw = encode_velocity(velocities[i])
-            motor_data.append([vel_raw])
-
-        return self.encode_joint_control(JointControlRequest(
-            aim=aim,
-            start_addr=ADDR_LINEAR_VEL,
-            addr_count=1,
+            addr_count=addr_count,
             motor_data=motor_data,
         ))
 

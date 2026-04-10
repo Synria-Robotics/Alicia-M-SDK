@@ -108,8 +108,8 @@ KD_RANGE           = 5.0       # Kd 映射范围 [0, 5]
 # === MIT 默认增益 ===
 DEFAULT_KP_LARGE   = 150.0     # 大关节默认 Kp (M0~M2)
 DEFAULT_KD_LARGE   = 2.0       # 大关节默认 Kd (M0~M2)
-DEFAULT_KP_SMALL   = 20.0      # 小关节默认 Kp (M3~M6)
-DEFAULT_KD_SMALL   = 1.0       # 小关节默认 Kd (M3~M6)
+DEFAULT_KP_SMALL   = 150.0     # 小关节默认 Kp (M3~M6)
+DEFAULT_KD_SMALL   = 2.0       # 小关节默认 Kd (M3~M6)
 
 # === 电机/关节数量 ===
 NUM_JOINTS         = 6         # 云擎关节数量（不含夹爪）

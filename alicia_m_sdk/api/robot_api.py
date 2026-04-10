@@ -230,18 +230,18 @@ class SynriaRobotAPI:
         target_joints: Optional[List[float]] = None,
         gripper_value: Optional[float] = None,
         joint_format: str = 'deg',
-        speed: float = 15,
-        gripper_speed: float = 40,
+        speed: float = 40,
+        gripper_speed: float = 100,
         wait_for_completion: bool = True,
-        use_interpolation: bool = False,
+        use_interpolation: bool = True,
         **kwargs,
     ) -> bool:
         """点位运动：设置关节角度和/或夹爪位置
 
         自动根据当前模式选择实现：
         - PV: 发送 pos+vel 帧，固件自行到达
-        - MIT: 发送全参数帧，由 PD 控制器驱动到达；
-          若 use_interpolation=True 则额外设定线性轨迹速度实现匀速插值
+        - MIT: 默认使用线性轨迹插值，发送 6 地址单帧
+          (pos+vel+torque+kp+kd+linear_vel)，vel=0，由 linear_vel 控制插值速度
 
         Args:
             target_joints: 目标角度，6 个关节
@@ -288,7 +288,7 @@ class SynriaRobotAPI:
                 use_interpolation=use_interpolation,
             )
 
-    def go_home(self, speed: float = 15, gripper_speed: float = 40) -> bool:
+    def go_home(self, speed: float = 40, gripper_speed: float = 100) -> bool:
         """回零位"""
         return self._joint_ctrl.go_home(speed=speed)
 
