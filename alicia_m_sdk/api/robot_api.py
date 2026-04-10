@@ -24,6 +24,7 @@ from ..protocol.codec import MessageCodec
 from ..protocol.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
+    NUM_JOINTS,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
@@ -356,10 +357,11 @@ class SynriaRobotAPI:
         return self._joint_ctrl.disable()
 
     def switch_mode(self, mode: str) -> bool:
-        """切换控制模式
+        """切换控制模式（仅关节 M0-M5，夹爪 M6 固件锁定 MIT）
 
         注意: 切换瞬间固件会短暂失能再使能，机械臂会因重力下坠。
         切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
+        夹爪电机始终保持 MIT 模式，不受模式切换影响。
 
         Args:
             mode: "pv" / "mit"
@@ -576,28 +578,31 @@ class SynriaRobotAPI:
     def _detect_firmware_mode(self) -> Optional[ControlMode]:
         """通过 0x11 查询固件实际控制模式
 
-        检查所有电机模式是否一致。若不一致（旧版 SDK 遗留的混合状态），
-        返回 None 以触发后续强制切换。
+        仅检查关节电机 M0-M5 的模式一致性（夹爪 M6 固件锁定 MIT，不参与判断）。
+        若关节电机模式不一致，返回 None 以触发后续强制切换。
 
         Returns:
-            所有电机一致时返回该模式，不一致或查询失败返回 None
+            关节电机一致时返回该模式，不一致或查询失败返回 None
         """
         _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
         values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
         if values is None or len(values) == 0:
             return None
-        # 检查所有电机模式一致性
-        if any(v != values[0] for v in values):
-            logger.warning("检测到混合控制模式状态: %s，将强制同步", values)
+        # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
+        joint_values = values[:NUM_JOINTS]
+        if any(v != joint_values[0] for v in joint_values):
+            logger.warning("检测到关节电机混合控制模式: %s，将强制同步", joint_values)
             return None
-        return _MODE_MAP.get(values[0])
+        return _MODE_MAP.get(joint_values[0])
 
     def _sync_control_mode(self) -> None:
         """检测固件控制模式并同步 SDK 内部状态
 
+        仅检测和同步关节电机 M0-M5 的模式（夹爪 M6 固件锁定 MIT）。
+
         根据 config.control_mode:
         - None: 跟随固件当前模式（不发送切换指令）
-        - "pv"/"mit": 若与固件不一致则自动切换
+        - "pv"/"mit": 若与固件不一致则自动切换关节电机
         """
         firmware_mode = self._detect_firmware_mode()
         requested = self._config.control_mode

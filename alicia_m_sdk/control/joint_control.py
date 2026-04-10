@@ -377,6 +377,9 @@ class JointController:
     ) -> bool:
         """控制夹爪
 
+        夹爪电机固件锁定为 MIT 模式，始终通过 MIT 全参数帧控制。
+        关节保持当前位置不动（PV 模式关节忽略 MIT 专属参数，仅使用 pos+vel）。
+
         Args:
             value: 夹爪目标值 [0=关闭, 1000=打开]
             speed: 夹爪速度 [0, 400]
@@ -391,34 +394,17 @@ class JointController:
         # 读取当前关节位置，保持不变
         current = self._get_current_angles()
 
-        if self._mode == ControlMode.PV:
-            # PV: 关节保持当前位置（固件坐标系直接发回），仅控制夹爪
-            # 裁剪关节位置至安全范围，防止 decode→encode 量化误差触发固件限位
-            positions = [
-                max(lo, min(hi, c))
-                for c, lo, hi in zip(current, self._joint_limits_lower, self._joint_limits_upper)
-            ]
-            velocities = [0.0] * NUM_JOINTS
-            # 夹爪
-            positions.append(value)
-            state = self._device.joint_state
-            current_gripper = state.gripper if state else 0.0
-            g_sign = 1.0 if value > current_gripper else -1.0
-            velocities.append(g_sign * speed_user_to_firmware(speed))
-            self._device.send_pv(self._device.aim, positions, velocities)
-        else:
-            # MIT: 发送全参数帧，关节保持当前位置
-            mit_params = self._build_hold_position_mit(current)
-            # 覆盖夹爪 pos_ref
-            gripper_kp, gripper_kd = _fill_mit_defaults(NUM_JOINTS, None, None)
-            mit_params[NUM_JOINTS] = MitParams(
-                pos_ref=value,
-                vel_ref=0.0,
-                t_ref=0.0,
-                kp=gripper_kp,
-                kd=gripper_kd,
-            )
-            self._device.send_mit(self._device.aim, mit_params)
+        # 夹爪固件锁定 MIT，始终发送 MIT 全参数帧
+        mit_params = self._build_hold_position_mit(current)
+        gripper_kp, gripper_kd = _fill_mit_defaults(NUM_JOINTS, None, None)
+        mit_params[NUM_JOINTS] = MitParams(
+            pos_ref=value,
+            vel_ref=0.0,
+            t_ref=0.0,
+            kp=gripper_kp,
+            kd=gripper_kd,
+        )
+        self._device.send_mit(self._device.aim, mit_params)
 
         if wait:
             return self._wait_for_gripper(value, timeout=timeout)
@@ -583,6 +569,8 @@ class JointController:
     def switch_mode(self, mode: Union[str, ControlMode]) -> bool:
         """切换控制模式（发送 0x11 指令, addr=0x0B）
 
+        仅切换关节电机 M0-M5，夹爪电机 M6 固件锁定为 MIT 模式不可切换。
+
         注意: 模式切换瞬间固件会短暂失能再使能，机械臂会因重力瞬间下坠。
 
         行为差异:
@@ -590,7 +578,7 @@ class JointController:
         - 切到 PV: 发送安全首帧（pos=当前, vel=0）防止跑到旧目标
 
         实现要点:
-        - 单指令切换全部电机（避免逐电机切换导致混合模式）
+        - 单指令切换 M0-M5（夹爪 M6 固件锁定 MIT，不参与切换）
         - 切换后读回验证，失败则重试一次
 
         Args:
@@ -617,11 +605,11 @@ class JointController:
         try:
             ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
 
-            # 单指令切换全部电机（motor 1~7）
+            # 单指令切换关节电机（motor 1~6，夹爪 M6 固件锁定 MIT 不参与）
             self._send_mode_switch_command(ctrl_mode_value)
             time.sleep(2.0)
 
-            # 读回验证：确认所有电机都已切换成功
+            # 读回验证：确认关节电机已切换成功
             if not self._verify_mode_switch(ctrl_mode_value):
                 logger.warning("模式切换未完全生效，重试一次")
                 self._send_mode_switch_command(ctrl_mode_value)
@@ -643,27 +631,26 @@ class JointController:
         return True
 
     def _send_mode_switch_command(self, ctrl_mode_value: int) -> None:
-        """发送模式切换指令（单指令覆盖全部电机）"""
+        """发送模式切换指令（仅切换关节 M0-M5，夹爪 M6 固件锁定 MIT）"""
         frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
             aim=self._device.aim,
             start_motor=1,
-            motor_count=NUM_MOTORS,
+            motor_count=NUM_JOINTS,
             param_addr=MOTOR_PARAM_CTRL_MODE,
             param_value=ctrl_mode_value,
         ))
         self._device.send_frame(frame)
 
     def _verify_mode_switch(self, expected_value: int) -> bool:
-        """读回验证所有电机的控制模式是否与预期一致"""
+        """读回验证关节电机 M0-M5 的控制模式是否与预期一致（夹爪 M6 固件锁定 MIT，不参与验证）"""
         values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
         if values is None:
             logger.warning("模式验证失败: 读取超时")
             return False
-        for i, v in enumerate(values):
-            if v != expected_value:
-                label = f"M{i}" if i < NUM_JOINTS else "夹爪"
-                logger.warning("电机 %s 模式未切换: 期望 0x%02X, 实际 0x%02X",
-                               label, expected_value, v)
+        for i in range(NUM_JOINTS):
+            if values[i] != expected_value:
+                logger.warning("电机 M%d 模式未切换: 期望 0x%02X, 实际 0x%02X",
+                               i, expected_value, values[i])
                 return False
         return True
 

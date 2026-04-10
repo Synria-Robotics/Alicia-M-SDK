@@ -1,7 +1,7 @@
 """14_demo_drag_teaching.py — 拖动示教与回放
 
 流程:
-1. PV 模式连接 -> Enter 切换 MIT（关节自由活动）
+1. PV 模式连接 -> Enter 切换 MIT（关节自由活动，夹爪固件锁定 MIT）
 2. 拖动机械臂和夹爪，后台录制路点
 3. q+Enter 停止录制 -> 切换回 PV
 4. y+Enter 回放轨迹（PV 逐点控制）
@@ -44,7 +44,7 @@ def main():
 
         beauty_print("正在切换到 MIT 模式...", type="info")
         robot.switch_mode("mit")
-        beauty_print("已切换到 MIT 模式，可以自由拖动机械臂和夹爪", type="success")
+        beauty_print("已切换到 MIT 模式，可以自由拖动机械臂（夹爪始终 MIT）", type="success")
 
         # --- 开始录制 ---
         beauty_print("开始录制路点... 按 q + Enter 停止录制", type="info")
