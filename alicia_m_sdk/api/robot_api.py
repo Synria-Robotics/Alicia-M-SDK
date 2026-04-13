@@ -580,13 +580,20 @@ class SynriaRobotAPI:
 
         仅检查关节电机 M0-M5 的模式一致性（夹爪 M6 固件锁定 MIT，不参与判断）。
         若关节电机模式不一致，返回 None 以触发后续强制切换。
+        内部重试多次，容忍连接初期的短暂通信不稳定。
 
         Returns:
             关节电机一致时返回该模式，不一致或查询失败返回 None
         """
         _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
-        values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
-        if values is None or len(values) == 0:
+        for attempt in range(3):
+            self._device.flush()
+            values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
+            if values is not None and len(values) >= NUM_JOINTS:
+                break
+            logger.debug("模式检测第 %d 次查询未获得有效响应", attempt + 1)
+            time.sleep(0.5)
+        else:
             return None
         # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
         joint_values = values[:NUM_JOINTS]
@@ -609,9 +616,9 @@ class SynriaRobotAPI:
         desired = ControlMode(requested.lower()) if requested else firmware_mode
 
         if desired is None:
-            # 查询失败且未指定模式 → 保持初始化时的默认 PV
-            logger.warning("无法检测固件控制模式，保持默认 PV 模式")
-            return
+            raise ConnectionError(
+                "无法检测固件控制模式，请检查串口连接和固件状态"
+            )
 
         if firmware_mode == desired:
             # 固件已是目标模式，同步 SDK 状态即可

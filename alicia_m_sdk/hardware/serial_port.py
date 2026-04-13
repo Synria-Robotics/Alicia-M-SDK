@@ -63,7 +63,7 @@ class SerialPort:
                 rtscts=False,
                 dsrdtr=False,
             )
-            self._rx_buffer.clear()
+            self.flush()
             self._port_name = port
             logger.info(f"串口已连接: {port} @ {self._baudrate} baud")
             return True
@@ -75,11 +75,26 @@ class SerialPort:
         """断开串口连接"""
         if self._serial and self._serial.is_open:
             try:
+                self.flush()
                 self._serial.close()
             except Exception:
                 pass
             logger.info("串口已断开")
         self._serial = None
+        self._rx_buffer.clear()
+
+    def flush(self) -> None:
+        """清空串口缓冲区（硬件 UART + SDK 接收缓冲）
+
+        用于模式切换、高频通信结束等场景，
+        防止残留帧数据破坏后续协议解析。
+        """
+        if self._serial and self._serial.is_open:
+            try:
+                self._serial.reset_input_buffer()
+                self._serial.reset_output_buffer()
+            except Exception:
+                pass
         self._rx_buffer.clear()
 
     def is_connected(self) -> bool:

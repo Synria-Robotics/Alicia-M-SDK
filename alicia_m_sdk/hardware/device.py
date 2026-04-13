@@ -140,6 +140,10 @@ class Device:
         """恢复轮询线程"""
         self._poll_paused.clear()
 
+    def flush(self) -> None:
+        """清空串口缓冲区（委托给底层串口驱动）"""
+        self._port.flush()
+
     # ========== 生命周期 ==========
 
     def start(self) -> None:
@@ -370,16 +374,16 @@ class Device:
             temperatures = phys.get('temperatures')
 
             # 构造 JointState（positions[0:6]=关节角度, positions[6]=夹爪值）
-            _trim6 = lambda v: v[:6] if v and len(v) >= 6 else v
+            # velocities/torques/linear_vels/temperatures 保留全部 7 个电机数据（含夹爪）
             joint_state = JointState(
                 angles=positions[:6] if len(positions) >= 6 else positions,
                 gripper=positions[6] if len(positions) >= 7 else 0.0,
                 timestamp=time.time(),
                 run_status=phys.get('run_status', 0),
-                velocities=_trim6(velocities),
-                torques=_trim6(torques),
-                linear_vels=_trim6(linear_vels),
-                temperatures=_trim6(temperatures),
+                velocities=velocities,
+                torques=torques,
+                linear_vels=linear_vels,
+                temperatures=temperatures,
             )
             self._state_cache.update_joint_state(joint_state)
 

@@ -609,6 +609,9 @@ class JointController:
         try:
             ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
 
+            # 清空串口缓冲区，防止残留帧干扰模式切换验证
+            self._device.flush()
+
             # 单指令切换关节电机（motor 1~6，夹爪 M6 固件锁定 MIT 不参与）
             self._send_mode_switch_command(ctrl_mode_value)
             time.sleep(2.0)
@@ -646,17 +649,29 @@ class JointController:
         self._device.send_frame(frame)
 
     def _verify_mode_switch(self, expected_value: int) -> bool:
-        """读回验证关节电机 M0-M5 的控制模式是否与预期一致（夹爪 M6 固件锁定 MIT，不参与验证）"""
-        values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
-        if values is None:
-            logger.warning("模式验证失败: 读取超时")
-            return False
-        for i in range(NUM_JOINTS):
-            if values[i] != expected_value:
-                logger.warning("电机 M%d 模式未切换: 期望 0x%02X, 实际 0x%02X",
-                               i, expected_value, values[i])
-                return False
-        return True
+        """读回验证关节电机 M0-M5 的控制模式是否与预期一致（夹爪 M6 固件锁定 MIT，不参与验证）
+
+        内部重试多次查询，容忍固件模式切换后的短暂响应延迟。
+        """
+        for attempt in range(3):
+            # 每次查询前清空残留帧，避免旧响应干扰匹配
+            self._device.flush()
+            values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
+            if values is None or len(values) < NUM_JOINTS:
+                logger.debug("模式验证第 %d 次查询未获得有效响应", attempt + 1)
+                time.sleep(0.5)
+                continue
+            # 检查所有关节电机是否已切换
+            mismatched = [i for i in range(NUM_JOINTS) if values[i] != expected_value]
+            if not mismatched:
+                return True
+            for i in mismatched:
+                logger.debug("电机 M%d 模式未切换: 期望 0x%02X, 实际 0x%02X",
+                             i, expected_value, values[i])
+            time.sleep(0.5)
+
+        logger.warning("模式验证失败: 多次查询均未确认切换成功")
+        return False
 
     def set_zero_position(self) -> bool:
         """设置当前位姿为零位（发送 0x03 指令）

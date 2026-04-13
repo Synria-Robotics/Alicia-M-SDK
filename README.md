@@ -10,7 +10,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 - **夹爪操作**：开合度控制（0~1000），支持独立或协同控制
 - **力矩管理**：MIT 模式下的力矩卸载/恢复，支持自由拖动示教
 - **遥操作**：Alicia-D 示教臂实时控制 Alicia-M 操作臂（PV / MIT 双模式）
-- **状态监测**：实时读取关节角度、速度、力矩、线圈温度等
+- **状态监测**：实时读取关节角度、速度、力矩、插补速度、线圈温度（含夹爪电机）
 - **运动学**：正/逆运动学求解（基于 RoboCore）
 - **轨迹规划**：关节空间与笛卡尔空间轨迹规划与执行
 - **可视化**：WebSocket 实时推送关节状态至 SparkVis
@@ -47,8 +47,8 @@ alicia_m_sdk/
 获取代码：
 
 ```
-git clone https://github.com/Synria-Robotics/Alicia-D-SDK.git
-cd Alicia-D-SDK
+git clone https://github.com/Synria-Robotics/Alicia-M-SDK.git
+cd Alicia-M-SDK
 ```
 
 创建虚拟环境：
@@ -107,21 +107,20 @@ robot.disconnect()
 | 00 | `demo_read_version.py` | 读取固件版本与设备信息 |
 | 01 | `demo_diagnostic.py` | 自检（待开发） |
 | 02 | `demo_read_status.py` | 读取控制模式与运行状态 |
-| 03 | `demo_read_states.py` | 循环读取关节角度、速度、力矩、温度 |
+| 03 | `demo_read_states.py` | 循环读取关节角度、速度、力矩、插补速度、温度（含夹爪） |
 | 04 | `demo_switch_mode.py` | PV / MIT 模式切换 |
 | 05 | `demo_disable_enable.py` | 使能 / 失能 |
-| 06 | `demo_move_gripper.py` | 夹爪控制（PV） |
+| 06 | `demo_move_gripper.py` | 夹爪控制（PV / MIT 均可） |
 | 07 | `demo_move_joint.py` | 关节运动（PV） |
 | 08 | `demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
-| 09 | `demo_move_gripper_mit.py` | 夹爪控制（MIT） |
-| 10 | `demo_move_joint_mit.py` | 关节运动（MIT） |
-| 11 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT） |
-| 12 | `demo_forward_kinematics.py` | 正运动学计算 |
-| 13 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
-| 14 | `demo_drag_teaching.py` | 拖动示教录制与 PV 回放 |
-| 15 | `demo_sparkvis.py` | SparkVis WebSocket 可视化（待开发） |
-| 16 | `demo_teleop.py` | 遥操作：Alicia-D 示教臂控制 Alicia-M（PV / MIT） |
-| 17 | `demo_reset_zero.py` | 零位标定 |
+| 09 | `demo_move_joint_mit.py` | 关节运动（MIT） |
+| 10 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT） |
+| 11 | `demo_forward_kinematics.py` | 正运动学计算 |
+| 12 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
+| 13 | `demo_drag_teaching.py` | 拖动示教录制与 PV 回放 |
+| 14 | `demo_sparkvis.py` | SparkVis WebSocket 可视化 |
+| 15 | `demo_teleop.py` | 遥操作：Alicia-D → Alicia-M（PV / MIT，支持插值） |
+| 16 | `demo_reset_zero.py` | 零位标定 |
 
 运行示例：
 

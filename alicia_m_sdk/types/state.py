@@ -29,19 +29,19 @@ class JointState:
         gripper: 夹爪值 (0~1000)
         timestamp: 状态采样时间戳（time.perf_counter）
         run_status: 原始运行状态字节（由 RobotStatus 进一步解析）
-        velocities: 关节速度 (rad/s)
-        torques: 关节力矩 (N*m)
-        linear_vels: 插补速度 (rad/s)
-        temperatures: 线圈温度 (°C)
+        velocities: 7 个电机速度 (rad/s)，含夹爪
+        torques: 7 个电机力矩 (N*m)，含夹爪
+        linear_vels: 7 个电机插补速度 (rad/s)，含夹爪
+        temperatures: 7 个电机线圈温度 (°C)，含夹爪
     """
     angles: List[float]                         # 6 个关节角度 (rad)
     gripper: float                              # 夹爪值 (0~1000)
     timestamp: float                            # 时间戳
     run_status: int                             # 原始运行状态字节
-    velocities: Optional[List[float]] = None    # 关节速度 (rad/s)
-    torques: Optional[List[float]] = None       # 关节力矩 (N*m)
-    linear_vels: Optional[List[float]] = None   # 插补速度 (rad/s)
-    temperatures: Optional[List[float]] = None  # 线圈温度 (°C)
+    velocities: Optional[List[float]] = None    # 7 个电机速度 (rad/s)，含夹爪
+    torques: Optional[List[float]] = None       # 7 个电机力矩 (N*m)，含夹爪
+    linear_vels: Optional[List[float]] = None   # 7 个电机插补速度 (rad/s)，含夹爪
+    temperatures: Optional[List[float]] = None  # 7 个电机线圈温度 (°C)，含夹爪
 
 
 @dataclass
