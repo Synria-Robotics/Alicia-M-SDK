@@ -55,6 +55,7 @@ def create_robot(
     backend: str = "numpy",
     debug_mode: bool = False,
     auto_connect: bool = True,
+    extended_polling: bool = False,
     **kwargs,
 ) -> SynriaRobotAPI:
     """创建机器人实例的工厂函数
@@ -75,6 +76,7 @@ def create_robot(
         backend: RoboCore 计算后端 ("numpy"/"torch")
         debug_mode: 调试模式（启用 DEBUG 级别日志）
         auto_connect: 是否自动连接
+        extended_polling: 扩展轮询（查询插补速度、温度等，需新固件支持）
 
     Returns:
         SynriaRobotAPI 实例
@@ -128,6 +130,10 @@ def create_robot(
     # 4. 自动连接
     if auto_connect:
         robot.connect()
+
+    # 5. 按需启用扩展轮询
+    if extended_polling:
+        robot.set_extended_polling(True)
 
     return robot
 

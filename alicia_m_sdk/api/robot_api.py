@@ -25,6 +25,7 @@ from ..protocol.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
     NUM_JOINTS,
+    POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
@@ -368,6 +369,19 @@ class SynriaRobotAPI:
         """
         ctrl_mode = ControlMode.PV if mode.lower() == "pv" else ControlMode.MIT
         return self._joint_ctrl.switch_mode(ctrl_mode)
+
+    def set_extended_polling(self, enabled: bool) -> None:
+        """切换状态轮询模式
+
+        基础模式（默认）: 仅查询角度、速度、力矩，兼容所有固件版本
+        扩展模式: 额外查询 kp、kd、插补速度、温度，仅新固件支持
+
+        Args:
+            enabled: True=扩展查询, False=基础查询
+        """
+        count = POLL_ADDR_EXTENDED if enabled else POLL_ADDR_BASIC
+        self._device.set_poll_addr_count(count)
+        logger.info("状态轮询模式: %s", "扩展 (7地址)" if enabled else "基础 (3地址)")
 
     def set_zero_position(self) -> bool:
         """设置当前位姿为零位"""

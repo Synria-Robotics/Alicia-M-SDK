@@ -20,6 +20,8 @@ from ..protocol.messages import JointStateRequest, MotorParamReadRequest
 from ..protocol.constants import (
     CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR, CMD_MOTOR_PARAM,
     AIM_FOLLOWER, NUM_MOTORS,
+    POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
+    ERROR_DESCRIPTIONS,
 )
 from ..types.state import JointState, MitParams, RobotStatus, VersionInfo
 
@@ -115,6 +117,7 @@ class Device:
         self._last_write_time: float = 0.0
         self._aim: int = AIM_FOLLOWER
         self._poll_paused = threading.Event()  # 轮询暂停控制
+        self._poll_addr_count: int = POLL_ADDR_BASIC  # 默认基础查询，兼容旧固件
 
     # ========== 属性 ==========
 
@@ -131,6 +134,14 @@ class Device:
     def set_aim(self, aim: int) -> None:
         """设置控制目标部位（connect 自动检测后调用）"""
         self._aim = aim
+
+    def set_poll_addr_count(self, count: int) -> None:
+        """设置轮询查询的地址数量
+
+        Args:
+            count: POLL_ADDR_BASIC(3) 或 POLL_ADDR_EXTENDED(7)
+        """
+        self._poll_addr_count = count
 
     def pause_polling(self) -> None:
         """暂停轮询线程（模式切换等操作期间使用）"""
@@ -327,7 +338,7 @@ class Device:
                         JointStateRequest(
                             aim=self._aim,
                             start_addr=0x00,
-                            addr_count=7,  # pos + vel + torque + kp + kd + linear_vel + temperature
+                            addr_count=self._poll_addr_count,
                         )
                     )
                     self.send_frame(query)
@@ -417,7 +428,9 @@ class Device:
         if len(frame.data) >= 1:
             error_type = frame.func_code
             error_data = frame.data[0] if frame.data else 0
-            logger.warning(f"固件错误: type=0x{error_type:02X}, data=0x{error_data:02X}")
+            desc = ERROR_DESCRIPTIONS.get(error_type, f"未知错误(0x{error_type:02X})")
+            logger.warning("固件错误: %s (type=0x%02X, data=0x%02X)",
+                           desc, error_type, error_data)
 
     @staticmethod
     def _parse_run_status(status_byte: int) -> RobotStatus:

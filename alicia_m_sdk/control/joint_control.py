@@ -626,11 +626,11 @@ class JointController:
             old_mode = self._mode
             self._mode = mode
 
-            # 切到 PV 时发安全首帧（pos=当前, vel=0）防止跑到旧目标
-            # 切到 MIT 无需额外帧（固件自动进入自由状态）
-            if mode == ControlMode.PV:
-                current = self._get_current_angles()
-                self._send_position_latch_pv(current)
+            # 无论切到哪种模式都发安全首帧，用当前位置初始化固件内部目标
+            # - 切到 PV: pos=当前, vel=0，防止跑到旧目标
+            # - 切到 MIT: pos=当前, kp/kd=默认，初始化插值起点，防止首次运动突跳
+            current = self._get_current_angles()
+            self._send_safety_first_frame(current)
         finally:
             self._device.resume_polling()
 

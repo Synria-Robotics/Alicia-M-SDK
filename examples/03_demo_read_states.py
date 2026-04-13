@@ -1,9 +1,11 @@
 """03_demo_read_states.py — 读取关节状态
 
-演示循环读取并打印关节角度、夹爪、速度、力矩、插补速度、线圈温度。
+演示循环读取并打印关节角度、夹爪、速度、力矩。
+使用 --extend 参数可启用扩展查询（插补速度、线圈温度，需新固件支持）。
 按 Ctrl+C 退出。
 """
 
+import argparse
 import math
 import time
 import alicia_m_sdk
@@ -13,9 +15,22 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 def main():
     beauty_print("Demo: 读取关节状态（循环打印）", type="module")
 
+    parser = argparse.ArgumentParser(description="读取关节状态示例")
+    parser.add_argument(
+        "--extend", action="store_true",
+        help="启用扩展查询（插补速度、线圈温度，需新固件支持）"
+    )
+    args = parser.parse_args()
+
     # 创建并连接机器人
     robot = alicia_m_sdk.create_robot()
     beauty_print(f"机器人连接成功（{robot.control_mode.value.upper()} 模式）", type="success")
+
+    # 按需启用扩展查询
+    if args.extend:
+        robot.set_extended_polling(True)
+        beauty_print("已启用扩展状态查询（插补速度 + 线圈温度）", type="info")
+
     beauty_print("按 Ctrl+C 退出循环", type="info")
 
     try:
@@ -46,11 +61,10 @@ def main():
             if state.torques is not None:
                 beauty_print(f"  关节力矩 (N*m):  {beauty_print_array(state.torques, precision=3)}", type="info")
 
-            # 插补速度
+            # 扩展字段（仅 --extend 时有数据）
             if state.linear_vels is not None:
                 beauty_print(f"  插补速度 (rad/s): {beauty_print_array(state.linear_vels, precision=3)}", type="info")
 
-            # 线圈温度
             if state.temperatures is not None:
                 beauty_print(f"  线圈温度 (°C):    {beauty_print_array(state.temperatures, precision=1)}", type="info")
 

@@ -115,6 +115,10 @@ DEFAULT_KD_SMALL   = 2.0       # 小关节默认 Kd (M3~M6)
 NUM_JOINTS         = 6         # 云擎关节数量（不含夹爪）
 NUM_MOTORS         = 7         # 电机总数（含夹爪）
 
+# === 轮询地址数量 ===
+POLL_ADDR_BASIC    = 3         # 基础查询: 位置 + 速度 + 力矩（兼容旧固件）
+POLL_ADDR_EXTENDED = 7         # 扩展查询: + kp + kd + 插补速度 + 温度（仅新固件）
+
 # === 数据帧属性字节标志 ===
 FEEDBACK_BIT       = 0x80      # 响应帧 start_addr 的 bit7 = 1 表示反馈帧
 
