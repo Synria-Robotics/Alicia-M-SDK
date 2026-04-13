@@ -347,6 +347,15 @@ class JointController:
 
     # ========== 通用方法 ==========
 
+    def send_safety_latch(self) -> None:
+        """发送安全首帧（用当前位置初始化固件内部目标）
+
+        根据当前模式自动选择 MIT 或 PV 位置锁定帧。
+        用于连接后、模式同步后等场景，防止首次运动从旧目标突跳。
+        """
+        current = self._get_current_angles()
+        self._send_safety_first_frame(current)
+
     def go_home(self, speed: float = 40.0) -> bool:
         """回零位（自动适配当前模式）
 
@@ -532,20 +541,15 @@ class JointController:
         Returns:
             True=使能成功
         """
-        # 步骤1: 发送使能指令
+        # 步骤1: 发送使能指令（固件不回复确认帧，fire-and-forget）
         frame = self._device.codec.encode_enable_request(EnableRequest(
             aim=self._device.aim,
             enable=True,
         ))
-        resp = self._device.send_and_wait(frame, CMD_ENABLE, timeout=1.0)
-        if resp is None:
-            logger.warning("使能指令响应超时")
-            return False
+        self._device.send_frame(frame)
+        time.sleep(0.1)  # 等待固件处理使能
 
-        # 步骤2: 等待状态缓存更新
-        time.sleep(0.05)
-
-        # 步骤3: 读取当前位置并发送安全首帧
+        # 步骤2: 读取当前位置并发送安全首帧
         current = self._get_current_angles()
         self._send_safety_first_frame(current)
 
@@ -562,10 +566,8 @@ class JointController:
             aim=self._device.aim,
             enable=False,
         ))
-        resp = self._device.send_and_wait(frame, CMD_ENABLE, timeout=1.0)
-        if resp is None:
-            logger.warning("失能指令响应超时")
-            return False
+        self._device.send_frame(frame)
+        time.sleep(0.1)  # 等待固件处理失能
 
         logger.info("失能完成")
         return True
@@ -577,13 +579,15 @@ class JointController:
 
         注意: 模式切换瞬间固件会短暂失能再使能，机械臂会因重力瞬间下坠。
 
-        行为差异:
-        - 切到 MIT: 固件进入自由状态（关节可自由活动），不发安全首帧
-        - 切到 PV: 发送安全首帧（pos=当前, vel=0）防止跑到旧目标
+        安全序列:
+        1. 暂停轮询 → 发送切换指令 → 等待固件处理 → 读回验证
+        2. 恢复轮询，等待获取切换后的实际关节位置（可能已因重力下坠）
+        3. 用下坠后的真实位置发送安全首帧，防止瞬移回切换前的旧位置
 
         实现要点:
         - 单指令切换 M0-M5（夹爪 M6 固件锁定 MIT，不参与切换）
         - 切换后读回验证，失败则重试一次
+        - 安全首帧必须在轮询恢复后发送，确保使用切换后的实际位置
 
         Args:
             mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
@@ -625,14 +629,16 @@ class JointController:
             # 更新内部模式
             old_mode = self._mode
             self._mode = mode
-
-            # 无论切到哪种模式都发安全首帧，用当前位置初始化固件内部目标
-            # - 切到 PV: pos=当前, vel=0，防止跑到旧目标
-            # - 切到 MIT: pos=当前, kp/kd=默认，初始化插值起点，防止首次运动突跳
-            current = self._get_current_angles()
-            self._send_safety_first_frame(current)
         finally:
             self._device.resume_polling()
+
+        # 等待轮询线程获取切换后的实际关节位置
+        # 模式切换期间固件短暂失能，机械臂可能因重力下坠，
+        # 必须用下坠后的实际位置（而非切换前的过期缓存）初始化固件目标，
+        # 否则机械臂会瞬移回切换前的旧位置
+        time.sleep(0.2)
+        current = self._get_current_angles()
+        self._send_safety_first_frame(current)
 
         logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
         return True

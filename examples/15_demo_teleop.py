@@ -47,10 +47,12 @@ def main(args):
         return
 
     # --- 连接 follower (Alicia-M 操作臂, 自动检测模式) ---
+    # 显式指定 control_aim="follower"，防止端口接反时误操作示教臂
     beauty_print("连接 follower (Alicia-M)...", type="info")
     follower = alicia_m_sdk.create_robot(
         port=args.follower_port,
         version=args.follower_version,
+        control_aim="follower",
     )
     if not follower.is_connected():
         beauty_print("follower 连接失败", type="error")

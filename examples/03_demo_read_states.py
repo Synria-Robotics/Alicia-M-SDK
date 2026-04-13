@@ -62,6 +62,12 @@ def main():
                 beauty_print(f"  关节力矩 (N*m):  {beauty_print_array(state.torques, precision=3)}", type="info")
 
             # 扩展字段（仅 --extend 时有数据）
+            if state.kps is not None:
+                beauty_print(f"  位置环 Kp:        {beauty_print_array(state.kps, precision=1)}", type="info")
+
+            if state.kds is not None:
+                beauty_print(f"  速度环 Kd:        {beauty_print_array(state.kds, precision=2)}", type="info")
+
             if state.linear_vels is not None:
                 beauty_print(f"  插补速度 (rad/s): {beauty_print_array(state.linear_vels, precision=3)}", type="info")
 

@@ -635,8 +635,11 @@ class SynriaRobotAPI:
             )
 
         if firmware_mode == desired:
-            # 固件已是目标模式，同步 SDK 状态即可
+            # 固件已是目标模式，同步 SDK 状态并发安全首帧
+            # 安全首帧将固件内部目标初始化为当前实际位置，
+            # 防止首次运动从上次会话的旧目标突跳
             self._joint_ctrl.mode = desired
+            self._joint_ctrl.send_safety_latch()
             logger.info("固件控制模式: %s", desired.value.upper())
         else:
             # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
@@ -647,15 +650,25 @@ class SynriaRobotAPI:
             self._joint_ctrl.switch_mode(desired)
 
     def _auto_detect_aim(self, timeout: float) -> None:
-        """自动检测控制目标（示教臂/操作臂）"""
+        """自动检测控制目标（示教臂/操作臂）
+
+        安全策略: 自动检测到 Leader 时强制回退为 Follower 并发出警告。
+        Alicia-M SDK 的控制指令（模式切换、使能等）不应发往示教臂，
+        否则可能导致示教臂固件异常。如确需连接 Leader，
+        请通过 create_robot(control_aim="leader") 显式指定。
+        """
         frame = self._codec.encode_version_request()
         resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
         info = self._device.version_info
         if info and info.device_type:
             dt = info.device_type.upper()
             if dt in ('L', 'LEADER'):
-                self._device.set_aim(AIM_LEADER)
-                logger.info("检测到示教臂 (Leader)")
+                logger.warning(
+                    "检测到示教臂 (Leader)，但未显式指定 control_aim='leader'。"
+                    "为防止误操作示教臂固件，已强制设为 Follower 模式。"
+                    "如确需连接 Leader，请通过 create_robot(control_aim='leader') 显式指定"
+                )
+                self._device.set_aim(AIM_FOLLOWER)
             else:
                 self._device.set_aim(AIM_FOLLOWER)
                 logger.info("检测到操作臂 (Follower)")

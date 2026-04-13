@@ -45,7 +45,7 @@ def main():
         input("\n按 Enter 在当前位置重新使能...")
         result = robot.enable_robot()
         if result:
-            beauty_print("已在当前位置使能（无突跳）", type="success")
+            beauty_print("已在当前位置使能", type="success")
         else:
             beauty_print("使能操作失败", type="warning")
 

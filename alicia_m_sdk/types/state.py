@@ -31,6 +31,8 @@ class JointState:
         run_status: 原始运行状态字节（由 RobotStatus 进一步解析）
         velocities: 7 个电机速度 (rad/s)，含夹爪
         torques: 7 个电机力矩 (N*m)，含夹爪
+        kps: 7 个电机位置环 Kp [0, 500]，含夹爪
+        kds: 7 个电机速度环 Kd [0, 5]，含夹爪
         linear_vels: 7 个电机插补速度 (rad/s)，含夹爪
         temperatures: 7 个电机线圈温度 (°C)，含夹爪
     """
@@ -40,6 +42,8 @@ class JointState:
     run_status: int                             # 原始运行状态字节
     velocities: Optional[List[float]] = None    # 7 个电机速度 (rad/s)，含夹爪
     torques: Optional[List[float]] = None       # 7 个电机力矩 (N*m)，含夹爪
+    kps: Optional[List[float]] = None           # 7 个电机位置环 Kp [0, 500]，含夹爪
+    kds: Optional[List[float]] = None           # 7 个电机速度环 Kd [0, 5]，含夹爪
     linear_vels: Optional[List[float]] = None   # 7 个电机插补速度 (rad/s)，含夹爪
     temperatures: Optional[List[float]] = None  # 7 个电机线圈温度 (°C)，含夹爪
 

@@ -381,11 +381,13 @@ class Device:
             positions = phys.get('positions', [0.0] * NUM_MOTORS)
             velocities = phys.get('velocities')
             torques = phys.get('torques')
+            kps = phys.get('kps')
+            kds = phys.get('kds')
             linear_vels = phys.get('linear_vels')
             temperatures = phys.get('temperatures')
 
             # 构造 JointState（positions[0:6]=关节角度, positions[6]=夹爪值）
-            # velocities/torques/linear_vels/temperatures 保留全部 7 个电机数据（含夹爪）
+            # 其余字段保留全部 7 个电机数据（含夹爪）
             joint_state = JointState(
                 angles=positions[:6] if len(positions) >= 6 else positions,
                 gripper=positions[6] if len(positions) >= 7 else 0.0,
@@ -393,6 +395,8 @@ class Device:
                 run_status=phys.get('run_status', 0),
                 velocities=velocities,
                 torques=torques,
+                kps=kps,
+                kds=kds,
                 linear_vels=linear_vels,
                 temperatures=temperatures,
             )
