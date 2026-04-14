@@ -18,6 +18,7 @@ from robocore.utils.backend import to_numpy
 
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
 DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
+# DEFAULT_TARGET_POSE = [0, 0.20, +0.22, 0.0, 0.707, 0.0, 0.707]
 
 
 def main():
@@ -53,9 +54,9 @@ def main():
                 T_current,
                 q_current,
                 method='dls',
-                max_iters=500,
-                pos_tol=1e-3,
-                ori_tol=1e-3,
+                max_iters=1000,
+                pos_tol=1e-2,
+                ori_tol=1e-2,
                 num_initial_guesses=5,
                 use_analytic_jacobian=True,
             )

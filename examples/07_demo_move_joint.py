@@ -11,6 +11,8 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 # 预设安全关节位置 (度)
 POSITION = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
+# POSITION = [0, 0, 0, 0, 0, 20]
+
 
 
 def main():

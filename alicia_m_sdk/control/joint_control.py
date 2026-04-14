@@ -579,15 +579,18 @@ class JointController:
 
         注意: 模式切换瞬间固件会短暂失能再使能，机械臂会因重力瞬间下坠。
 
-        安全序列:
-        1. 暂停轮询 → 发送切换指令 → 等待固件处理 → 读回验证
-        2. 恢复轮询，等待获取切换后的实际关节位置（可能已因重力下坠）
-        3. 用下坠后的真实位置发送安全首帧，防止瞬移回切换前的旧位置
+        安全序列（两阶段安全帧）:
+        1. 切换前捕获当前位置
+        2. 发送切换指令 → 短暂等待固件处理 → 立即发送早期安全帧
+           （用切换前位置锁定固件目标，防止固件用未初始化目标驱动电机乱飞）
+        3. 等待固件完全稳定 → 读回验证
+        4. 恢复轮询 → 用下坠后的真实位置发送精确安全帧
 
         实现要点:
         - 单指令切换 M0-M5（夹爪 M6 固件锁定 MIT，不参与切换）
         - 切换后读回验证，失败则重试一次
-        - 安全首帧必须在轮询恢复后发送，确保使用切换后的实际位置
+        - 早期安全帧: 切换后 0.5s 内发送，防止固件 MIT 控制器用零位目标驱动电机
+        - 精确安全帧: 轮询恢复后发送，修正重力下坠偏差
 
         Args:
             mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
@@ -607,6 +610,9 @@ class JointController:
             self._mode.value, mode.value,
         )
 
+        # 切换前捕获当前关节位置（用于早期安全帧）
+        pre_switch_angles = self._get_current_angles()
+
         # 暂停轮询，避免与模式切换指令交叉
         self._device.pause_polling()
 
@@ -618,13 +624,32 @@ class JointController:
 
             # 单指令切换关节电机（motor 1~6，夹爪 M6 固件锁定 MIT 不参与）
             self._send_mode_switch_command(ctrl_mode_value)
-            time.sleep(2.0)
+            time.sleep(0.5)
+
+            # 早期安全帧: 用切换前的位置立即锁定固件目标
+            # 固件切入新模式后 PD 控制器可能使用未初始化的目标位置（如全零），
+            # 导致 torque = kp * (0 - 当前位置)，机械臂瞬间飞向零位。
+            # 在验证之前抢先发送安全帧，将目标初始化为切换前的实际位置。
+            # 直接调用目标模式的锁定方法，不依赖 self._mode 当前值。
+            if mode == ControlMode.MIT:
+                self._send_position_latch_mit(pre_switch_angles)
+            else:
+                self._send_position_latch_pv(pre_switch_angles)
+            logger.debug("早期安全帧已发送（切换前位置锁定）")
+
+            time.sleep(1.5)
 
             # 读回验证：确认关节电机已切换成功
             if not self._verify_mode_switch(ctrl_mode_value):
                 logger.warning("模式切换未完全生效，重试一次")
                 self._send_mode_switch_command(ctrl_mode_value)
-                time.sleep(2.0)
+                time.sleep(0.5)
+                # 重试后同样立即发送早期安全帧
+                if mode == ControlMode.MIT:
+                    self._send_position_latch_mit(pre_switch_angles)
+                else:
+                    self._send_position_latch_pv(pre_switch_angles)
+                time.sleep(1.5)
 
             # 更新内部模式
             old_mode = self._mode
@@ -632,10 +657,9 @@ class JointController:
         finally:
             self._device.resume_polling()
 
-        # 等待轮询线程获取切换后的实际关节位置
+        # 精确安全帧: 等待轮询线程获取切换后的实际关节位置
         # 模式切换期间固件短暂失能，机械臂可能因重力下坠，
-        # 必须用下坠后的实际位置（而非切换前的过期缓存）初始化固件目标，
-        # 否则机械臂会瞬移回切换前的旧位置
+        # 用下坠后的真实位置（而非切换前的过期缓存）修正固件目标
         time.sleep(0.2)
         current = self._get_current_angles()
         self._send_safety_first_frame(current)
