@@ -42,6 +42,9 @@ class Teleoperation:
             两臂均为 0-1000 量程时使用默认 1.0
         joint_signs: 6 个关节的符号乘数 (+1/-1)，补偿 leader/follower 关节方向差异
         joint_offsets_rad: 6 个关节的弧度偏移量，加到映射后的 follower 关节值上
+        joint_mapper: 自定义关节映射函数，签名 ``(List[float]) -> List[float]``。
+            输入为 leader 关节角度（弧度），输出为 follower 关节角度（弧度）。
+            设置后将替代 joint_signs / joint_offsets_rad 的默认映射逻辑
         use_interpolation: MIT 模式是否使用线性轨迹插值（默认 False）。
             启用时发送 6 地址帧，运动更平滑但可能降低重力负载关节的刚度
     """
@@ -55,6 +58,7 @@ class Teleoperation:
         gripper_scale: float = 1.0,
         joint_signs: Optional[List[float]] = None,
         joint_offsets_rad: Optional[List[float]] = None,
+        joint_mapper: Optional[Callable[[List[float]], List[float]]] = None,
         use_interpolation: bool = False,
     ):
         self.leader = leader
@@ -64,6 +68,7 @@ class Teleoperation:
         self.gripper_scale = gripper_scale
         self.joint_signs = joint_signs or [1.0] * 6
         self.joint_offsets_rad = joint_offsets_rad or [0.0] * 6
+        self.joint_mapper = joint_mapper
         self.use_interpolation = use_interpolation
 
         self._running = threading.Event()
@@ -83,7 +88,12 @@ class Teleoperation:
     # ========== 内部映射 ==========
 
     def _map_joints(self, leader_joints: List[float]) -> List[float]:
-        """leader → follower 关节角度映射（符号翻转 + 偏移）"""
+        """leader → follower 关节角度映射
+
+        若设置了 joint_mapper 则使用自定义映射，否则使用符号翻转 + 偏移。
+        """
+        if self.joint_mapper is not None:
+            return self.joint_mapper(leader_joints)
         return [
             sign * angle + offset
             for angle, sign, offset in zip(
