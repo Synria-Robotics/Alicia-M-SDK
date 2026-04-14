@@ -1,7 +1,9 @@
 """06_demo_move_gripper.py — 夹爪控制
 
 演示夹爪的打开、关闭、半开操作。
-PV 和 MIT 模式下均可运行，MIT 模式支持逐电机设置阻抗参数。
+夹爪电机 M6 固件锁定 MIT 模式，无须切换关节控制模式，PV 和 MIT 下均可运行。
+
+MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分保持当前位置不动。
 """
 
 import time
@@ -19,16 +21,9 @@ MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 def main():
     beauty_print("Demo: 夹爪控制", type="module")
 
-    # 创建并连接机器人（不指定模式，避免自动切换）
+    # 创建并连接机器人（无须指定模式，夹爪电机固件锁定 MIT）
     robot = alicia_m_sdk.create_robot()
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
-
-    # 需要 MIT 模式，若当前不是则提示用户确认后切换
-    if robot.control_mode.value != "mit":
-        beauty_print("本示例需要 MIT 模式，切换过程中机械臂将短暂失能", type="warning")
-        input("按 Enter 切换到 MIT 模式...")
-        robot.switch_mode("mit")
-        beauty_print("已切换到 MIT 模式", type="success")
 
     try:
         # --- 半开夹爪 (500) ---
