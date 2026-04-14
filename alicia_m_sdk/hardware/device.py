@@ -215,13 +215,13 @@ class Device:
         params: List[MitParams],
         linear_velocities: Optional[List[float]] = None,
     ) -> None:
-        """发送 MIT 全参数帧（fire-and-forget）
+        """发送 MIT 全参数帧（fire-and-forget，始终 6 地址）
 
         Args:
             aim: 目标部位
             params: 7 个电机的 MIT 参数
             linear_velocities: 线性轨迹插值速度 (rad/s)，
-                提供时合并为 6 地址单帧 (pos+vel+tor+kp+kd+linear_vel)
+                None 时填充清零信号 (0xFFFF) 禁用插值
         """
         # 解包 MitParams 为 codec 所需的独立列表
         positions = [p.pos_ref for p in params]

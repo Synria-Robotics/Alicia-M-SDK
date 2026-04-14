@@ -126,13 +126,11 @@ class Teleoperation:
     def _control_loop(self) -> None:
         """后台控制循环主体
 
-        插值模式策略：首帧发送 6 地址帧设定固件线性插值速度，
-        后续帧仅发送 5 地址帧更新目标位置，固件保留插值速度持续生效，
-        避免每帧重置插值状态导致 PD 刚度丧失。
+        每帧发送 6 地址 MIT 帧。插值模式下每帧携带线性轨迹速度，
+        非插值模式下线性速度填充清零信号 (0xFFFF)。
         """
         interval = 1.0 / self.frequency_hz
         mode_str = self.follower.control_mode.value.upper()
-        interp_sent = False  # 插值首帧是否已发送
 
         logger.info(
             "遥操作控制循环启动: %.0f Hz, %s 模式, 插值=%s",
@@ -152,13 +150,6 @@ class Teleoperation:
                 follower_joints = self._map_joints(state.angles)
                 follower_gripper = self._map_gripper(state.gripper)
 
-                # 插值模式：首帧发 6 地址帧设速度，后续 5 地址帧更新位置
-                if self.use_interpolation and not interp_sent:
-                    use_interp_this_frame = True
-                    interp_sent = True
-                else:
-                    use_interp_this_frame = False
-
                 # 发送到 follower（PV/MIT 由 follower 当前模式自动路由）
                 self.follower.set_robot_state(
                     target_joints=follower_joints,
@@ -167,7 +158,7 @@ class Teleoperation:
                     speed=self.follower_speed,
                     gripper_speed=self.follower_speed,
                     wait_for_completion=False,
-                    use_interpolation=use_interp_this_frame,
+                    use_interpolation=self.use_interpolation,
                     kp=self.kp,
                     kd=self.kd,
                     torque=self.torque,

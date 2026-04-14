@@ -31,7 +31,6 @@ from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
 from ..control.joint_control import JointController
 from ..control.trajectory_executor import TrajectoryExecutor
-from ..control.teaching import DragTeaching
 from .. import kinematics as kin_module
 from .. import planning as plan_module
 
@@ -61,7 +60,6 @@ class SynriaRobotAPI:
             joint_limits_upper=config.joint_limits_upper,
         )
         self._traj_executor = TrajectoryExecutor(self._device)
-        self._teaching = DragTeaching(self._device, self._joint_ctrl)
         self._robot_model = robot_model
         self._connected = False
 
@@ -341,7 +339,7 @@ class SynriaRobotAPI:
     ) -> None:
         """MIT 全参数直接发送（低延迟）
 
-        每帧发送完整的 5 参数 MIT 数据，不等待、不插值。
+        每帧发送 6 地址 MIT 帧（线性速度填清零信号），不等待、不插值。
         调用方需自行维持高频发送（≥200Hz）。
 
         Args:
@@ -524,20 +522,6 @@ class SynriaRobotAPI:
             if r.get('success'):
                 q_current = r['q'].tolist()
         return {'results': results, 'num_solved': sum(1 for r in results if r.get('success'))}
-
-    # ========== 示教 ==========
-
-    def start_teaching(self, interval: float = 0.05) -> None:
-        """开始拖动示教录制"""
-        self._teaching.start_recording(interval)
-
-    def stop_teaching(self) -> List[List[float]]:
-        """停止示教，返回路点"""
-        return self._teaching.stop_recording()
-
-    def replay_teaching(self, waypoints: List[List[float]], hz: float = 200) -> bool:
-        """回放示教轨迹"""
-        return self._teaching.replay(waypoints, hz)
 
     # ========== 状态打印 ==========
 

@@ -68,7 +68,7 @@ alicia_m_sdk/
 │   ├── __init__.py
 │   ├── joint_control.py            # 关节控制：关节运动、夹爪控制、回零、等待完成
 │   ├── trajectory_executor.py      # 轨迹执行器：关节空间/笛卡尔空间轨迹的硬件回放
-│   └── teaching.py                 # 示教模式：拖动示教、路点录制
+│   └── teleoperation.py            # 遥操作：主从跟随控制
 │
 ├── types/                          # 【类型定义层】全局数据结构（新增）
 │   ├── __init__.py
@@ -102,9 +102,9 @@ examples/                               # 示例脚本
 ├── 08_demo_move_full_arm.py            # 关节+夹爪协同控制（PV + MIT）
 ├── 09_demo_forward_kinematics.py       # 正运动学
 ├── 10_demo_inverse_kinematics.py       # 逆运动学
-├── 11_demo_drag_teaching.py            # 拖动示教与回放
-├── 12_demo_sparkvis.py                 # SparkVis 可视化
-└── 13_demo_reset_zero.py              # 零位标定
+├── 13_demo_teleop.py                   # 遥操作
+├── 14_demo_reset_zero.py               # 零位标定
+└── 15_demo_teleop_mapped.py            # 遥操作 + URDF 限位映射
 ```
 
 ---
@@ -487,7 +487,7 @@ class Device:
 
     def send_mit(self, aim: int, params: List[MitParams]) -> None:
         """发送 MIT 全参数帧（pos+vel+torque+kp+kd，fire-and-forget）"""
-        msg = JointControlRequest(aim, start_addr=0x00, addr_count=5, ...)
+        msg = JointControlRequest(aim, start_addr=0x00, addr_count=6, ...)
         self.send_frame(self._codec.encode_joint_control(msg))
 
     def send_linear_velocity(self, aim: int, velocities: List[float]) -> None:
@@ -675,7 +675,7 @@ class JointController:
                  gripper: Optional[float] = None) -> None:
         """MIT 全参数直接发送（标准 MIT 接口）
 
-        发送一帧包含全部 5 参数的 MIT 帧。不做等待，不做插值。
+        发送一帧 6 地址 MIT 帧（线性速度填清零信号）。不做等待，不做插值。
         用于遥操作、力控、轨迹回放等需要持续高频发帧的场景。
 
         Args:
@@ -794,32 +794,6 @@ class TrajectoryExecutor:
 
     def stop(self) -> None:
         """紧急停止当前轨迹"""
-```
-
-#### 5.3.3 `teaching.py` — 示教模式
-
-```python
-class DragTeaching:
-    """拖动示教
-
-    流程：
-    1. 确保 MIT 模式 → 发送 0x05 卸力（kp=kd=0）
-    2. 后台录制线程以固定间隔读取关节位置
-    3. 用户手动拖动机械臂
-    4. 停止录制 → 发送 0x05 恢复力矩
-    """
-
-    def __init__(self, device: Device, joint_controller: JointController):
-        ...
-
-    def start_recording(self, interval: float = 0.05) -> None:
-        """进入无力矩状态并开始录制路点"""
-
-    def stop_recording(self) -> List[List[float]]:
-        """停止录制，恢复力矩，返回路点列表"""
-
-    def replay(self, waypoints: List[List[float]], hz: float = 200) -> bool:
-        """回放录制的路点（MIT 全参数帧高频发送）"""
 ```
 
 ---
@@ -1072,7 +1046,7 @@ class SynriaRobotAPI:
                          gripper: Optional[float] = None) -> None:
         """MIT 全参数直接发送（低延迟，用于遥操作/力控/高频控制）
 
-        每帧发送完整的 5 参数 MIT 数据。不等待、不插值。
+        每帧发送 6 地址 MIT 帧（线性速度填清零信号）。不等待、不插值。
         调用方需自行维持高频发送（≥200Hz）。
         """
         # → self._joint_ctrl.send_mit(...)
@@ -1394,7 +1368,7 @@ def create_robot(
 
 ### 6.3 控制层从 API 层分离
 
-**决策**：`JointController`、`TrajectoryExecutor`、`DragTeaching` 独立为控制层。
+**决策**：`JointController`、`TrajectoryExecutor`、`Teleoperation` 独立为控制层。
 
 **原因**：
 - 原 `SynriaRobotAPI` 有 1100+ 行，关节控制、轨迹执行、等待逻辑全部混在一起
@@ -1809,7 +1783,7 @@ mode = 0x02 0x00 0x00 0x00  → PV（位置速度）模式
 
 **piper_sdk 参考对照**：
 - piper PV → `JointCtrl(j1..j6)`: 3 个 CAN 帧（0x155-0x157），每帧 2 个关节，仅位置
-- piper MIT → `JointMitCtrl(joint, pos, vel, kp, kd, t)`: 每关节 1 个 CAN 帧（0x15A-0x15F），全 5 参数
+- piper MIT → `JointMitCtrl(joint, pos, vel, kp, kd, t)`: 每关节 1 个 CAN 帧（0x15A-0x15F），全 6 地址
 - 云擎 PV → 1 个串口帧，7 电机，每电机 pos+vel（4B）
 - 云擎 MIT → 1 个串口帧，7 电机，每电机 pos+vel+torque+kp+kd（10B）
 
@@ -1874,14 +1848,14 @@ PV 控制帧 (start_addr=0x00, addr_count=2: 位置+速度):
 > 标准 MIT 阻抗控制器模型：
 > `τ = kp × (pos_ref - pos_cur) + kd × (vel_ref - vel_cur) + t_ref`
 > 
-> 每帧都发送全部 5 参数，上层可实时调整增益和前馈，实现柔顺控制、力控、遥操作等高级功能。
+> 每帧都发送全部 6 地址，上层可实时调整增益和前馈，实现柔顺控制、力控、遥操作等高级功能。
 
 #### 9.3.1 MIT 控制帧结构（标准全参数帧）
 
 **每一帧都携带全部 5 个参数**，这是 MIT 的标准做法：
 
 ```
-MIT 控制帧 (start_addr=0x00, addr_count=5: pos+vel+torque+kp+kd):
+MIT 控制帧 (start_addr=0x00, addr_count=6: pos+vel+torque+kp+kd+linear_vel):
 [0xAA][0x06][aim|0x80][0x48][0x00][0x05]
   [M0: pos(2B) vel(2B) torque(2B) kp(2B) kd(2B)]   ← 10字节/电机
   [M1: pos(2B) vel(2B) torque(2B) kp(2B) kd(2B)]
@@ -2015,7 +1989,7 @@ class JointController:
 
         以最低延迟发送全参数 MIT 帧。
         遥操作端以高频率（≥200Hz）调用此方法。
-        每帧全部 5 参数都可独立变化。
+        每帧全部 6 地址都可独立变化。
 
         Args:
             joint_params: 7 个电机的 MIT 参数
@@ -2273,24 +2247,14 @@ def encode_kd(kd: float) -> int:
 → 断开
 ```
 
-#### `11_demo_drag_teaching.py` — 拖动示教与回放
-```
-连接（MIT 模式）
-→ 用户 Enter → 切换 MIT 无力矩（Kp=0, Kd=0），提示用户拖动机械臂
-→ 后台开始录制路点
-→ 用户按 q → 停止录制，展示轨迹图像
-→ 用户 Enter → 重新使能力矩，按录制轨迹回放
-→ 回放完成 → 断开
-```
-
-#### `12_demo_sparkvis.py` — SparkVis 可视化
+#### `13_demo_teleop.py` — 遥操作
 ```
 连接
 → 启动 WebSocket 服务 → 实时推送关节状态到 SparkVis
 → Ctrl+C 退出
 ```
 
-#### `13_demo_reset_zero.py` — 零位标定
+#### `14_demo_reset_zero.py` — 零位标定
 ```
 方案一（MIT 模式，当前可用）:
   连接（MIT 模式）
@@ -2390,7 +2354,7 @@ if __name__ == "__main__":
 ### 阶段三：控制层
 7. 实现 `control/joint_control.py`（含 PV/MIT 双模式支持）
 8. 实现 `control/trajectory_executor.py`（含 PV/MIT 轨迹执行差异）
-9. 实现 `control/teaching.py`（MIT 无力矩模式 + 路点录制）
+9. 实现 `control/teleoperation.py`（遥操作控制器）
 
 ### 阶段四：API 层与接口
 10. 实现 `kinematics.py` 和 `planning.py`（RoboCore 封装）
@@ -2415,7 +2379,7 @@ if __name__ == "__main__":
 | `hardware/comm_manager.py` | _(移除)_ | 合并到 `device.py` |
 | `execution/hardware_executor.py` | `control/trajectory_executor.py` | 统一轨迹执行 |
 | `execution/trajectory_executor.py` | `control/trajectory_executor.py` | 合并 |
-| `execution/drag_teaching.py` | `control/teaching.py` | 精简 |
+| `execution/drag_teaching.py` | _(已废弃)_ | 拖动示教功能已移除 |
 | `execution/sparkvis.py` | _(移除或作为可选插件)_ | 非核心功能 |
 | `utils/control_utils.py` | `utils/validation.py` | 重命名，职责更清晰 |
 | `utils/unit_conversion.py` | `utils/conversion.py` | 扩展为含协议值转换 |
