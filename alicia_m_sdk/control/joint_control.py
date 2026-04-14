@@ -297,12 +297,11 @@ class JointController:
     ) -> bool:
         """MIT 模式点位运动
 
-        支持两种运动方式:
+        始终发送 6 地址帧 (pos+vel+torque+kp+kd+linear_vel)，支持两种运动方式:
         - 线性轨迹插值 (use_interpolation=True, 默认):
-          发送 6 地址单帧 (pos+vel+torque+kp+kd+linear_vel)，
-          vel=0，由 linear_vel 指定插值速度，固件按该速度线性到达目标。
+          linear_vel 为用户指定的插值速度，固件按该速度线性到达目标。
         - 直接 PD 控制 (use_interpolation=False):
-          发送 MIT 全参数帧 (pos=目标, kp/kd=自定义或默认)，
+          linear_vel 填充清零信号 (0xFFFF)，禁用固件插值，
           由 PD 控制器驱动关节趋近目标，发送后立即返回（不等待到达）。
 
         MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
@@ -358,9 +357,9 @@ class JointController:
         torques = _normalize_mit_param(torque, "torque", default=0.0)
         vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
 
-        # 步骤3: 构建 MIT 帧
-        #   插值模式: 合并线性速度为单帧 (addr_count=6)
-        #   直接 PD:  不含线性速度 (addr_count=5)
+        # 步骤3: 构建 MIT 帧（始终 6 地址）
+        #   插值模式: 线性速度为用户指定值
+        #   直接 PD:  线性速度填充清零信号 (0xFFFF)
         mit_params = []
         for i in range(NUM_JOINTS):
             filled_kp, filled_kd = _fill_mit_defaults(i, kps[i], kds[i])

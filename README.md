@@ -58,16 +58,18 @@ conda create -n msdk python=3.10
 conda activate msdk
 ```
 
-**方法一：从PyPI安装：**
-
-```bash
-pip install alicia_m_sdk
-```
-
-**方法二：从源码安装（开发模式）：**
+**方法一（推荐）：从源码安装（开发模式）：**
 
 ```bash
 pip install -e .
+```
+
+源码安装可随时修改代码并立即生效，适合开发和调试。
+
+**方法二：从 PyPI 安装：**
+
+```bash
+pip install alicia_m_sdk
 ```
 
 ### 基本使用

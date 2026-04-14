@@ -17,7 +17,7 @@ from .constants import (
     FUNC_VERSION_REQ, FUNC_VERSION_RESP,
     AIM_LEADER, AIM_FOLLOWER,
     ADDR_POSITION, ADDR_VELOCITY, ADDR_TORQUE, ADDR_KP, ADDR_KD,
-    ADDR_LINEAR_VEL, ADDR_TEMPERATURE,
+    ADDR_LINEAR_VEL, ADDR_TEMPERATURE, LINEAR_VEL_CLEAR,
     PLACEHOLDER, ENABLE_ON, ENABLE_OFF, FEEDBACK_BIT,
     NUM_MOTORS,
     VERSION_SERIAL_LEN, VERSION_HARDWARE_LEN, VERSION_FIRMWARE_LEN,
@@ -35,6 +35,7 @@ from .messages import (
 from alicia_m_sdk.utils.conversion import (
     encode_position, decode_position,
     encode_velocity, decode_velocity,
+    encode_linear_velocity, decode_linear_velocity,
     encode_torque, decode_torque,
     encode_kp, decode_kp,
     encode_kd, decode_kd,
@@ -200,7 +201,7 @@ class MessageCodec:
         """编码关节控制请求（写入目标状态）
 
         PV 帧: addr_count=2, 每电机 4 字节 (pos 16bit + vel 12bit)
-        MIT 帧: addr_count=5, 每电机 10 字节 (pos 16bit + vel 12bit + torque 12bit + kp 16bit + kd 16bit)
+        MIT 帧: addr_count=6, 每电机 12 字节 (pos + vel + torque + kp + kd + linear_vel)
 
         12bit 数据存储方式: 2 字节小端序，高 4 位保留置零，低 12 位为有效数据。
 
@@ -466,10 +467,11 @@ class MessageCodec:
         kds: List[float],
         linear_velocities: Optional[List[float]] = None,
     ) -> Frame:
-        """编码 MIT 模式控制帧（物理量输入，全参数）
+        """编码 MIT 模式控制帧（物理量输入，全参数，始终 6 地址）
 
-        无线性速度时: addr_count=5, 每电机 10 字节 (pos + vel + torque + kp + kd)
-        含线性速度时: addr_count=6, 每电机 12 字节 (pos + vel + torque + kp + kd + linear_vel)
+        始终发送 addr_count=6 的帧 (pos + vel + torque + kp + kd + linear_vel)。
+        当 linear_velocities 为 None 时，线性轨迹速度填充清零信号 (0xFFFF)，
+        通知固件禁用线性轨迹插值。
 
         Args:
             aim: 目标部位
@@ -479,7 +481,7 @@ class MessageCodec:
             kps: 7 个电机的 Kp 增益
             kds: 7 个电机的 Kd 增益
             linear_velocities: 7 个电机的线性轨迹插值速度 (rad/s)，
-                None 时不含线性速度（addr_count=5）
+                None 时填充清零信号 (0xFFFF) 禁用插值
 
         Returns:
             编码后的 Frame 对象
@@ -503,16 +505,17 @@ class MessageCodec:
             tor_raw = encode_torque(torques[i], motor_index=i)
             kp_raw = encode_kp(kps[i])
             kd_raw = encode_kd(kds[i])
-            data = [pos_raw, vel_raw, tor_raw, kp_raw, kd_raw]
+            # 线性轨迹速度: 有值时编码 [0, 10] rad/s，无值时填充 0xFFFF 清零信号
             if linear_velocities is not None:
-                data.append(encode_velocity(linear_velocities[i]))
-            motor_data.append(data)
+                lv_raw = encode_linear_velocity(linear_velocities[i])
+            else:
+                lv_raw = LINEAR_VEL_CLEAR
+            motor_data.append([pos_raw, vel_raw, tor_raw, kp_raw, kd_raw, lv_raw])
 
-        addr_count = 6 if linear_velocities is not None else 5
         return self.encode_joint_control(JointControlRequest(
             aim=aim,
             start_addr=ADDR_POSITION,
-            addr_count=addr_count,
+            addr_count=6,
             motor_data=motor_data,
         ))
 
@@ -524,7 +527,7 @@ class MessageCodec:
         ADDR_TORQUE:     ("torques",     lambda raw, i: decode_torque(raw, motor_index=i)),
         ADDR_KP:         ("kps",         lambda raw, i: decode_kp(raw)),
         ADDR_KD:         ("kds",         lambda raw, i: decode_kd(raw)),
-        ADDR_LINEAR_VEL: ("linear_vels", lambda raw, i: decode_velocity(raw)),
+        ADDR_LINEAR_VEL: ("linear_vels", lambda raw, i: decode_linear_velocity(raw)),
         ADDR_TEMPERATURE:("temperatures",lambda raw, i: decode_temperature(raw)),
     }
 

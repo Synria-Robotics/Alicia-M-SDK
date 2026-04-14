@@ -38,6 +38,7 @@ ADDR_KP            = 0x03      # 位置环 kp          16bit  0~500
 ADDR_KD            = 0x04      # 速度环 kd          16bit  0~5
 ADDR_LINEAR_VEL    = 0x05      # 线性轨迹速度       12bit  rad/s
 ADDR_TEMPERATURE   = 0x06      # 线圈温度           16bit  只读
+LINEAR_VEL_CLEAR   = 0xFFFF    # 线性轨迹速度清零信号（全字节 0xFF）
 
 # === 0x11 指令：电机参数地址表 ===
 MOTOR_PARAM_ACCEL       = 0x05  # 加速度 (float)

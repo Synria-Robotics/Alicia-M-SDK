@@ -13,6 +13,9 @@ from .conversion import (
     # 速度
     encode_velocity,
     decode_velocity,
+    # 线性轨迹速度
+    encode_linear_velocity,
+    decode_linear_velocity,
     # 力矩
     encode_torque,
     decode_torque,
@@ -60,6 +63,8 @@ __all__ = [
     "decode_position",
     "encode_velocity",
     "decode_velocity",
+    "encode_linear_velocity",
+    "decode_linear_velocity",
     "encode_torque",
     "decode_torque",
     "encode_kp",
