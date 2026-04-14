@@ -5,7 +5,7 @@
 设计原则:
 - PV = 「发后不管」: 发送目标+速度，固件自行到达
 - MIT = 「持续控制」: 每帧发送完整阻抗参数，SDK 持有控制权
-- 所有可能导致关节突变的操作，内置「位置锁定首帧」安全序列
+- 模式切换流程: 失能 → 切换 → 使能，固件侧处理目标位置初始化
 - 输入超限时优先裁剪+警告（而非直接拒绝）
 """
 
@@ -111,7 +111,7 @@ class JointController:
     """关节级运动控制
 
     提供 PV 模式和 MIT 模式的独立控制方法，以及两种模式共用的通用方法。
-    所有安全序列由本类内部自动执行，用户无需手动处理。
+    模式切换采用失能→切换→使能流程，固件侧处理目标位置初始化。
 
     Args:
         device: 设备抽象层实例（通过 Device 发送指令，读取状态缓存）
@@ -409,15 +409,6 @@ class JointController:
 
     # ========== 通用方法 ==========
 
-    def send_safety_latch(self) -> None:
-        """发送安全首帧（用当前位置初始化固件内部目标）
-
-        根据当前模式自动选择 MIT 或 PV 位置锁定帧。
-        用于连接后、模式同步后等场景，防止首次运动从旧目标突跳。
-        """
-        current = self._get_current_angles()
-        self._send_safety_first_frame(current)
-
     def go_home(self, speed: float = 40.0) -> bool:
         """回零位（自动适配当前模式）
 
@@ -585,21 +576,13 @@ class JointController:
     def torque_on(self, joints: Optional[List[int]] = None) -> bool:
         """恢复力矩（仅 MIT 模式，发送 0x05 指令）
 
-        安全序列:
-        1. 读取当前关节位置
-        2. 发送 0x05 恢复指令（固件内部恢复 kp/kd）
-        3. 立即以当前位置发送 MIT 帧（防止弹回旧位置）
-
         Args:
             joints: 需要恢复力矩的关节索引列表，None 表示全部
 
         Returns:
             True=成功恢复
         """
-        # 步骤1: 读取当前位置
-        current = self._get_current_angles()
-
-        # 步骤2: 发送 0x05 恢复力矩指令（固件 1-indexed: 1~7）
+        # 发送 0x05 恢复力矩指令（固件 1-indexed: 1~7）
         if joints is None:
             start_joint = 1
             joint_count = NUM_MOTORS
@@ -615,34 +598,21 @@ class JointController:
         self._device.send_frame(frame)
         time.sleep(0.05)
 
-        # 步骤3: 安全序列 — 以当前位置发送首帧（防止突跳）
-        self._send_position_latch_mit(current)
-
         logger.info("力矩恢复完成: joints=%s", joints or "全部")
         return True
 
     def enable(self) -> bool:
         """使能机器人（发送 0x09 指令，任何模式可用）
 
-        安全序列:
-        1. 发送 0x09 使能指令
-        2. 读取当前关节位置
-        3. 以当前位置发送首帧（防止突跳到旧目标位置）
-
         Returns:
             True=使能成功
         """
-        # 步骤1: 发送使能指令（固件不回复确认帧，fire-and-forget）
         frame = self._device.codec.encode_enable_request(EnableRequest(
             aim=self._device.aim,
             enable=True,
         ))
         self._device.send_frame(frame)
         time.sleep(0.1)  # 等待固件处理使能
-
-        # 步骤2: 读取当前位置并发送安全首帧
-        current = self._get_current_angles()
-        self._send_safety_first_frame(current)
 
         logger.info("使能完成")
         return True
@@ -668,20 +638,11 @@ class JointController:
 
         仅切换关节电机 M0-M5，夹爪电机 M6 固件锁定为 MIT 模式不可切换。
 
-        注意: 模式切换瞬间固件会短暂失能再使能，机械臂会因重力瞬间下坠。
-
-        安全序列（两阶段安全帧）:
-        1. 切换前捕获当前位置
-        2. 发送切换指令 → 短暂等待固件处理 → 立即发送早期安全帧
-           （用切换前位置锁定固件目标，防止固件用未初始化目标驱动电机乱飞）
-        3. 等待固件完全稳定 → 读回验证
-        4. 恢复轮询 → 用下坠后的真实位置发送精确安全帧
-
-        实现要点:
-        - 单指令切换 M0-M5（夹爪 M6 固件锁定 MIT，不参与切换）
-        - 切换后读回验证，失败则重试一次
-        - 早期安全帧: 切换后 0.5s 内发送，防止固件 MIT 控制器用零位目标驱动电机
-        - 精确安全帧: 轮询恢复后发送，修正重力下坠偏差
+        切换流程:
+        1. 失能所有电机
+        2. 发送模式切换指令
+        3. 读回验证（失败重试一次）
+        4. 使能所有电机
 
         Args:
             mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
@@ -697,12 +658,12 @@ class JointController:
             return True
 
         logger.warning(
-            "即将切换控制模式: %s → %s（切换瞬间机械臂会短暂卸力）",
+            "即将切换控制模式: %s → %s",
             self._mode.value, mode.value,
         )
 
-        # 切换前捕获当前关节位置（用于早期安全帧）
-        pre_switch_angles = self._get_current_angles()
+        # 步骤1: 失能所有电机
+        self.disable()
 
         # 暂停轮询，避免与模式切换指令交叉
         self._device.pause_polling()
@@ -713,34 +674,15 @@ class JointController:
             # 清空串口缓冲区，防止残留帧干扰模式切换验证
             self._device.flush()
 
-            # 单指令切换关节电机（motor 1~6，夹爪 M6 固件锁定 MIT 不参与）
+            # 步骤2: 发送模式切换指令（M0-M5，夹爪 M6 固件锁定 MIT 不参与）
             self._send_mode_switch_command(ctrl_mode_value)
             time.sleep(0.5)
 
-            # 早期安全帧: 用切换前的位置立即锁定固件目标
-            # 固件切入新模式后 PD 控制器可能使用未初始化的目标位置（如全零），
-            # 导致 torque = kp * (0 - 当前位置)，机械臂瞬间飞向零位。
-            # 在验证之前抢先发送安全帧，将目标初始化为切换前的实际位置。
-            # 直接调用目标模式的锁定方法，不依赖 self._mode 当前值。
-            if mode == ControlMode.MIT:
-                self._send_position_latch_mit(pre_switch_angles)
-            else:
-                self._send_position_latch_pv(pre_switch_angles)
-            logger.debug("早期安全帧已发送（切换前位置锁定）")
-
-            time.sleep(1.5)
-
-            # 读回验证：确认关节电机已切换成功
+            # 步骤3: 读回验证
             if not self._verify_mode_switch(ctrl_mode_value):
                 logger.warning("模式切换未完全生效，重试一次")
                 self._send_mode_switch_command(ctrl_mode_value)
                 time.sleep(0.5)
-                # 重试后同样立即发送早期安全帧
-                if mode == ControlMode.MIT:
-                    self._send_position_latch_mit(pre_switch_angles)
-                else:
-                    self._send_position_latch_pv(pre_switch_angles)
-                time.sleep(1.5)
 
             # 更新内部模式
             old_mode = self._mode
@@ -748,12 +690,9 @@ class JointController:
         finally:
             self._device.resume_polling()
 
-        # 精确安全帧: 等待轮询线程获取切换后的实际关节位置
-        # 模式切换期间固件短暂失能，机械臂可能因重力下坠，
-        # 用下坠后的真实位置（而非切换前的过期缓存）修正固件目标
+        # 步骤4: 使能所有电机，等待轮询获取使能后的新鲜状态
+        self.enable()
         time.sleep(0.2)
-        current = self._get_current_angles()
-        self._send_safety_first_frame(current)
 
         logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
         return True
@@ -896,82 +835,3 @@ class JointController:
             velocities.append(sign * magnitude)
         return velocities
 
-    def _build_hold_position_mit(
-        self, current_angles: List[float]
-    ) -> List[MitParams]:
-        """构建「保持当前位置」的 MIT 参数列表
-
-        用于安全首帧: pos=当前位置, vel=0, t=0, kp=默认, kd=默认
-
-        Args:
-            current_angles: 当前 6 个关节角度 (rad)
-
-        Returns:
-            7 个电机的 MitParams 列表
-        """
-        params = []
-        for i in range(NUM_JOINTS):
-            kp, kd = _fill_mit_defaults(i, None, None)
-            params.append(MitParams(
-                pos_ref=current_angles[i],
-                vel_ref=0.0,
-                t_ref=0.0,
-                kp=kp,
-                kd=kd,
-            ))
-        # 夹爪: 保持当前位置
-        state = self._device.joint_state
-        current_gripper = state.gripper if state else 0.0
-        gripper_kp, gripper_kd = _fill_mit_defaults(NUM_JOINTS, None, None)
-        params.append(MitParams(
-            pos_ref=current_gripper,
-            vel_ref=0.0,
-            t_ref=0.0,
-            kp=gripper_kp,
-            kd=gripper_kd,
-        ))
-        return params
-
-    def _send_position_latch_mit(self, current_angles: List[float]) -> None:
-        """发送 MIT 位置锁定帧（安全首帧）
-
-        以当前位置为目标，vel=0, t=0, kp/kd=默认值。
-        用于恢复力矩、使能、模式切换后防止关节突跳。
-
-        Args:
-            current_angles: 当前 6 个关节角度 (rad)
-        """
-        params = self._build_hold_position_mit(current_angles)
-        self._device.send_mit(self._device.aim, params)
-        logger.debug("MIT 安全首帧已发送 (位置锁定)")
-
-    def _send_position_latch_pv(self, current_angles: List[float]) -> None:
-        """发送 PV 位置锁定帧（安全首帧）
-
-        以当前位置为目标，vel=0。
-        用于使能、模式切换后防止关节突跳。
-
-        Args:
-            current_angles: 当前 6 个关节角度 (rad)
-        """
-        positions = list(current_angles)
-        velocities = [0.0] * NUM_JOINTS
-        # 夹爪
-        state = self._device.joint_state
-        current_gripper = state.gripper if state else 0.0
-        positions.append(current_gripper)
-        velocities.append(0.0)
-
-        self._device.send_pv(self._device.aim, positions, velocities)
-        logger.debug("PV 安全首帧已发送 (位置锁定)")
-
-    def _send_safety_first_frame(self, current_angles: List[float]) -> None:
-        """根据当前模式发送安全首帧
-
-        Args:
-            current_angles: 当前 6 个关节角度 (rad)
-        """
-        if self._mode == ControlMode.MIT:
-            self._send_position_latch_mit(current_angles)
-        else:
-            self._send_position_latch_pv(current_angles)

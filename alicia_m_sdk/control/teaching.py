@@ -4,7 +4,7 @@
 1. 确保 MIT 模式 → 发送 0x05 卸力 (kp=kd=0)
 2. 后台录制线程以固定间隔读取关节位置
 3. 用户手动拖动机械臂
-4. 停止录制 → 发送 0x05 恢复力矩（安全序列: 首帧=当前位置）
+4. 停止录制 → 发送 0x05 恢复力矩
 
 回放使用 MIT 全参数帧高频发送。
 """
@@ -95,10 +95,6 @@ class DragTeaching:
     def stop_recording(self) -> List[List[float]]:
         """停止录制，恢复力矩，返回路点列表
 
-        安全序列:
-        1. 停止录制线程
-        2. 发送 0x05 恢复力矩（首帧=当前位置，防止突跳）
-
         Returns:
             路点列表，每个路点为 [j0, j1, j2, j3, j4, j5, gripper] (7 个值)
         """
@@ -114,7 +110,7 @@ class DragTeaching:
             self._record_thread = None
         self._recording = False
 
-        # 恢复力矩（含安全序列）
+        # 恢复力矩
         self._joint_ctrl.torque_on(joints=None)
 
         with self._lock:

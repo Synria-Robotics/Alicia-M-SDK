@@ -368,7 +368,7 @@ class SynriaRobotAPI:
         return False
 
     def enable_robot(self) -> bool:
-        """使能机器人（含安全序列防止突跳）"""
+        """使能机器人（发送 0x09 使能指令）"""
         return self._joint_ctrl.enable()
 
     def disable_robot(self) -> bool:
@@ -378,7 +378,7 @@ class SynriaRobotAPI:
     def switch_mode(self, mode: str) -> bool:
         """切换控制模式（仅关节 M0-M5，夹爪 M6 固件锁定 MIT）
 
-        注意: 切换瞬间固件会短暂失能再使能，机械臂会因重力下坠。
+        流程: 失能 → 切换模式 → 使能。
         切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
         夹爪电机始终保持 MIT 模式，不受模式切换影响。
 
@@ -653,11 +653,8 @@ class SynriaRobotAPI:
             )
 
         if firmware_mode == desired:
-            # 固件已是目标模式，同步 SDK 状态并发安全首帧
-            # 安全首帧将固件内部目标初始化为当前实际位置，
-            # 防止首次运动从上次会话的旧目标突跳
+            # 固件已是目标模式，同步 SDK 状态即可（固件侧已处理目标位置初始化）
             self._joint_ctrl.mode = desired
-            self._joint_ctrl.send_safety_latch()
             logger.info("固件控制模式: %s", desired.value.upper())
         else:
             # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换

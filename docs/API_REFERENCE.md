@@ -99,9 +99,9 @@ MitParams(
 
 | 方法 | 说明 |
 |------|------|
-| `enable_robot()` | 使能（含安全序列） |
+| `enable_robot()` | 使能 |
 | `disable_robot()` | 失能 |
-| `switch_mode(mode)` | 切换模式 `"pv"` / `"mit"`（含安全序列） |
+| `switch_mode(mode)` | 切换模式 `"pv"` / `"mit"`（失能→切换→使能） |
 | `torque_control(command, joints)` | 力矩开关，`"off"` / `"on"`（仅 MIT） |
 | `set_zero_position()` | 设置当前位姿为零位 |
 

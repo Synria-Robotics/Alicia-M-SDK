@@ -18,9 +18,16 @@ POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 def main():
     beauty_print("Demo: 关节+夹爪协同控制", type="module")
 
-    # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot(control_mode="pv")
-    beauty_print("机器人连接成功", type="success")
+    # 创建并连接机器人（不指定模式，避免自动切换）
+    robot = alicia_m_sdk.create_robot()
+    beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
+
+    # 需要 PV 模式，若当前不是则提示用户确认后切换
+    if robot.control_mode.value != "pv":
+        beauty_print("本示例需要 PV 模式，切换过程中机械臂将短暂失能", type="warning")
+        input("按 Enter 切换到 PV 模式...")
+        robot.switch_mode("pv")
+        beauty_print("已切换到 PV 模式", type="success")
 
     try:
         # --- 初始化：回零位 + 夹爪打开 ---

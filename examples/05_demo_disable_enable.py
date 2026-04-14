@@ -32,7 +32,7 @@ def main():
         _print_joints(robot, "当前关节角度")
 
         # --- 失能：卸载力矩 ---
-        beauty_print("请用手扶住机械臂，准备失能", type="warning")
+        beauty_print("失能后机械臂将失去力矩，可能因重力下坠", type="warning")
         input("\n按 Enter 失能（电机将失去力矩，可自由拖动）...")
         result = robot.disable_robot()
         if result:

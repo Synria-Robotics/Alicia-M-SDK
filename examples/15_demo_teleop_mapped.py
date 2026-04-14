@@ -91,18 +91,17 @@ def main(args):
         # --- 可选: follower 先回零 ---
         if args.home:
             if follower.control_mode != ControlMode.PV:
-                beauty_print("临时切换到 PV 模式以执行回零...", type="info")
+                beauty_print("需要临时切换到 PV 模式以执行回零", type="warning")
+                input("按 Enter 切换到 PV 模式...")
                 follower.switch_mode("pv")
             beauty_print("Follower 回零位...", type="info")
             follower.go_home(speed=20)
             beauty_print("Follower 已归零", type="success")
 
-        # --- 自动检测并切换到目标控制模式 ---
+        # --- 检测并切换到目标控制模式 ---
         if follower.control_mode != target_mode:
-            if target_mode == ControlMode.MIT:
-                beauty_print("切换到 MIT 模式时机械臂会短暂卸力!", type="warning")
-                beauty_print("请用手扶住机械臂", type="warning")
-            beauty_print(f"切换到 {mode.upper()} 模式...", type="info")
+            beauty_print(f"需要切换到 {mode.upper()} 模式，切换过程中机械臂将短暂失能", type="warning")
+            input(f"按 Enter 切换到 {mode.upper()} 模式...")
             follower.switch_mode(mode)
             beauty_print(f"已切换到 {mode.upper()} 模式", type="success")
 

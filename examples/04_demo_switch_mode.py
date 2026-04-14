@@ -32,7 +32,7 @@ def main():
             beauty_print("  切换后关节可自由活动（无力矩锁定）", type="warning")
         else:
             beauty_print("切回 PV 模式时机械臂会短暂卸力后重新锁定!", type="warning")
-        beauty_print("  请确保机械臂周围安全，并用手扶住机械臂", type="warning")
+        beauty_print("  切换过程中机械臂将短暂失能，可能因重力下坠", type="warning")
         input(f"\n确认安全后按 Enter 切换到 {other.value.upper()} 模式...")
 
         beauty_print(f"正在切换到 {other.value.upper()} 模式...", type="info")
