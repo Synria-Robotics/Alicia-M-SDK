@@ -2,6 +2,10 @@
 
 演示 MIT 模式下关节与夹爪的独立控制及协同控制：
   回零+夹爪打开 -> 仅关节运动 -> 仅夹爪运动 -> 同时控制 -> 回零。
+
+使用逐电机 MIT 阻抗参数，展示 kp/kd/torque/vel_ref 的逐关节设置方式。
+
+MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 """
 
 import time
@@ -12,6 +16,12 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 # 预设安全关节位置 (度)
 POSE_A = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
 POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
+
+# MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
+MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def main():
@@ -31,6 +41,10 @@ def main():
             speed=30,
             gripper_speed=100,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("初始化完成", type="success")
         time.sleep(1.0)
@@ -44,6 +58,10 @@ def main():
             joint_format="deg",
             speed=30,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("关节运动完成", type="success")
         time.sleep(1.0)
@@ -56,6 +74,10 @@ def main():
             gripper_value=0,
             gripper_speed=100,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("夹爪关闭完成", type="success")
         time.sleep(1.0)
@@ -70,6 +92,10 @@ def main():
             speed=30,
             gripper_speed=100,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("关节+夹爪协同运动完成", type="success")
         time.sleep(1.0)
@@ -83,6 +109,10 @@ def main():
             speed=30,
             gripper_speed=100,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("回零完成", type="success")
         time.sleep(1.0)

@@ -110,17 +110,16 @@ robot.disconnect()
 | 03 | `demo_read_states.py` | 循环读取关节角度、速度、力矩、插补速度、温度（含夹爪） |
 | 04 | `demo_switch_mode.py` | PV / MIT 模式切换 |
 | 05 | `demo_disable_enable.py` | 使能 / 失能 |
-| 06 | `demo_move_gripper.py` | 夹爪控制（PV / MIT 均可） |
+| 06 | `demo_move_gripper.py` | 夹爪控制（MIT，逐电机阻抗参数） |
 | 07 | `demo_move_joint.py` | 关节运动（PV） |
 | 08 | `demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
-| 09 | `demo_move_joint_mit.py` | 关节运动（MIT） |
-| 10 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT） |
+| 09 | `demo_move_joint_mit.py` | 关节运动（MIT，逐电机阻抗参数） |
+| 10 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT，逐电机阻抗参数） |
 | 11 | `demo_forward_kinematics.py` | 正运动学计算 |
 | 12 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
-| 13 | `demo_drag_teaching.py` | 拖动示教录制与 PV 回放 |
-| 14 | `demo_sparkvis.py` | SparkVis WebSocket 可视化 |
-| 15 | `demo_teleop.py` | 遥操作：Alicia-D → Alicia-M（PV / MIT，支持插值） |
-| 16 | `demo_reset_zero.py` | 零位标定 |
+| 13 | `demo_teleop.py` | 遥操作：Alicia-D → Alicia-M（PV / MIT，逐电机阻抗参数） |
+| 14 | `demo_reset_zero.py` | 零位标定 |
+| 15 | `demo_teleop_mapped.py` | 遥操作 + URDF 限位映射（逐电机阻抗参数） |
 
 运行示例：
 

@@ -10,7 +10,7 @@ import math
 import time
 import logging
 import warnings
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Union, Any
 
 import numpy as np
 
@@ -235,6 +235,10 @@ class SynriaRobotAPI:
         gripper_speed: float = 100,
         wait_for_completion: bool = True,
         use_interpolation: bool = True,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
         **kwargs,
     ) -> bool:
         """点位运动：设置关节角度和/或夹爪位置
@@ -244,6 +248,8 @@ class SynriaRobotAPI:
         - MIT: 默认使用线性轨迹插值，发送 6 地址单帧
           (pos+vel+torque+kp+kd+linear_vel)，vel=0，由 linear_vel 控制插值速度
 
+        MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
+
         Args:
             target_joints: 目标角度，6 个关节
             gripper_value: 夹爪值 [0, 1000]
@@ -252,6 +258,13 @@ class SynriaRobotAPI:
             gripper_speed: 夹爪速度 [0, 400]
             wait_for_completion: 是否等待到达
             use_interpolation: MIT 模式是否使用线性轨迹插值（PV 模式忽略）
+            kp: MIT 位置增益 [0, 500]（PV 模式忽略）。
+                None=使用默认值，float=广播至所有电机，
+                List[float] 长度 6(仅关节) 或 7(含夹爪) 逐电机设置。
+            kd: MIT 速度增益 [0, 5]（PV 模式忽略）。格式同 kp。
+            torque: MIT 前馈力矩 (N·m)（PV 模式忽略）。
+                None=默认 0，float=广播，List[float] 逐电机设置。
+            vel_ref: MIT 目标速度 (rad/s)（PV 模式忽略）。格式同 torque。
 
         Returns:
             是否成功到达目标
@@ -266,6 +279,7 @@ class SynriaRobotAPI:
                 return self._joint_ctrl.move_gripper(
                     gripper_value, speed=gripper_speed,
                     wait=wait_for_completion,
+                    kp=kp, kd=kd, torque=torque, vel_ref=vel_ref,
                 )
             return True  # 无目标，无操作
 
@@ -287,6 +301,10 @@ class SynriaRobotAPI:
                 gripper_speed=gripper_speed,
                 wait=wait_for_completion,
                 use_interpolation=use_interpolation,
+                kp=kp,
+                kd=kd,
+                torque=torque,
+                vel_ref=vel_ref,
             )
 
     def go_home(self, speed: float = 40, gripper_speed: float = 100) -> bool:

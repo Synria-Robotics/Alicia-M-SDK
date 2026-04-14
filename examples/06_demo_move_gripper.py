@@ -1,12 +1,19 @@
 """06_demo_move_gripper.py — 夹爪控制
 
 演示夹爪的打开、关闭、半开操作。
-PV 和 MIT 模式下均可运行。
+PV 和 MIT 模式下均可运行，MIT 模式支持逐电机设置阻抗参数。
 """
 
 import time
 import alicia_m_sdk
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+
+# MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
+MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def main():
@@ -19,25 +26,41 @@ def main():
     try:
         # --- 半开夹爪 (500) ---
         beauty_print("移动夹爪到半开 (500)...", type="info")
-        robot.set_robot_state(gripper_value=500, gripper_speed=100, wait_for_completion=True)
+        robot.set_robot_state(
+            gripper_value=500, gripper_speed=100,
+            wait_for_completion=True,
+            kp=MIT_KP, kd=MIT_KD, torque=MIT_TORQUE, vel_ref=MIT_VEL_REF,
+        )
         beauty_print("夹爪已半开", type="success")
         time.sleep(1.0)
 
         # --- 打开夹爪 (1000 = 全开) ---
         beauty_print("打开夹爪 (1000)...", type="info")
-        robot.set_robot_state(gripper_value=1000, gripper_speed=100, wait_for_completion=True)
+        robot.set_robot_state(
+            gripper_value=1000, gripper_speed=100,
+            wait_for_completion=True,
+            kp=MIT_KP, kd=MIT_KD, torque=MIT_TORQUE, vel_ref=MIT_VEL_REF,
+        )
         beauty_print("夹爪已打开", type="success")
         time.sleep(1.0)
 
         # --- 半开夹爪 (500) ---
         beauty_print("移动夹爪到半开 (500)...", type="info")
-        robot.set_robot_state(gripper_value=500, gripper_speed=100, wait_for_completion=True)
+        robot.set_robot_state(
+            gripper_value=500, gripper_speed=100,
+            wait_for_completion=True,
+            kp=MIT_KP, kd=MIT_KD, torque=MIT_TORQUE, vel_ref=MIT_VEL_REF,
+        )
         beauty_print("夹爪已半开", type="success")
         time.sleep(1.0)
 
         # --- 关闭夹爪 (0 = 全闭) ---
         beauty_print("关闭夹爪 (0)...", type="info")
-        robot.set_robot_state(gripper_value=0, gripper_speed=100, wait_for_completion=True)
+        robot.set_robot_state(
+            gripper_value=0, gripper_speed=100,
+            wait_for_completion=True,
+            kp=MIT_KP, kd=MIT_KD, torque=MIT_TORQUE, vel_ref=MIT_VEL_REF,
+        )
         beauty_print("夹爪已关闭", type="success")
         time.sleep(2.0)
 

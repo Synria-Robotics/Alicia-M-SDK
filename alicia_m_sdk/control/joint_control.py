@@ -67,6 +67,46 @@ def _fill_mit_defaults(motor_index: int, kp: Optional[float],
     return filled_kp, filled_kd
 
 
+def _normalize_mit_param(
+    value: Optional[Union[float, List[Optional[float]]]],
+    name: str,
+    default: Optional[float] = None,
+) -> List[Optional[float]]:
+    """标准化 MIT 参数为逐电机列表（长度 NUM_MOTORS）
+
+    支持三种输入形式:
+    - None: 所有电机使用默认值
+    - 标量: 广播至所有电机（6 关节 + 夹爪）
+    - 列表: 长度 6（仅关节，夹爪使用默认值）或 7（含夹爪），
+            列表中的 None 元素表示该电机使用默认值
+
+    Args:
+        value: MIT 参数值 — None / 标量 / 列表
+        name: 参数名称（用于异常消息）
+        default: 列表中 None 元素的替换值，None 表示保留 None（由下游填充）
+
+    Returns:
+        长度 NUM_MOTORS 的列表，None 元素表示使用默认值
+
+    Raises:
+        ValidationError: 列表长度不合法
+    """
+    if value is None:
+        return [default] * NUM_MOTORS
+    if isinstance(value, (int, float)):
+        return [float(value)] * NUM_MOTORS
+    value = list(value)
+    if len(value) not in (NUM_JOINTS, NUM_MOTORS):
+        raise ValidationError(
+            f"{name} 列表长度错误: 期望 {NUM_JOINTS}(仅关节) 或 "
+            f"{NUM_MOTORS}(含夹爪), 实际 {len(value)}"
+        )
+    result = [float(v) if v is not None else default for v in value]
+    if len(result) == NUM_JOINTS:
+        result.append(default)  # 夹爪使用默认值
+    return result
+
+
 class JointController:
     """关节级运动控制
 
@@ -250,6 +290,10 @@ class JointController:
         wait: bool = True,
         timeout: float = 15.0,
         use_interpolation: bool = True,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
     ) -> bool:
         """MIT 模式点位运动
 
@@ -258,8 +302,10 @@ class JointController:
           发送 6 地址单帧 (pos+vel+torque+kp+kd+linear_vel)，
           vel=0，由 linear_vel 指定插值速度，固件按该速度线性到达目标。
         - 直接 PD 控制 (use_interpolation=False):
-          发送 MIT 全参数帧 (pos=目标, kp/kd=默认)，
+          发送 MIT 全参数帧 (pos=目标, kp/kd=自定义或默认)，
           由 PD 控制器驱动关节趋近目标，发送后立即返回（不等待到达）。
+
+        MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
         Args:
             target_joints: 目标角度 (rad), 6 个关节
@@ -269,6 +315,12 @@ class JointController:
             wait: 是否阻塞等待到达，仅 use_interpolation=True 时生效
             timeout: 等待超时 (秒)
             use_interpolation: 是否使用线性轨迹插值
+            kp: 位置增益 [0, 500]。None=使用默认值，
+                float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+            kd: 速度增益 [0, 5]。格式同 kp。
+            torque: 前馈力矩 (N·m)。None=默认 0，
+                float=广播，List[float] 逐电机设置。
+            vel_ref: 目标速度 (rad/s)。格式同 torque。
 
         Returns:
             True=到达目标 / False=超时
@@ -298,29 +350,39 @@ class JointController:
             g_speeds = validate_speed(g_speed, 1)
             linear_vels.append(speed_user_to_firmware(g_speeds[0]))
 
-        # 步骤2: 构建 MIT 帧 (pos=目标, vel=0, t=0, kp=默认, kd=默认)
+        # 步骤2: 标准化 MIT 参数为逐电机列表
+        # kp/kd: None 保留，由 _fill_mit_defaults 按电机编号填充安全默认值
+        # torque/vel_ref: None → 0.0，无需按电机区分
+        kps = _normalize_mit_param(kp, "kp")
+        kds = _normalize_mit_param(kd, "kd")
+        torques = _normalize_mit_param(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+
+        # 步骤3: 构建 MIT 帧
         #   插值模式: 合并线性速度为单帧 (addr_count=6)
         #   直接 PD:  不含线性速度 (addr_count=5)
         mit_params = []
         for i in range(NUM_JOINTS):
-            kp, kd = _fill_mit_defaults(i, None, None)
+            filled_kp, filled_kd = _fill_mit_defaults(i, kps[i], kds[i])
             mit_params.append(MitParams(
                 pos_ref=target_joints[i],
-                vel_ref=0.0,
-                t_ref=0.0,
-                kp=kp,
-                kd=kd,
+                vel_ref=vel_refs[i],
+                t_ref=torques[i],
+                kp=filled_kp,
+                kd=filled_kd,
             ))
         # 夹爪电机
         gripper_target = gripper if gripper is not None else (
             self._device.joint_state.gripper
             if self._device.joint_state else 0.0
         )
-        gripper_kp, gripper_kd = _fill_mit_defaults(NUM_JOINTS, None, None)
+        gripper_kp, gripper_kd = _fill_mit_defaults(
+            NUM_JOINTS, kps[NUM_JOINTS], kds[NUM_JOINTS],
+        )
         mit_params.append(MitParams(
             pos_ref=gripper_target,
-            vel_ref=0.0,
-            t_ref=0.0,
+            vel_ref=vel_refs[NUM_JOINTS],
+            t_ref=torques[NUM_JOINTS],
             kp=gripper_kp,
             kd=gripper_kd,
         ))
@@ -330,7 +392,7 @@ class JointController:
         logger.debug("MIT 帧已发送: target=%s, interpolation=%s",
                      target_joints, use_interpolation)
 
-        # 步骤3: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
+        # 步骤4: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
         # MIT PD 控制器存在稳态误差，容差需大于 PV 模式
         reached = True
         if use_interpolation and wait:
@@ -377,6 +439,10 @@ class JointController:
         speed: float = 100.0,
         wait: bool = True,
         timeout: float = 5.0,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
     ) -> bool:
         """控制夹爪
 
@@ -390,25 +456,50 @@ class JointController:
             speed: 夹爪速度 [0, 400]
             wait: 是否阻塞等待到达
             timeout: 等待超时 (秒)
+            kp: 位置增益 [0, 500]。None=使用默认值，
+                float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+            kd: 速度增益 [0, 5]。格式同 kp。
+            torque: 前馈力矩 (N·m)。None=默认 0，
+                float=广播，List[float] 逐电机设置。
+            vel_ref: 目标速度 (rad/s)。格式同 torque。
 
         Returns:
             True=到达目标 / False=超时
         """
         value = validate_gripper_value(value)
 
+        # 标准化 MIT 参数为逐电机列表
+        kps = _normalize_mit_param(kp, "kp")
+        kds = _normalize_mit_param(kd, "kd")
+        torques = _normalize_mit_param(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+
         # 读取当前关节位置，保持不变
         current = self._get_current_angles()
 
         # 夹爪固件锁定 MIT，始终发送 MIT 全参数帧
-        mit_params = self._build_hold_position_mit(current)
-        gripper_kp, gripper_kd = _fill_mit_defaults(NUM_JOINTS, None, None)
-        mit_params[NUM_JOINTS] = MitParams(
+        # 关节部分保持当前位置，torque/vel_ref 强制归零以防意外运动
+        mit_params = []
+        for i in range(NUM_JOINTS):
+            filled_kp, filled_kd = _fill_mit_defaults(i, kps[i], kds[i])
+            mit_params.append(MitParams(
+                pos_ref=current[i],
+                vel_ref=0.0,
+                t_ref=0.0,
+                kp=filled_kp,
+                kd=filled_kd,
+            ))
+        # 夹爪电机：使用用户指定的全部 MIT 参数
+        gripper_kp, gripper_kd = _fill_mit_defaults(
+            NUM_JOINTS, kps[NUM_JOINTS], kds[NUM_JOINTS],
+        )
+        mit_params.append(MitParams(
             pos_ref=value,
-            vel_ref=0.0,
-            t_ref=0.0,
+            vel_ref=vel_refs[NUM_JOINTS],
+            t_ref=torques[NUM_JOINTS],
             kp=gripper_kp,
             kd=gripper_kd,
-        )
+        ))
 
         # 线性轨迹插值：所有电机始终设正值速度，禁止设 0（防止阶段切换抖动）
         g_speeds = validate_speed(speed, 1)

@@ -1,26 +1,28 @@
-"""15_demo_teleop.py — 遥操作: Alicia-D (示教臂) → Alicia-M (操作臂)
+"""13_demo_teleop.py — 遥操作: Alicia-D (示教臂) → Alicia-M (操作臂)
 
 使用 Alicia-D 伺服示教臂实时控制 Alicia-M 电机操作臂。
-支持 PV 模式和 MIT 模式（默认 MIT）。
+支持 PV 模式和 MIT 模式（默认 MIT），MIT 模式支持逐电机设置阻抗参数。
+
+MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
 用法:
     # MIT 模式遥操作（默认，不使用插值）
-    python 15_demo_teleop.py
+    python 13_demo_teleop.py
 
     # MIT 模式 + 线性轨迹插值
-    python 15_demo_teleop.py --interpolation --speed 200
+    python 13_demo_teleop.py --interpolation --speed 200
 
     # PV 模式遥操作
-    python 15_demo_teleop.py --mode pv
+    python 13_demo_teleop.py --mode pv
 
     # 指定串口
-    python 15_demo_teleop.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
+    python 13_demo_teleop.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
 
     # 调整频率和速度
-    python 15_demo_teleop.py --frequency 100 --speed 300
+    python 13_demo_teleop.py --frequency 100 --speed 300
 
     # 跳过回零
-    python 15_demo_teleop.py --skip-home
+    python 13_demo_teleop.py --skip-home
 """
 
 import argparse
@@ -31,6 +33,13 @@ import alicia_m_sdk
 from alicia_m_sdk import ControlMode
 from alicia_m_sdk.control.teleoperation import Teleoperation
 from robocore.utils.beauty_logger import beauty_print
+
+
+# MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
+MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def main(args):
@@ -89,7 +98,7 @@ def main(args):
         if follower_joints is not None:
             beauty_print(f"Follower 关节 (deg): {np.round(np.degrees(follower_joints), 1).tolist()}")
 
-        # --- 创建遥操作控制器 ---
+        # --- 创建遥操作控制器（逐电机 MIT 参数） ---
         teleop = Teleoperation(
             leader=leader,
             follower=follower,
@@ -97,6 +106,10 @@ def main(args):
             follower_speed=args.speed,
             joint_signs=[1.0, 1.0, -1.0, -1.0, 1.0, -1.0],
             use_interpolation=args.interpolation,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
 
         if args.verbose:

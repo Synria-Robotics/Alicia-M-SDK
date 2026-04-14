@@ -1,4 +1,4 @@
-"""16_demo_reset_zero.py — 零位标定
+"""14_demo_reset_zero.py — 零位标定
 
 流程:
 1. 连接机械臂，运行本脚本

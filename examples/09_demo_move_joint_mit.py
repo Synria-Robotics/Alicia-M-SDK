@@ -1,6 +1,9 @@
 """09_demo_move_joint_mit.py — 关节控制 (MIT)
 
 演示 MIT 模式关节空间运动控制：回零 -> 目标位置 -> 回零。
+使用逐电机 MIT 阻抗参数，展示 kp/kd/torque/vel_ref 的逐关节设置方式。
+
+MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 """
 
 import argparse
@@ -11,8 +14,12 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 # 预设安全关节位置 (度)
 POSITION = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
-# POSITION = [0, 0.0, -30.0, 0.0, 0.0, 0.0]
-# POSITION = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
+MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def main():
@@ -36,13 +43,17 @@ def main():
         beauty_print("已到达零位", type="success")
         time.sleep(1.0)
 
-        # --- 移动到目标位置 ---
+        # --- 移动到目标位置（逐电机 MIT 参数） ---
         beauty_print(f"移动到目标位置: {POSITION} (deg)...", type="info")
         robot.set_robot_state(
             target_joints=POSITION,
             joint_format="deg",
             speed=args.speed,
             wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
         beauty_print("已到达目标位置", type="success")
         time.sleep(1.0)

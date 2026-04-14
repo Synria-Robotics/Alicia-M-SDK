@@ -1,26 +1,30 @@
-"""17_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
+"""15_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
 
-与 15_demo_teleop.py 功能相同，但使用 joint_mapping.py 中的
+与 13_demo_teleop.py 功能相同，但使用 joint_mapping.py 中的
 URDF 限位映射代替简单的符号翻转，具备:
 - D 零位 → M 区间中点对齐
 - 关节 3 按比例缩放（D/M 行程不同）
 - 所有关节输出裁剪到 M 的 URDF 限位
 
+MIT 模式支持逐电机设置阻抗参数（kp/kd/torque/vel_ref），修改文件顶部常量即可。
+
+MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
+
 用法:
     # MIT 模式（默认）
-    python 17_demo_teleop_mapped.py
+    python 15_demo_teleop_mapped.py
 
     # MIT 模式 + 线性轨迹插值
-    python 17_demo_teleop_mapped.py --interpolation --speed 200
+    python 15_demo_teleop_mapped.py --interpolation --speed 200
 
     # PV 模式
-    python 17_demo_teleop_mapped.py --mode pv
+    python 15_demo_teleop_mapped.py --mode pv
 
     # 指定串口
-    python 17_demo_teleop_mapped.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
+    python 15_demo_teleop_mapped.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
 
     # 跳过回零
-    python 17_demo_teleop_mapped.py --skip-home
+    python 15_demo_teleop_mapped.py --skip-home
 """
 
 import argparse
@@ -34,6 +38,13 @@ from alicia_m_sdk.control.teleoperation import Teleoperation
 from robocore.utils.beauty_logger import beauty_print
 
 from joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
+
+
+# MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
+MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def make_joint_mapper_rad():
@@ -103,7 +114,7 @@ def main(args):
         if follower_joints is not None:
             beauty_print(f"Follower 关节 (deg): {np.round(np.degrees(follower_joints), 1).tolist()}")
 
-        # --- 创建遥操作控制器（使用 URDF 限位映射） ---
+        # --- 创建遥操作控制器（使用 URDF 限位映射 + 逐电机 MIT 参数） ---
         teleop = Teleoperation(
             leader=leader,
             follower=follower,
@@ -111,6 +122,10 @@ def main(args):
             follower_speed=args.speed,
             joint_mapper=make_joint_mapper_rad(),
             use_interpolation=args.interpolation,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
         )
 
         if args.verbose:

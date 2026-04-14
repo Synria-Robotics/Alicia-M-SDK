@@ -16,8 +16,9 @@ Alicia-M 电机操作臂（follower）跟随运动。
 import time
 import threading
 import logging
-from typing import Optional, List, Callable
+from typing import Optional, Union, List, Callable
 
+from ..control.joint_control import _normalize_mit_param
 from ..utils.timing import precise_sleep
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,12 @@ class Teleoperation:
             设置后将替代 joint_signs / joint_offsets_rad 的默认映射逻辑
         use_interpolation: MIT 模式是否使用线性轨迹插值（默认 False）。
             启用时发送 6 地址帧，运动更平滑但可能降低重力负载关节的刚度
+        kp: MIT 位置增益 [0, 500]。None=使用默认值，
+            float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+        kd: MIT 速度增益 [0, 5]。格式同 kp。
+        torque: MIT 前馈力矩 (N·m)。None=默认 0，
+            float=广播，List[float] 逐电机设置。
+        vel_ref: MIT 目标速度 (rad/s)。格式同 torque。
     """
 
     def __init__(
@@ -60,6 +67,10 @@ class Teleoperation:
         joint_offsets_rad: Optional[List[float]] = None,
         joint_mapper: Optional[Callable[[List[float]], List[float]]] = None,
         use_interpolation: bool = False,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
     ):
         self.leader = leader
         self.follower = follower
@@ -70,6 +81,11 @@ class Teleoperation:
         self.joint_offsets_rad = joint_offsets_rad or [0.0] * 6
         self.joint_mapper = joint_mapper
         self.use_interpolation = use_interpolation
+        # 预标准化 MIT 参数为逐电机列表，避免控制循环中每帧重复转换
+        self.kp = _normalize_mit_param(kp, "kp")
+        self.kd = _normalize_mit_param(kd, "kd")
+        self.torque = _normalize_mit_param(torque, "torque", default=0.0)
+        self.vel_ref = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
 
         self._running = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -152,6 +168,10 @@ class Teleoperation:
                     gripper_speed=self.follower_speed,
                     wait_for_completion=False,
                     use_interpolation=use_interp_this_frame,
+                    kp=self.kp,
+                    kd=self.kd,
+                    torque=self.torque,
+                    vel_ref=self.vel_ref,
                 )
 
                 self._loop_count += 1
