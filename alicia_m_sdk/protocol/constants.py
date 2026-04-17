@@ -19,6 +19,7 @@ CMD_MOTOR_PARAM    = 0x11      # 关节控制幅值和驱动参数设置
 CMD_ERROR          = 0xEE      # 错误反馈
 
 # === 0x03 零位标定方式 ===
+# 弱调零需要固件版本 >= 1.0.6，当前不通过公开 API 开放。
 ZERO_RESET_WEAK    = 0x00      # 弱调零：只改协议零点偏移
 ZERO_RESET_STRONG  = 0x01      # 强调零：执行底层硬调零
 

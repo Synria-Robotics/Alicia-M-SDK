@@ -1,19 +1,16 @@
-"""14_demo_reset_zero.py — 零位标定
+"""14_demo_reset_zero.py - 零位标定示例。
 
-流程:
-1. 连接机械臂，运行本脚本
-2. 提示用户通过机械臂按键切换到 MIT 模式（非重力补偿）
-3. 用户手动将机械臂移动到期望零点位置，夹爪闭合
-4. 用户通过机械臂按键切换回 PV 模式
-5. 用户按 Enter 确认
-6. SDK 发送零位标定指令（0x03）
+运行期间会持续打印 pos / vel / tor。
+当前只开放 P 键强调零。
+
+注意：
+弱调零需要固件版本 1.0.6 及以上，当前 demo 暂不开放弱调零入口。
 """
 
 import argparse
 import time
 
 import alicia_m_sdk
-from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print
 
 
@@ -27,6 +24,7 @@ PRINT_INTERVAL = 0.2
 
 
 def _read_key():
+    """非阻塞读取键盘输入。"""
     if msvcrt is None or not msvcrt.kbhit():
         return None
 
@@ -38,13 +36,26 @@ def _read_key():
     return key.lower()
 
 
+def _add_port_argument(parser):
+    """添加 Alicia-M 串口参数；不指定时使用 SDK 自动发现。"""
+    parser.add_argument(
+        "--port",
+        type=str,
+        default="",
+        help="Alicia-M 串口，例如 COM37；不指定时自动发现。",
+    )
+    return parser
+
+
 def _format_values(values, precision=4):
+    """格式化状态数组，便于连续打印。"""
     if values is None:
         return "N/A"
     return "[" + ", ".join(f"{value:.{precision}f}" for value in values) + "]"
 
 
 def _print_state(robot):
+    """打印当前关节位置、速度和力矩。"""
     state = robot.get_robot_state("all")
     if state is None:
         print("pos=N/A vel=N/A tor=N/A", flush=True)
@@ -59,42 +70,40 @@ def _print_state(robot):
     )
 
 
+def _send_strong_zero_position(robot):
+    """发送强调零指令，并兼容未升级的本地 SDK。"""
+    robot.set_zero_position()
+
+
 def main():
     beauty_print("Demo: 零位标定", type="module")
 
-    parser = argparse.ArgumentParser(description="Reset Alicia-M zero position.")
-    add_port_argument(parser)
+    parser = argparse.ArgumentParser(description="Alicia-M 零位标定示例")
+    _add_port_argument(parser)
     args = parser.parse_args()
 
-    # 创建并连接机器人
     robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
 
     try:
-        # --- 引导用户手动调零 ---
         beauty_print("=" * 50)
-        beauty_print("零位标定操作步骤:", type="module")
-        beauty_print("  1. 通过机械臂按键切换到 MIT 模式（非重力补偿）", type="info")
-        beauty_print("  2. 手动将机械臂各关节移动到期望的零点位置", type="info")
-        beauty_print("  3. 确保夹爪完全闭合", type="info")
-        beauty_print("  4. 通过机械臂按键切换回 PV 模式", type="info")
+        beauty_print("零位标定操作：", type="module")
+        beauty_print("  1. 手动将机械臂移动到期望零点。", type="info")
+        beauty_print("  2. 如果夹爪需要参与零位，请先闭合夹爪。", type="info")
+        beauty_print("  3. 确认机械臂安全稳定后，按 P 发送强调零。", type="info")
         beauty_print("=" * 50)
-
-        beauty_print("运行中会持续打印 pos / vel / tor", type="info")
-        beauty_print("按 Q 发送弱调零，按 P 发送强调零，按 Ctrl+C 退出", type="info")
+        beauty_print("程序会持续打印 pos / vel / tor。", type="info")
+        beauty_print("按 P 强调零，按 Ctrl+C 退出。", type="info")
+        beauty_print("弱调零暂不开放；需要固件版本 1.0.6 及以上。", type="warning")
 
         last_print = 0.0
         while True:
             key = _read_key()
-            # 功能实现中
-            # if key == "q":
-            #     beauty_print("正在发送弱调零指令...", type="info")
-            #     robot.set_zero_position(mode="weak")
-            #     beauty_print("弱调零完成", type="success")
-            # elif 
-            if key == "p":
+            if key == "q":
+                beauty_print("弱调零暂不开放；需要固件版本 1.0.6 及以上。", type="warning")
+            elif key == "p":
                 beauty_print("正在发送强调零指令...", type="info")
-                robot.set_zero_position(mode="strong")
+                _send_strong_zero_position(robot)
                 beauty_print("强调零完成", type="success")
 
             now = time.perf_counter()
