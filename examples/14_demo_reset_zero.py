@@ -86,11 +86,13 @@ def main():
         last_print = 0.0
         while True:
             key = _read_key()
-            if key == "q":
-                beauty_print("正在发送弱调零指令...", type="info")
-                robot.set_zero_position(mode="weak")
-                beauty_print("弱调零完成", type="success")
-            elif key == "p":
+            # 功能实现中
+            # if key == "q":
+            #     beauty_print("正在发送弱调零指令...", type="info")
+            #     robot.set_zero_position(mode="weak")
+            #     beauty_print("弱调零完成", type="success")
+            # elif 
+            if key == "p":
                 beauty_print("正在发送强调零指令...", type="info")
                 robot.set_zero_position(mode="strong")
                 beauty_print("强调零完成", type="success")
