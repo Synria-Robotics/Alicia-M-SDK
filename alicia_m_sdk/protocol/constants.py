@@ -18,6 +18,10 @@ CMD_ENABLE         = 0x09      # 机器人部位失能/使能
 CMD_MOTOR_PARAM    = 0x11      # 关节控制幅值和驱动参数设置
 CMD_ERROR          = 0xEE      # 错误反馈
 
+# === 0x03 零位标定方式 ===
+ZERO_RESET_WEAK    = 0x00      # 弱调零：只改协议零点偏移
+ZERO_RESET_STRONG  = 0x01      # 强调零：执行底层硬调零
+
 # === 功能码：bit7 表示读写方向 ===
 FUNC_READ_BIT      = 0x00      # bit7=0 → 读取
 FUNC_WRITE_BIT     = 0x80      # bit7=1 → 写入

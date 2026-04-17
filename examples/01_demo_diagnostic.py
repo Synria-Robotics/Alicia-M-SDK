@@ -4,15 +4,22 @@
 注意: 底层自检功能尚未更新，当前以占位形式实现。
 """
 
+import argparse
+
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def main():
     beauty_print("Demo: 自检功能（底层待更新）", type="module")
 
+    parser = argparse.ArgumentParser(description="Run Alicia-M diagnostic demo.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
 
     try:

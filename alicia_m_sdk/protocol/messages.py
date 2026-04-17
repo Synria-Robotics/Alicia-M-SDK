@@ -139,10 +139,12 @@ class ZeroResetRequest:
         aim: 目标部位
         start_joint: 起始关节 ID
         joint_count: 关节数量
+        reset_mode: 调零方式，0x00=弱调零，0x01=强调零
     """
     aim: int
     start_joint: int
     joint_count: int
+    reset_mode: Optional[int] = None
 
 
 # ============================================================

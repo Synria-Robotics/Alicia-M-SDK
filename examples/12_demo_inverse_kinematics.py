@@ -5,11 +5,13 @@
   2. 给定目标位姿 -> IK 求解 -> 可选执行运动
 """
 
+import argparse
 import math
 import time
 import numpy as np
 import alicia_m_sdk
 from alicia_m_sdk import forward_kinematics, inverse_kinematics, RobotModel
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.transform import matrix_to_euler, matrix_to_quaternion
 from robocore.transform.conversions import quaternion_to_matrix
@@ -24,8 +26,12 @@ DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
 def main():
     beauty_print("Demo: 逆运动学 (IK)", type="module")
 
+    parser = argparse.ArgumentParser(description="Run Alicia-M inverse kinematics demo.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人（不指定模式，避免自动切换）
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
 
     # 需要 PV 模式，若当前不是则提示用户确认后切换

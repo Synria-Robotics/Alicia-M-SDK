@@ -3,15 +3,22 @@
 演示查询各电机控制模式（通过 0x11 读取）和运行状态。
 """
 
+import argparse
+
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def main():
     beauty_print("Demo: 读取机械臂模式与使能状态", type="module")
 
+    parser = argparse.ArgumentParser(description="Read Alicia-M status.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print(f"机器人连接成功（{robot.control_mode.value.upper()} 模式）", type="success")
 
     try:

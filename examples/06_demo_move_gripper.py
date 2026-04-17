@@ -6,8 +6,10 @@
 MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分保持当前位置不动。
 """
 
+import argparse
 import time
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -21,8 +23,12 @@ MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 def main():
     beauty_print("Demo: 夹爪控制", type="module")
 
+    parser = argparse.ArgumentParser(description="Move Alicia-M gripper.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人（无须指定模式，夹爪电机固件锁定 MIT）
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
 
     try:

@@ -21,6 +21,7 @@ from ..protocol.constants import (
     NUM_JOINTS, NUM_MOTORS,
     DEFAULT_KP_LARGE, DEFAULT_KD_LARGE,
     DEFAULT_KP_SMALL, DEFAULT_KD_SMALL,
+    ZERO_RESET_WEAK, ZERO_RESET_STRONG,
 )
 from ..protocol.messages import (
     TorqueRequest, EnableRequest, MotorParamRequest, ZeroResetRequest,
@@ -105,6 +106,20 @@ def _normalize_mit_param(
     if len(result) == NUM_JOINTS:
         result.append(default)  # 夹爪使用默认值
     return result
+
+
+def _normalize_zero_reset_mode(mode: Union[str, int]) -> int:
+    """Normalize zero-reset mode to the protocol byte."""
+    if isinstance(mode, str):
+        normalized = mode.strip().lower()
+        if normalized in ("weak", "soft", "0"):
+            return ZERO_RESET_WEAK
+        if normalized in ("strong", "hard", "1"):
+            return ZERO_RESET_STRONG
+    elif mode in (ZERO_RESET_WEAK, ZERO_RESET_STRONG):
+        return int(mode)
+
+    raise ValidationError("调零方式错误: 期望 'weak'/'strong' 或 0/1")
 
 
 class JointController:
@@ -732,21 +747,26 @@ class JointController:
         logger.warning("模式验证失败: 多次查询均未确认切换成功")
         return False
 
-    def set_zero_position(self) -> bool:
+    def set_zero_position(self, mode: Union[str, int] = "strong") -> bool:
         """设置当前位姿为零位（发送 0x03 指令）
+
+        Args:
+            mode: 调零方式，"weak"/0=弱调零，"strong"/1=强调零
 
         Returns:
             True=设置成功
         """
+        reset_mode = _normalize_zero_reset_mode(mode)
         frame = self._device.codec.encode_zero_reset(ZeroResetRequest(
             aim=self._device.aim,
             start_joint=0,
             joint_count=NUM_MOTORS,
+            reset_mode=reset_mode,
         ))
         self._device.send_frame(frame)
         time.sleep(0.1)  # 等待固件处理零位标定
 
-        logger.info("零位标定完成")
+        logger.info("零位标定完成: mode=%s", "weak" if reset_mode == ZERO_RESET_WEAK else "strong")
         return True
 
     # ========== 等待到达 ==========

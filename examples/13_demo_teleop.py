@@ -149,8 +149,9 @@ if __name__ == "__main__":
                         help="控制模式: pv / mit (默认: mit)")
     parser.add_argument('--leader-port', type=str, default="/dev/ttyACM0",
                         help="Leader 串口 (Alicia-D)")
-    parser.add_argument('--follower-port', type=str, default="/dev/ttyACM1",
-                        help="Follower 串口 (Alicia-M)")
+    parser.add_argument('--port', '--follower-port', dest='follower_port',
+                        type=str, default="",
+                        help="Follower 串口 (Alicia-M)，不指定则自动发现")
     parser.add_argument('--follower-version', type=str, default="v1_1",
                         help="Alicia-M 硬件版本，可选 v1_0/v1_1 (默认: v1_1)")
     parser.add_argument('--frequency', type=float, default=100.0,

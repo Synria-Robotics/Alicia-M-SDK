@@ -5,8 +5,10 @@
 PV 和 MIT 模式下均可运行。
 """
 
+import argparse
 import time
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -18,8 +20,12 @@ POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 def main():
     beauty_print("Demo: 关节+夹爪协同控制", type="module")
 
+    parser = argparse.ArgumentParser(description="Move Alicia-M arm and gripper.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人（不指定模式，避免自动切换）
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
 
     # 需要 PV 模式，若当前不是则提示用户确认后切换

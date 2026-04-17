@@ -7,16 +7,23 @@
       切换到 MIT 后关节可自由活动（无力矩锁定），夹爪始终为 MIT 模式。
 """
 
+import argparse
+
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print
 
 
 def main():
     beauty_print("Demo: 切换控制模式 (PV <-> MIT)", type="module")
 
+    parser = argparse.ArgumentParser(description="Switch Alicia-M control mode.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 自动检测固件当前模式（不强制指定）
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
 
     try:

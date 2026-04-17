@@ -399,9 +399,13 @@ class SynriaRobotAPI:
         self._device.set_poll_addr_count(count)
         logger.info("状态轮询模式: %s", "扩展 (7地址)" if enabled else "基础 (3地址)")
 
-    def set_zero_position(self) -> bool:
-        """设置当前位姿为零位"""
-        return self._joint_ctrl.set_zero_position()
+    def set_zero_position(self, mode: Union[str, int] = "strong") -> bool:
+        """设置当前位姿为零位
+
+        Args:
+            mode: 调零方式，"weak"/0=弱调零，"strong"/1=强调零
+        """
+        return self._joint_ctrl.set_zero_position(mode=mode)
 
     # ========== 运动学 ==========
 

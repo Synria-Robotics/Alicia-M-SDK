@@ -9,15 +9,65 @@
 6. SDK 发送零位标定指令（0x03）
 """
 
+import argparse
+import time
+
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print
+
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+
+PRINT_INTERVAL = 0.2
+
+
+def _read_key():
+    if msvcrt is None or not msvcrt.kbhit():
+        return None
+
+    key = msvcrt.getwch()
+    if key in ("\x00", "\xe0"):
+        if msvcrt.kbhit():
+            msvcrt.getwch()
+        return None
+    return key.lower()
+
+
+def _format_values(values, precision=4):
+    if values is None:
+        return "N/A"
+    return "[" + ", ".join(f"{value:.{precision}f}" for value in values) + "]"
+
+
+def _print_state(robot):
+    state = robot.get_robot_state("all")
+    if state is None:
+        print("pos=N/A vel=N/A tor=N/A", flush=True)
+        return
+
+    pos = list(state.angles) + [state.gripper]
+    print(
+        f"pos={_format_values(pos)} "
+        f"vel={_format_values(state.velocities)} "
+        f"tor={_format_values(state.torques)}",
+        flush=True,
+    )
 
 
 def main():
     beauty_print("Demo: 零位标定", type="module")
 
+    parser = argparse.ArgumentParser(description="Reset Alicia-M zero position.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
 
     try:
@@ -30,12 +80,27 @@ def main():
         beauty_print("  4. 通过机械臂按键切换回 PV 模式", type="info")
         beauty_print("=" * 50)
 
-        input("\n完成以上步骤后，按 Enter 发送零位标定指令...")
+        beauty_print("运行中会持续打印 pos / vel / tor", type="info")
+        beauty_print("按 Q 发送弱调零，按 P 发送强调零，按 Ctrl+C 退出", type="info")
 
-        # --- 发送零位标定指令 ---
-        beauty_print("正在发送零位标定指令...", type="info")
-        robot.set_zero_position()
-        beauty_print("零位标定完成！当前位置已设为新零点", type="success")
+        last_print = 0.0
+        while True:
+            key = _read_key()
+            if key == "q":
+                beauty_print("正在发送弱调零指令...", type="info")
+                robot.set_zero_position(mode="weak")
+                beauty_print("弱调零完成", type="success")
+            elif key == "p":
+                beauty_print("正在发送强调零指令...", type="info")
+                robot.set_zero_position(mode="strong")
+                beauty_print("强调零完成", type="success")
+
+            now = time.perf_counter()
+            if now - last_print >= PRINT_INTERVAL:
+                _print_state(robot)
+                last_print = now
+
+            time.sleep(0.02)
 
     except KeyboardInterrupt:
         beauty_print("\n用户取消", type="warning")

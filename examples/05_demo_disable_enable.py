@@ -4,8 +4,10 @@
 使能时会在当前位置恢复控制，确保不突跳到旧位置。
 """
 
+import argparse
 import math
 import alicia_m_sdk
+from demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -23,8 +25,12 @@ def _print_joints(robot, label: str):
 def main():
     beauty_print("Demo: 失能/使能交互", type="module")
 
+    parser = argparse.ArgumentParser(description="Disable and enable Alicia-M.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot()
+    robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
 
     try:

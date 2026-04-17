@@ -283,8 +283,9 @@ class MessageCodec:
     def encode_zero_reset(self, msg: ZeroResetRequest) -> Frame:
         """编码位姿重置请求（设置当前位姿为零位）
 
-        新固件协议: func_code 仅含部位标识（不带写入位），
-        数据 2 字节 = 起始关节ID(0) + 关节数量。
+        新固件协议: func_code 仅含部位标识（不带写入位）。
+        数据前 2 字节 = 起始关节ID(0) + 关节数量；
+        可选第 3 字节 = 调零方式（0x00=弱调零，0x01=强调零）。
 
         Args:
             msg: ZeroResetRequest 消息对象
@@ -292,11 +293,13 @@ class MessageCodec:
         Returns:
             编码后的 Frame 对象
         """
-        data = bytes([msg.start_joint, msg.joint_count])
+        data = bytearray([msg.start_joint, msg.joint_count])
+        if msg.reset_mode is not None:
+            data.append(msg.reset_mode)
         return Frame(
             cmd_id=CMD_ZERO_RESET,
             func_code=msg.aim,
-            data=data,
+            data=bytes(data),
         )
 
     # ============================================================
