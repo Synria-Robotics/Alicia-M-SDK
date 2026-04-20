@@ -433,7 +433,7 @@ class Device:
             error_type = frame.func_code
             error_data = frame.data[0] if frame.data else 0
             desc = ERROR_DESCRIPTIONS.get(error_type, f"未知错误(0x{error_type:02X})")
-            logger.warning("固件错误: %s (type=0x%02X, data=0x%02X)",
+            logger.warning("固件检测得到的数据帧有误: %s (type=0x%02X, data=0x%02X)",
                            desc, error_type, error_data)
 
     @staticmethod
