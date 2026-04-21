@@ -96,7 +96,7 @@ class SynriaRobotAPI:
         """
         if self._config.port:
             self._connect_once(timeout)
-            print(f"已连接 Alicia-M 串口: {self.connected_port}", flush=True)
+            print(f"已连接串口: {self.connected_port}", flush=True)
             return True
 
         ports = SerialPort.find_ports()
@@ -104,14 +104,14 @@ class SynriaRobotAPI:
             raise ConnectionError("未找到可用串口设备")
 
         ports = list(reversed(ports))
-        print(f"自动发现候选串口（按尝试顺序）: {', '.join(ports)}", flush=True)
+        print(f"发现串口: {', '.join(ports)}", flush=True)
         errors = []
         for port in ports:
-            print(f"尝试连接 Alicia-M 串口: {port}", flush=True)
+            print(f"自动尝试连接串口: {port}", flush=True)
             try:
                 self._serial_port.set_port(port)
                 self._connect_once(timeout)
-                print(f"已连接 Alicia-M 串口: {self.connected_port}", flush=True)
+                print(f"已自动连接串口: {self.connected_port}", flush=True)
                 return True
             except Exception as exc:
                 errors.append(f"{port}: {exc}")

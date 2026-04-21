@@ -21,7 +21,6 @@ def _print_joints(robot, label: str):
     else:
         beauty_print("无法读取关节角度", type="warning")
 
-
 def main():
     beauty_print("Demo: 失能/使能交互", type="module")
 

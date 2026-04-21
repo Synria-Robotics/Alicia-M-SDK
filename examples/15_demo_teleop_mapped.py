@@ -58,7 +58,6 @@ def make_joint_mapper_rad():
         return [math.radians(d) for d in follower_deg]
     return mapper
 
-
 def main(args):
     mode = args.mode.lower()
     target_mode = ControlMode(mode)
