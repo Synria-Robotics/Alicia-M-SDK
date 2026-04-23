@@ -3,7 +3,6 @@
 入口脚本只负责交互流程；版本判断、状态打印和调零协议细节放在这里。
 """
 
-import re
 import time
 
 from alicia_m_sdk.protocol.constants import NUM_MOTORS, ZERO_RESET_WEAK
@@ -39,13 +38,14 @@ def supports_weak_zero(version):
 
 
 def parse_firmware_version(version):
-    """从 v1.0.6、1.0.6-beta 等字符串中提取版本号。"""
+    """解析固件整数版本号，例如 106 表示 1.0.6。"""
     if not version:
         return None
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)", version)
-    if match is None:
+    text = str(version).strip()
+    if not text.isdigit():
         return None
-    return tuple(int(part) for part in match.groups())
+    value = int(text)
+    return value // 100, (value // 10) % 10, value % 10
 
 
 def print_robot_state(robot):
