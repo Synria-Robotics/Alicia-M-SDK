@@ -14,6 +14,7 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
+# ps: 注意mit是模式是柔性控制，最终位置有所偏差是正常的
 POSITION = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
