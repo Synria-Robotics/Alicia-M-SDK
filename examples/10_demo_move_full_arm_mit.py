@@ -16,6 +16,7 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
+# ps: 注意mit是模式是柔性控制，最终位置有所偏差是正常的
 POSE_A = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
 POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
