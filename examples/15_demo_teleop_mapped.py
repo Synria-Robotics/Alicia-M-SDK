@@ -1,6 +1,6 @@
 """15_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
 
-与 13_demo_teleop.py 功能相同，但使用 joint_mapping.py 中的
+与 13_demo_teleop.py 功能相同，但使用 demo_utils/joint_mapping.py 中的
 URDF 限位映射代替简单的符号翻转，具备:
 - D 零位 → M 区间中点对齐
 - 关节 3 按比例缩放（D/M 行程不同）
@@ -37,7 +37,7 @@ from alicia_m_sdk import ControlMode
 from alicia_m_sdk.control.teleoperation import Teleoperation
 from robocore.utils.beauty_logger import beauty_print
 
-from joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
+from alicia_m_sdk.demo_utils.joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
@@ -166,16 +166,16 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default="mit",
                         choices=["pv", "mit"],
                         help="控制模式: pv / mit (默认: mit)")
-    parser.add_argument('--leader-port', type=str, default="/dev/ttyACM0",
+    parser.add_argument('--leader-port', type=str, default="COM55",
                         help="Leader 串口 (Alicia-D)")
-    parser.add_argument('--port', '--follower-port', dest='follower_port',
-                        type=str, default="",
+    parser.add_argument('--port', '--follower-port', default="COM57", dest='follower_port',
+                        type=str,
                         help="Follower 串口 (Alicia-M)，不指定则自动发现")
     parser.add_argument('--follower-version', type=str, default="v1_1",
                         help="Alicia-M 硬件版本，可选 v1_0/v1_1 (默认: v1_1)")
     parser.add_argument('--frequency', type=float, default=100.0,
                         help="控制循环频率 [10-200] Hz (默认: 100)")
-    parser.add_argument('--speed', type=float, default=400.0,
+    parser.add_argument('--speed', type=float, default=200.0,
                         help="Follower 运动速度 [0-400]，映射到 [0-10] rad/s (默认: 400)")
     parser.add_argument('--interpolation', action='store_true',
                         help="MIT 模式启用线性轨迹插值")

@@ -6,7 +6,7 @@
 import argparse
 
 import alicia_m_sdk
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 

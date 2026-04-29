@@ -16,6 +16,7 @@ CMD_TORQUE         = 0x05      # 肢体力矩控制（关节力矩开关）
 CMD_JOINT_STATE    = 0x06      # 关节与夹具状态控制
 CMD_ENABLE         = 0x09      # 机器人部位失能/使能
 CMD_MOTOR_PARAM    = 0x11      # 关节控制幅值和驱动参数设置
+CMD_GRIPPER_PARAM  = 0x17      # 夹爪夹持参数读取/设置
 CMD_ERROR          = 0xEE      # 错误反馈
 
 # === 0x03 零位标定方式 ===

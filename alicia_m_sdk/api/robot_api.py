@@ -369,6 +369,19 @@ class SynriaRobotAPI:
             return False
         return self._joint_ctrl.move_gripper(value, wait=wait_for_completion)
 
+    def set_linear_interpolation_velocity(
+        self,
+        velocity_rad_s: Union[float, List[float]] = 2.0,
+    ) -> bool:
+        """一次性设置固件线性轨迹插值速度.
+
+        发送一帧只包含线性插值速度（0x06/addr=0x05）的数据帧。
+        速度单位为 rad/s，可传标量广播到 7 个电机，或传长度 7 的列表。
+        """
+        return self._joint_ctrl.set_linear_interpolation_velocity(
+            velocity_rad_s,
+        )
+
     # ========== MIT 专用接口 ==========
 
     def send_mit_command(

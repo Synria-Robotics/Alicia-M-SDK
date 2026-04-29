@@ -9,7 +9,7 @@ MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分�
 import argparse
 import time
 import alicia_m_sdk
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 

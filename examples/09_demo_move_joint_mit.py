@@ -9,7 +9,7 @@ MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 import argparse
 import time
 import alicia_m_sdk
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 

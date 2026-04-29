@@ -209,6 +209,18 @@ class Device:
         frame = self._codec.encode_pv_control(aim, positions, velocities)
         self.send_frame(frame)
 
+    def send_linear_velocity(self, aim: int,
+                             linear_velocities: List[float]) -> None:
+        """发送线性轨迹插值速度帧（fire-and-forget）.
+
+        只写入 0x06 指令的 ADDR_LINEAR_VEL 地址，用于一次性配置
+        固件侧线性轨迹插值速度。
+        """
+        frame = self._codec.encode_linear_velocity_control(
+            aim, linear_velocities,
+        )
+        self.send_frame(frame)
+
     def send_mit(
         self,
         aim: int,
@@ -362,7 +374,7 @@ class Device:
             self._handle_version(frame)
         elif cmd_id == CMD_ERROR:
             self._handle_error(frame)
-        # 其他指令的响应（0x03, 0x05, 0x09, 0x11）通过 send_and_wait 处理
+        # 其他指令的响应（0x03, 0x05, 0x09, 0x11, 0x17）通过 send_and_wait 处理
 
     def _handle_joint_state(self, frame: Frame) -> None:
         """处理 0x06 关节状态响应"""

@@ -11,7 +11,7 @@ import time
 import numpy as np
 import alicia_m_sdk
 from alicia_m_sdk import forward_kinematics, inverse_kinematics, RobotModel
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.transform import matrix_to_euler, matrix_to_quaternion
 from robocore.transform.conversions import quaternion_to_matrix
