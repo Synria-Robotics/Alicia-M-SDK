@@ -26,13 +26,10 @@ def validate_joint_angles(
 
     逐关节检查角度是否在限位范围内，超限时裁剪到边界并发出警告。
 
-    Args:
-        angles: 目标关节角度列表 (rad)
-        joint_limits_lower: 各关节角度下限 (rad)
-        joint_limits_upper: 各关节角度上限 (rad)
-
-    Returns:
-        裁剪后的关节角度列表 (rad)
+    :param angles, 目标关节角度列表 (rad)
+    :param joint_limits_lower, 各关节角度下限 (rad)
+    :param joint_limits_upper, 各关节角度上限 (rad)
+    :return, 裁剪后的关节角度列表 (rad)
     """
     clipped = []
     for i, angle in enumerate(angles):
@@ -60,12 +57,9 @@ def validate_speed(
     支持标量（所有关节使用相同速度）和列表（逐关节独立速度）两种输入形式。
     超限时裁剪到 [0, 400] 并发出警告。
 
-    Args:
-        speed: 速度值，标量或列表，范围 [0, 400]
-        num_joints: 关节数量
-
-    Returns:
-        长度为 num_joints 的速度列表
+    :param speed, 速度值，标量或列表，范围 [0, 400]
+    :param num_joints, 关节数量
+    :return, 长度为 num_joints 的速度列表
     """
     # 标量 → 列表
     if isinstance(speed, (int, float)):
@@ -102,11 +96,8 @@ def validate_gripper_value(value: float) -> float:
 
     超限时裁剪到边界并发出警告。
 
-    Args:
-        value: 夹爪目标值
-
-    Returns:
-        裁剪后的夹爪值 [0, 1000]
+    :param value, 夹爪目标值
+    :return, 裁剪后的夹爪值 [0, 1000]
     """
     if value < _GRIPPER_MIN:
         logger.warning(f"夹爪值超限: {value:.2f} < {_GRIPPER_MIN:.2f}, 已裁剪")

@@ -124,32 +124,10 @@ def plan_joint_trajectory(
     在关节空间中对给定路点进行轨迹插值，生成平滑的时间序列
     （时间戳、位置、速度、加速度）。
 
-    Args:
-        waypoints: 路点列表，每个路点为关节角度列表 (rad)
-            形状: [N, num_joints]，至少需要 2 个路点
-        planner_type: 规划器类型，可选值：
-            - 'b_spline': B 样条插值（默认，平滑性好）
-            - 'multi_segment': 多段多项式插值
-        **kwargs: 传递给规划器的额外参数：
-            - duration (float): 总时长 (s)，默认根据路点间距自动估算
-            - frequency (float): 采样频率 (Hz)，默认 200.0
-            - order (int): B 样条阶数，默认 5（仅 b_spline）
-            - segment_type (str): 分段类型 "cubic"/"quintic"（仅 multi_segment）
-
-    Returns:
-        包含以下键的字典：
-        - 'success': 规划是否成功 (bool)
-        - 'timestamps': 时间序列 (ndarray, shape [M])
-        - 'positions': 关节位置序列 (ndarray, shape [M, num_joints])
-        - 'velocities': 关节速度序列 (ndarray, shape [M, num_joints])
-        - 'accelerations': 关节加速度序列 (ndarray, shape [M, num_joints])
-        - 'duration': 轨迹总时长 (float, s)
-        - 'num_points': 采样点数 (int)
-        - 'planner_type': 使用的规划器类型 (str)
-
-    Raises:
-        ValueError: 路点数量不足或格式错误
-        ImportError: robocore.planning 不可用
+    :param waypoints, 路点列表，每个路点为关节角度列表 (rad) 形状: [N, num_joints]，至少需要 2 个路点
+    :param planner_type, 规划器类型，可选值： - 'b_spline': B 样条插值（默认，平滑性好） - 'multi_segment': 多段多项式插值
+    :param **kwargs, 传递给规划器的额外参数： - duration (float): 总时长 (s)，默认根据路点间距自动估算 - frequency (float): 采样频率 (Hz)，默认 200.0 - order (int): B 样条阶数，默认 5（仅 b_spline） - segment_type (str): 分段类型 "cubic"/"quintic"（仅 multi_segment）
+    :return, 包含以下键的字典： - 'success': 规划是否成功 (bool) - 'timestamps': 时间序列 (ndarray, shape [M]) - 'positions': 关节位置序列 (ndarray, shape [M, num_joints]) - 'velocities': 关节速度序列 (ndarray, shape [M, num_joints]) - 'accelerations': 关节加速度序列 (ndarray, shape [M, num_joints]) - 'duration': 轨迹总时长 (float, s) - 'num_points': 采样点数 (int) - 'planner_type': 使用的规划器类型 (str)
     """
     # 参数校验
     if len(waypoints) < 2:
@@ -241,29 +219,9 @@ def plan_cartesian_trajectory(
     在笛卡尔空间中对给定末端位姿路点进行轨迹插值，
     生成平滑的末端位姿序列（位置 + 姿态）。
 
-    Args:
-        waypoints: 末端位姿路点列表，每个路点为:
-            - 长度 6: [x, y, z, rx, ry, rz]（位置+欧拉角）
-            - 长度 7: [x, y, z, qx, qy, qz, qw]（位置+四元数）
-            至少需要 2 个路点
-        **kwargs: 传递给规划器的额外参数：
-            - duration (float): 总时长 (s)
-            - frequency (float): 采样频率 (Hz)，默认 200.0
-            - interpolation (str): 姿态插值方法 "slerp"/"linear"
-
-    Returns:
-        包含以下键的字典：
-        - 'success': 规划是否成功 (bool)
-        - 'timestamps': 时间序列 (ndarray, shape [M])
-        - 'positions': 末端位置序列 (ndarray, shape [M, 3])
-        - 'orientations': 末端姿态序列 (ndarray, shape [M, 4]，四元数 xyzw)
-        - 'poses': 完整位姿序列 (ndarray, shape [M, 7]，pos+quat)
-        - 'duration': 轨迹总时长 (float, s)
-        - 'num_points': 采样点数 (int)
-
-    Raises:
-        ValueError: 路点数量不足或格式错误
-        ImportError: robocore.planning 不可用
+    :param waypoints, 末端位姿路点列表，每个路点为: - 长度 6: [x, y, z, rx, ry, rz]（位置+欧拉角） - 长度 7: [x, y, z, qx, qy, qz, qw]（位置+四元数） 至少需要 2 个路点
+    :param **kwargs, 传递给规划器的额外参数： - duration (float): 总时长 (s) - frequency (float): 采样频率 (Hz)，默认 200.0 - interpolation (str): 姿态插值方法 "slerp"/"linear"
+    :return, 包含以下键的字典： - 'success': 规划是否成功 (bool) - 'timestamps': 时间序列 (ndarray, shape [M]) - 'positions': 末端位置序列 (ndarray, shape [M, 3]) - 'orientations': 末端姿态序列 (ndarray, shape [M, 4]，四元数 xyzw) - 'poses': 完整位姿序列 (ndarray, shape [M, 7]，pos+quat) - 'duration': 轨迹总时长 (float, s) - 'num_points': 采样点数 (int)
     """
     # 参数校验
     if len(waypoints) < 2:

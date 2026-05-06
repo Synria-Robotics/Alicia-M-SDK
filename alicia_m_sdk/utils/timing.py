@@ -20,8 +20,7 @@ def precise_sleep(duration: float) -> None:
         - duration <= 2ms: 全程忙等待
         - duration <= 0: 立即返回
 
-    Args:
-        duration: 休眠时长（秒），如 0.001 表示 1ms
+    :param duration, 休眠时长（秒），如 0.001 表示 1ms
     """
     if duration <= 0:
         return
@@ -47,16 +46,7 @@ class FPSCounter:
     使用滑动窗口法统计最近 N 帧的平均帧率。
     适用于控制循环的性能监控。
 
-    Args:
-        window_size: 统计窗口大小（帧数），默认 60 帧
-
-    用法::
-
-        fps = FPSCounter()
-        while running:
-            # ... 执行一帧逻辑 ...
-            fps.tick()
-            print(f"FPS: {fps.get_fps():.1f}")
+    :param window_size, 统计窗口大小（帧数），默认 60 帧 用法:: fps = FPSCounter() while running: # ... 执行一帧逻辑 ... fps.tick() print(f"FPS: {fps.get_fps():.1f}")
     """
 
     def __init__(self, window_size: int = 60):
@@ -76,8 +66,7 @@ class FPSCounter:
         基于滑动窗口内的时间间隔计算平均帧率。
         窗口内不足 2 帧时返回 0.0。
 
-        Returns:
-            平均帧率 (Hz)
+        :return, 平均帧率 (Hz)
         """
         n = len(self._timestamps)
         if n < 2:

@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ..protocol.constants import NUM_JOINTS
+from ..hardware.constants import NUM_JOINTS
 from .beauty_logger import beauty_print
 
 _MAX_WAYPOINT_SCATTER = 400

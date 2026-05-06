@@ -3,6 +3,6 @@
 提供 SynriaRobotAPI 主类，作为 SDK 的统一入口门面。
 """
 
-from .robot_api import SynriaRobotAPI
+from .synria_robot_api import SynriaRobotAPI
 
 __all__ = ['SynriaRobotAPI']

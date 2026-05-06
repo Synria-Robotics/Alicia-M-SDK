@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from ..hardware.device import Device
-from ..protocol.constants import NUM_JOINTS, NUM_MOTORS
+from ..hardware.constants import NUM_JOINTS, NUM_MOTORS
 from ..types.exceptions import ValidationError, MotionError
 from ..utils.beauty_logger import beauty_print, logger
 from ..utils.timing import precise_sleep

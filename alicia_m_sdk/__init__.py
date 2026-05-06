@@ -19,7 +19,7 @@
 __version__ = "1.0.1"
 
 # === 核心类型 ===
-from .api.robot_api import SynriaRobotAPI
+from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams, RobotStatus, VersionInfo
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
@@ -67,20 +67,17 @@ def create_robot(
     3. 创建 SynriaRobotAPI 实例
     4. 自动连接（可选）
 
-    Args:
-        port: 串口端口路径，空字符串表示自动发现
-        version: 机器人硬件版本 ("v1_0", "v1_1")
-        variant: 变体标识（None=自动检测）
-        control_aim: 控制目标 ("leader"/"follower"/None=自动检测)
-        control_mode: 控制模式 ("pv"/"mit"/None=检测固件当前模式)
-        baudrate: 串口波特率
-        backend: RoboCore 计算后端 ("numpy"/"torch")
-        debug_mode: 调试模式（启用 DEBUG 级别日志）
-        auto_connect: 是否自动连接
-        extended_polling: 扩展轮询（查询插补速度、温度等，需新固件支持）
-
-    Returns:
-        SynriaRobotAPI 实例
+    :param port, 串口端口路径，空字符串表示自动发现
+    :param version, 机器人硬件版本 ("v1_0", "v1_1")
+    :param variant, 变体标识（None=自动检测）
+    :param control_aim, 控制目标 ("leader"/"follower"/None=自动检测)
+    :param control_mode, 控制模式 ("pv"/"mit"/None=检测固件当前模式)
+    :param baudrate, 串口波特率
+    :param backend, RoboCore 计算后端 ("numpy"/"torch")
+    :param debug_mode, 调试模式（启用 DEBUG 级别日志）
+    :param auto_connect, 是否自动连接
+    :param extended_polling, 扩展轮询（查询插补速度、温度等，需新固件支持）
+    :return, SynriaRobotAPI 实例
     """
     if debug_mode:
         logger.set_min_level(LogLevel.DEBUG)

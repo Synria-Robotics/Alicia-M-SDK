@@ -50,7 +50,7 @@ alicia_m_sdk/
 │
 ├── api/                            # 【用户 API 层】面向用户的高层接口
 │   ├── __init__.py
-│   └── robot_api.py                # SynriaRobotAPI 主类（精简版，委托各子模块）
+│   └── synria_robot_api.py         # SynriaRobotAPI 主类（精简版，委托各子模块）
 │
 ├── protocol/                       # 【协议层】通信协议的编解码（新增，核心改动）
 │   ├── __init__.py
@@ -972,7 +972,7 @@ class MotionError(AliciaSDKError):
 
 重构后的 API 层是一个**精简的门面（Facade）**，将具体逻辑委托给控制层、运动学接口、规划接口。
 
-#### 5.5.1 `robot_api.py` — SynriaRobotAPI
+#### 5.5.1 `synria_robot_api.py` — SynriaRobotAPI
 
 ```python
 class SynriaRobotAPI:
@@ -1276,7 +1276,7 @@ def format_array(arr, precision: int = 5, sign: bool = True) -> str:
 """Alicia-M-SDK: Synria 云擎系列机械臂 Python SDK"""
 
 import robocore as rc
-from .api.robot_api import SynriaRobotAPI
+from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode
@@ -2329,9 +2329,9 @@ if __name__ == "__main__":
 
 | 功能 | 预留接口 | 所在模块 |
 |------|---------|---------|
-| 读取当前控制模式 | `get_robot_state("control_mode")` | `device.py` / `robot_api.py` |
-| 读取电机温度 | `get_robot_state("temperature")` | `device.py` / `robot_api.py` |
-| 自检功能 | `get_robot_state("self_check")` | `device.py` / `robot_api.py` |
+| 读取当前控制模式 | `get_robot_state("control_mode")` | `device.py` / `synria_robot_api.py` |
+| 读取电机温度 | `get_robot_state("temperature")` | `device.py` / `synria_robot_api.py` |
+| 自检功能 | `get_robot_state("self_check")` | `device.py` / `synria_robot_api.py` |
 | 切换重力补偿模式 | `switch_mode("gravity_comp")` | `joint_control.py` |
 | SDK 侧切换 PV/MIT | `switch_mode("pv"/"mit")` | `joint_control.py` |
 
@@ -2358,7 +2358,7 @@ if __name__ == "__main__":
 
 ### 阶段四：API 层与接口
 10. 实现 `kinematics.py` 和 `planning.py`（RoboCore 封装）
-11. 实现 `api/robot_api.py`（门面类）
+11. 实现 `api/synria_robot_api.py`（门面类）
 12. 实现 `__init__.py`（包入口和 `create_robot()`）
 
 ### 阶段五：收尾
@@ -2372,7 +2372,7 @@ if __name__ == "__main__":
 
 | 旧文件 | 新文件 | 说明 |
 |--------|--------|------|
-| `api/synria_robot_api.py` | `api/robot_api.py` | 大幅精简，委托子模块 |
+| `api/synria_robot_api.py` | `api/synria_robot_api.py` | 大幅精简，委托子模块 |
 | `hardware/servo_driver.py` | `hardware/device.py` | 统一设备抽象 |
 | `hardware/serial_comm.py` | `hardware/serial_port.py` | 纯 I/O 封装 |
 | `hardware/data_parser.py` | `protocol/codec.py` + `protocol/messages.py` | 解析逻辑归入协议层 |

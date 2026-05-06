@@ -65,8 +65,7 @@ class MessageCodec:
 
         请求帧: 功能码=0x7E, 数据=0xFE（占位符）
 
-        Returns:
-            编码后的 Frame 对象
+        :return, 编码后的 Frame 对象
         """
         return Frame(
             cmd_id=CMD_VERSION,
@@ -79,14 +78,8 @@ class MessageCodec:
 
         响应数据: 序列号(16B) + 硬件版本(4B) + 固件版本(4B) = 24 字节
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            VersionResponse 消息对象
-
-        Raises:
-            ValueError: 指令ID不匹配或数据长度错误
+        :param frame, 接收到的 Frame 对象
+        :return, ValueError: 指令ID不匹配或数据长度错误
         """
         self._check_cmd(frame, CMD_VERSION)
         expected_len = VERSION_SERIAL_LEN + VERSION_HARDWARE_LEN + VERSION_FIRMWARE_LEN
@@ -125,11 +118,8 @@ class MessageCodec:
 
         请求帧: [0xAA][0x06][aim][0x02][start_addr][addr_count][CRC8][0xFF]
 
-        Args:
-            msg: JointStateRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, JointStateRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytes([msg.start_addr, msg.addr_count])
         return Frame(
@@ -144,14 +134,8 @@ class MessageCodec:
         响应数据: [start_addr][addr_count][motor_data...][run_status]
         motor_data: 7 个电机 × addr_count 个地址 × 2 字节/地址
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            JointStateResponse 消息对象
-
-        Raises:
-            ValueError: 数据格式错误
+        :param frame, 接收到的 Frame 对象
+        :return, ValueError: 数据格式错误
         """
         self._check_cmd(frame, CMD_JOINT_STATE)
         if len(frame.data) < 3:
@@ -205,11 +189,8 @@ class MessageCodec:
 
         12bit 数据存储方式: 2 字节小端序，高 4 位保留置零，低 12 位为有效数据。
 
-        Args:
-            msg: JointControlRequest 消息对象，motor_data 为原始协议整数值
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, JointControlRequest 消息对象，motor_data 为原始协议整数值
+        :return, 编码后的 Frame 对象
         """
         # 构建数据区
         data = bytearray()
@@ -234,11 +215,8 @@ class MessageCodec:
         响应帧: [start_addr|0x80][addr_count][result]
         result: 0x01=成功, 0x00=失败
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            JointControlResponse 消息对象
+        :param frame, 接收到的 Frame 对象
+        :return, JointControlResponse 消息对象
         """
         self._check_cmd(frame, CMD_JOINT_STATE)
         if len(frame.data) < 3:
@@ -263,11 +241,8 @@ class MessageCodec:
 
         数据: 每个部位 2 字节（起始关节ID + 偏移数量）
 
-        Args:
-            msg: TorqueRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, TorqueRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytes([msg.start_joint, msg.joint_count])
         return Frame(
@@ -287,11 +262,8 @@ class MessageCodec:
         数据前 2 字节 = 起始关节ID(0) + 关节数量；
         可选第 3 字节 = 调零方式（0x00=弱调零，0x01=强调零）。
 
-        Args:
-            msg: ZeroResetRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, ZeroResetRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytearray([msg.start_joint, msg.joint_count])
         if msg.reset_mode is not None:
@@ -311,11 +283,8 @@ class MessageCodec:
 
         数据: 1 字节，0x01=使能，0x00=失能
 
-        Args:
-            msg: EnableRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, EnableRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytes([ENABLE_ON if msg.enable else ENABLE_OFF])
         return Frame(
@@ -336,11 +305,8 @@ class MessageCodec:
         常见用法 — 模式切换:
             param_addr=0x0B, param_value=0x01(MIT) 或 0x02(PV)
 
-        Args:
-            msg: MotorParamRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, MotorParamRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytearray()
         data.append(msg.start_motor)
@@ -360,11 +326,8 @@ class MessageCodec:
         帧格式: [start_motor][motor_count][param_addr]
         读取时 func_code 不带 FUNC_WRITE_BIT。
 
-        Args:
-            msg: MotorParamReadRequest 消息对象
-
-        Returns:
-            编码后的 Frame 对象
+        :param msg, MotorParamReadRequest 消息对象
+        :return, 编码后的 Frame 对象
         """
         data = bytes([msg.start_motor, msg.motor_count, msg.param_addr])
         return Frame(
@@ -379,11 +342,8 @@ class MessageCodec:
         响应格式: [保留字节(3)][参数值(4字节LE)] × N 个电机
         前 3 字节为保留字段，后续按电机顺序返回 uint32 值。
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            各电机的参数值列表
+        :param frame, 接收到的 Frame 对象
+        :return, 各电机的参数值列表
         """
         self._check_cmd(frame, CMD_MOTOR_PARAM)
         data = frame.data
@@ -405,11 +365,8 @@ class MessageCodec:
 
         错误类型由功能码字段标识，携带数据的含义取决于错误类型。
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            ErrorResponse 消息对象
+        :param frame, 接收到的 Frame 对象
+        :return, ErrorResponse 消息对象
         """
         self._check_cmd(frame, CMD_ERROR)
         return ErrorResponse(
@@ -432,13 +389,10 @@ class MessageCodec:
         PV 帧: addr_count=2, 每电机 4 字节 (pos 16bit + vel 12bit)
         总数据长度: 2(前缀) + 7*4(电机数据) = 30 字节
 
-        Args:
-            aim: 目标部位（AIM_LEADER / AIM_FOLLOWER）
-            positions: 7 个电机的目标位置 (rad)
-            velocities: 7 个电机的有符号目标速度 (rad/s)
-
-        Returns:
-            编码后的 Frame 对象
+        :param aim, 目标部位（AIM_LEADER / AIM_FOLLOWER）
+        :param positions, 7 个电机的目标位置 (rad)
+        :param velocities, 7 个电机的有符号目标速度 (rad/s)
+        :return, 编码后的 Frame 对象
         """
         self._validate_motor_list(positions, "positions")
         self._validate_motor_list(velocities, "velocities")
@@ -476,18 +430,14 @@ class MessageCodec:
         当 linear_velocities 为 None 时，线性轨迹速度填充清零信号 (0xFFFF)，
         通知固件禁用线性轨迹插值。
 
-        Args:
-            aim: 目标部位
-            positions: 7 个电机的目标位置 (rad)
-            velocities: 7 个电机的目标速度 (rad/s)
-            torques: 7 个电机的前馈力矩 (N·m)
-            kps: 7 个电机的 Kp 增益
-            kds: 7 个电机的 Kd 增益
-            linear_velocities: 7 个电机的线性轨迹插值速度 (rad/s)，
-                None 时填充清零信号 (0xFFFF) 禁用插值
-
-        Returns:
-            编码后的 Frame 对象
+        :param aim, 目标部位
+        :param positions, 7 个电机的目标位置 (rad)
+        :param velocities, 7 个电机的目标速度 (rad/s)
+        :param torques, 7 个电机的前馈力矩 (N·m)
+        :param kps, 7 个电机的 Kp 增益
+        :param kds, 7 个电机的 Kd 增益
+        :param linear_velocities, 7 个电机的线性轨迹插值速度 (rad/s)， None 时填充清零信号 (0xFFFF) 禁用插值
+        :return, 编码后的 Frame 对象
         """
         self._validate_motor_list(positions, "positions")
         self._validate_motor_list(velocities, "velocities")
@@ -542,13 +492,8 @@ class MessageCodec:
 
         根据 start_addr 和 addr_count 自动选择对应的解码器。
 
-        Args:
-            response: JointStateResponse 消息对象
-
-        Returns:
-            字典，键为字段名（positions / velocities / torques / kps / kds /
-            linear_vels / temperatures），值为各电机的物理量列表。
-            附加 "run_status" 字段。
+        :param response, JointStateResponse 消息对象
+        :return, 字典，键为字段名（positions / velocities / torques / kps / kds / linear_vels / temperatures），值为各电机的物理量列表。 附加 "run_status" 字段。
         """
         result: dict = {"run_status": response.run_status}
 
@@ -573,15 +518,8 @@ class MessageCodec:
     def decode_frame(self, frame: Frame):
         """根据帧的指令 ID 自动分发到对应的解码方法
 
-        Args:
-            frame: 接收到的 Frame 对象
-
-        Returns:
-            对应的消息对象（VersionResponse / JointStateResponse /
-            JointControlResponse / ErrorResponse）
-
-        Raises:
-            ValueError: 未知的指令 ID
+        :param frame, 接收到的 Frame 对象
+        :return, 对应的消息对象（VersionResponse / JointStateResponse / JointControlResponse / ErrorResponse）
         """
         if frame.cmd_id == CMD_VERSION:
             return self.decode_version_response(frame)

@@ -34,7 +34,7 @@ import numpy as np
 import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from alicia_m_sdk.control.teleoperation import Teleoperation
+from alicia_m_sdk.execution.teleoperation import Teleoperation
 from robocore.utils.beauty_logger import beauty_print
 
 from joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m

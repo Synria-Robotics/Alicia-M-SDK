@@ -17,8 +17,8 @@ from ..types.enums import ControlMode, ControlAim
 from ..types.exceptions import (
     ConnectionError, TimeoutError, RobotStateError,
 )
-from ..protocol.codec import MessageCodec
-from ..protocol.constants import (
+from ..hardware.codec import MessageCodec
+from ..hardware.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
     NUM_JOINTS,
@@ -26,8 +26,8 @@ from ..protocol.constants import (
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
-from ..control.joint_control import JointController
-from ..control.trajectory_executor import TrajectoryExecutor
+from ..execution.joint_control import JointController
+from ..execution.trajectory_executor import TrajectoryExecutor
 from .. import kinematics as kin_module
 from .. import planning as plan_module
 from ..utils.beauty_logger import logger
@@ -38,9 +38,8 @@ class SynriaRobotAPI:
 
     提供面向用户的统一控制入口，内部委托各子模块执行具体逻辑。
 
-    Args:
-        config: 机器人配置
-        robot_model: RoboCore RobotModel 实例（由 create_robot 传入）
+    :param config, 机器人配置
+    :param robot_model, RoboCore RobotModel 实例（由 create_robot 传入）
     """
 
     def __init__(self, config: RobotConfig, robot_model=None):
@@ -76,14 +75,8 @@ class SynriaRobotAPI:
 
         总超时覆盖整个连接流程：串口打开 + 后台线程启动 + 自动检测 + 首次状态获取。
 
-        Args:
-            timeout: 总超时（秒）
-
-        Returns:
-            连接成功返回 True
-
-        Raises:
-            ConnectionError: 连接失败
+        :param timeout, 总超时（秒）
+        :return, 连接成功返回 True
         """
         deadline = time.time() + timeout
 
@@ -151,11 +144,8 @@ class SynriaRobotAPI:
         一次性查询（发送请求等待响应）:
             - "control_mode": 各电机控制模式 (0x11)
 
-        Args:
-            info_type: 查询类型
-
-        Returns:
-            对应类型的状态数据，不可用时返回 None
+        :param info_type, 查询类型
+        :return, 对应类型的状态数据，不可用时返回 None
         """
         state = self._device.joint_state
 
@@ -191,8 +181,7 @@ class SynriaRobotAPI:
     def get_pose(self) -> Optional[Dict]:
         """获取末端位姿（通过 FK 计算）
 
-        Returns:
-            位姿字典 {transform, position, rotation, euler_xyz, quaternion_xyzw}
+        :return, 位姿字典 {transform, position, rotation, euler_xyz, quaternion_xyzw}
         """
         if self._robot_model is None:
             logger.warning("未加载机器人模型，无法计算位姿")
@@ -207,11 +196,8 @@ class SynriaRobotAPI:
     def get_firmware_version(self, timeout: float = 5.0) -> Optional[str]:
         """获取固件版本
 
-        Args:
-            timeout: 查询超时
-
-        Returns:
-            固件版本字符串，如 "v1.1.0"
+        :param timeout, 查询超时
+        :return, 固件版本字符串，如 "v1.1.0"
         """
         frame = self._codec.encode_version_request()
         resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
@@ -244,24 +230,18 @@ class SynriaRobotAPI:
 
         MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
-        Args:
-            target_joints: 目标角度，6 个关节
-            gripper_value: 夹爪值 [0, 1000]
-            joint_format: 角度格式 'deg' / 'rad'
-            speed: 运动速度 [0, 400]
-            gripper_speed: 夹爪速度 [0, 400]
-            wait_for_completion: 是否等待到达
-            use_interpolation: MIT 模式是否使用线性轨迹插值（PV 模式忽略）
-            kp: MIT 位置增益 [0, 500]（PV 模式忽略）。
-                None=使用默认值，float=广播至所有电机，
-                List[float] 长度 6(仅关节) 或 7(含夹爪) 逐电机设置。
-            kd: MIT 速度增益 [0, 5]（PV 模式忽略）。格式同 kp。
-            torque: MIT 前馈力矩 (N·m)（PV 模式忽略）。
-                None=默认 0，float=广播，List[float] 逐电机设置。
-            vel_ref: MIT 目标速度 (rad/s)（PV 模式忽略）。格式同 torque。
-
-        Returns:
-            是否成功到达目标
+        :param target_joints, 目标角度，6 个关节
+        :param gripper_value, 夹爪值 [0, 1000]
+        :param joint_format, 角度格式 'deg' / 'rad'
+        :param speed, 运动速度 [0, 400]
+        :param gripper_speed, 夹爪速度 [0, 400]
+        :param wait_for_completion, 是否等待到达
+        :param use_interpolation, MIT 模式是否使用线性轨迹插值（PV 模式忽略）
+        :param kp, MIT 位置增益 [0, 500]（PV 模式忽略）。 None=使用默认值，float=广播至所有电机， List[float] 长度 6(仅关节) 或 7(含夹爪) 逐电机设置。
+        :param kd, MIT 速度增益 [0, 5]（PV 模式忽略）。格式同 kp。
+        :param torque, MIT 前馈力矩 (N·m)（PV 模式忽略）。 None=默认 0，float=广播，List[float] 逐电机设置。
+        :param vel_ref, MIT 目标速度 (rad/s)（PV 模式忽略）。格式同 torque。
+        :return, 是否成功到达目标
         """
         # 角度转换
         if target_joints is not None and joint_format == 'deg':
@@ -313,10 +293,9 @@ class SynriaRobotAPI:
     ) -> bool:
         """控制夹爪
 
-        Args:
-            command: "open" / "close" / None（使用 value）
-            value: 夹爪目标值 [0, 1000]
-            wait_for_completion: 是否等待
+        :param command, "open" / "close" / None（使用 value）
+        :param value, 夹爪目标值 [0, 1000]
+        :param wait_for_completion, 是否等待
         """
         if command == "open":
             value = 1000.0
@@ -338,9 +317,8 @@ class SynriaRobotAPI:
         每帧发送 6 地址 MIT 帧（线性速度填清零信号），不等待、不插值。
         调用方需自行维持高频发送（≥200Hz）。
 
-        Args:
-            joint_params: 7 个电机的 MIT 参数
-            gripper: 夹爪值，None 使用 joint_params[6].pos_ref
+        :param joint_params, 7 个电机的 MIT 参数
+        :param gripper, 夹爪值，None 使用 joint_params[6].pos_ref
         """
         self._joint_ctrl.send_mit(joint_params, gripper=gripper)
 
@@ -351,9 +329,8 @@ class SynriaRobotAPI:
     ) -> bool:
         """力矩开关（仅 MIT 模式）
 
-        Args:
-            command: "off"=卸力, "on"=恢复
-            joints: 关节索引列表，None=全部
+        :param command, "off"=卸力, "on"=恢复
+        :param joints, 关节索引列表，None=全部
         """
         if command == "off":
             return self._joint_ctrl.torque_off(joints)
@@ -376,8 +353,7 @@ class SynriaRobotAPI:
         切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
         夹爪电机始终保持 MIT 模式，不受模式切换影响。
 
-        Args:
-            mode: "pv" / "mit"
+        :param mode, "pv" / "mit"
         """
         ctrl_mode = ControlMode.PV if mode.lower() == "pv" else ControlMode.MIT
         return self._joint_ctrl.switch_mode(ctrl_mode)
@@ -388,8 +364,7 @@ class SynriaRobotAPI:
         基础模式（默认）: 仅查询角度、速度、力矩，兼容所有固件版本
         扩展模式: 额外查询 kp、kd、插补速度、温度，仅新固件支持
 
-        Args:
-            enabled: True=扩展查询, False=基础查询
+        :param enabled, True=扩展查询, False=基础查询
         """
         count = POLL_ADDR_EXTENDED if enabled else POLL_ADDR_BASIC
         self._device.set_poll_addr_count(count)
@@ -411,14 +386,11 @@ class SynriaRobotAPI:
     ) -> Dict:
         """通过逆运动学移动到目标位姿
 
-        Args:
-            target_pose: 目标位姿（4x4矩阵 / [x,y,z,qx,qy,qz,qw]）
-            method: IK 方法
-            execute: 是否执行运动
-            speed: 运动速度
-
-        Returns:
-            IK 结果字典
+        :param target_pose, 目标位姿（4x4矩阵 / [x,y,z,qx,qy,qz,qw]）
+        :param method, IK 方法
+        :param execute, 是否执行运动
+        :param speed, 运动速度
+        :return, IK 结果字典
         """
         if self._robot_model is None:
             raise RobotStateError("未加载机器人模型")
@@ -457,10 +429,9 @@ class SynriaRobotAPI:
     ) -> bool:
         """执行平滑关节轨迹
 
-        Args:
-            q_end: 目标关节角度 (rad)
-            duration: 运动时长
-            method: 插值方法
+        :param q_end, 目标关节角度 (rad)
+        :param duration, 运动时长
+        :param method, 插值方法
         """
         state = self._device.joint_state
         if state is None:
@@ -594,8 +565,7 @@ class SynriaRobotAPI:
         若关节电机模式不一致，返回 None 以触发后续强制切换。
         内部重试多次，容忍连接初期的短暂通信不稳定。
 
-        Returns:
-            关节电机一致时返回该模式，不一致或查询失败返回 None
+        :return, 关节电机一致时返回该模式，不一致或查询失败返回 None
         """
         _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
         for attempt in range(3):

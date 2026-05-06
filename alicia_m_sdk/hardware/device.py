@@ -13,10 +13,10 @@ import threading
 from typing import Optional, List, Dict, Any
 
 from .serial_port import SerialPort
-from ..protocol.frame import Frame
-from ..protocol.codec import MessageCodec
-from ..protocol.messages import JointStateRequest, MotorParamReadRequest
-from ..protocol.constants import (
+from .frame import Frame
+from .codec import MessageCodec
+from .messages import JointStateRequest, MotorParamReadRequest
+from .constants import (
     CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR, CMD_MOTOR_PARAM,
     AIM_FOLLOWER, NUM_MOTORS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
@@ -99,9 +99,8 @@ class StateCache:
 class Device:
     """机器人设备抽象：非阻塞通信、异步状态更新
 
-    Args:
-        serial_port: 串口驱动实例
-        codec: 消息编解码器实例
+    :param serial_port, 串口驱动实例
+    :param codec, 消息编解码器实例
     """
 
     def __init__(self, serial_port: SerialPort, codec: MessageCodec):
@@ -136,8 +135,7 @@ class Device:
     def set_poll_addr_count(self, count: int) -> None:
         """设置轮询查询的地址数量
 
-        Args:
-            count: POLL_ADDR_BASIC(3) 或 POLL_ADDR_EXTENDED(7)
+        :param count, POLL_ADDR_BASIC(3) 或 POLL_ADDR_EXTENDED(7)
         """
         self._poll_addr_count = count
 
@@ -199,10 +197,9 @@ class Device:
                 velocities: List[float]) -> None:
         """发送 PV 控制帧（pos+vel，fire-and-forget）
 
-        Args:
-            aim: 目标部位 (AIM_LEADER / AIM_FOLLOWER)
-            positions: 7 个电机的目标位置 (rad)
-            velocities: 7 个电机的有符号速度 (rad/s)
+        :param aim, 目标部位 (AIM_LEADER / AIM_FOLLOWER)
+        :param positions, 7 个电机的目标位置 (rad)
+        :param velocities, 7 个电机的有符号速度 (rad/s)
         """
         frame = self._codec.encode_pv_control(aim, positions, velocities)
         self.send_frame(frame)
@@ -215,11 +212,9 @@ class Device:
     ) -> None:
         """发送 MIT 全参数帧（fire-and-forget，始终 6 地址）
 
-        Args:
-            aim: 目标部位
-            params: 7 个电机的 MIT 参数
-            linear_velocities: 线性轨迹插值速度 (rad/s)，
-                None 时填充清零信号 (0xFFFF) 禁用插值
+        :param aim, 目标部位
+        :param params, 7 个电机的 MIT 参数
+        :param linear_velocities, 线性轨迹插值速度 (rad/s)， None 时填充清零信号 (0xFFFF) 禁用插值
         """
         # 解包 MitParams 为 codec 所需的独立列表
         positions = [p.pos_ref for p in params]
@@ -240,13 +235,10 @@ class Device:
         仅用于低频操作：版本查询、模式切换等。
         通过 Event 机制等待读线程收到匹配响应，不阻塞串口。
 
-        Args:
-            frame: 要发送的请求帧
-            expected_cmd: 期望响应的指令 ID
-            timeout: 等待超时（秒）
-
-        Returns:
-            匹配的响应帧，超时返回 None
+        :param frame, 要发送的请求帧
+        :param expected_cmd, 期望响应的指令 ID
+        :param timeout, 等待超时（秒）
+        :return, 匹配的响应帧，超时返回 None
         """
         event = self._state_cache.register_pending(expected_cmd)
         self.send_frame(frame)
@@ -260,12 +252,9 @@ class Device:
     ) -> Optional[List[int]]:
         """读取所有电机的指定参数
 
-        Args:
-            param_addr: 参数地址 (如 MOTOR_PARAM_CTRL_MODE=0x0B)
-            timeout: 等待超时 (秒)
-
-        Returns:
-            各电机的参数值列表（uint32），超时返回 None
+        :param param_addr, 参数地址 (如 MOTOR_PARAM_CTRL_MODE=0x0B)
+        :param timeout, 等待超时 (秒)
+        :return, 各电机的参数值列表（uint32），超时返回 None
         """
         query = self._codec.encode_motor_param_read(MotorParamReadRequest(
             aim=self._aim,

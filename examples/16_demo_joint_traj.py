@@ -20,7 +20,7 @@ import time
 import numpy as np
 import alicia_m_sdk
 from demo_common import add_port_argument
-from alicia_m_sdk.control.trajectory_executor import (
+from alicia_m_sdk.execution.trajectory_executor import (
     execute_joint_trajectory,
     load_waypoints_from_file,
     resolve_default_traj_save_dir,
