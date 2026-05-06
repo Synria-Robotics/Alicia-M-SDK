@@ -8,7 +8,6 @@ Device 是硬件层的核心，统一管理通信调度和状态缓存。
 - 状态轮询线程: 专用后台线程周期性发送状态查询帧，保证空闲时缓存不过期
 """
 
-import logging
 import time
 import threading
 from typing import Optional, List, Dict, Any
@@ -24,8 +23,7 @@ from ..protocol.constants import (
     ERROR_DESCRIPTIONS,
 )
 from ..types.state import JointState, MitParams, RobotStatus, VersionInfo
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class StateCache:
@@ -433,8 +431,9 @@ class Device:
             error_type = frame.func_code
             error_data = frame.data[0] if frame.data else 0
             desc = ERROR_DESCRIPTIONS.get(error_type, f"未知错误(0x{error_type:02X})")
-            logger.warning("固件错误: %s (type=0x%02X, data=0x%02X)",
-                           desc, error_type, error_data)
+            logger.warning(
+                f"固件错误: {desc} (type=0x{error_type:02X}, data=0x{error_data:02X})"
+            )
 
     @staticmethod
     def _parse_run_status(status_byte: int) -> RobotStatus:

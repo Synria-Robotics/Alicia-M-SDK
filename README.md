@@ -14,6 +14,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 - **运动学**：正/逆运动学求解（基于 RoboCore）
 - **轨迹规划**：关节空间与笛卡尔空间轨迹规划与执行
 - **可视化**：WebSocket 实时推送关节状态至 SparkVis
+- **运行日志**：默认输出终端日志并自动保存到 `./logs/alicia_m_sdk_YYYYMMDD_HHMMSS.log`
 
 ## 主要特性
 

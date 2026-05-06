@@ -10,7 +10,7 @@ import argparse
 import time
 import alicia_m_sdk
 from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
@@ -20,12 +20,8 @@ MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
-def main():
+def main(args):
     beauty_print("Demo: 夹爪控制", type="module")
-
-    parser = argparse.ArgumentParser(description="Move Alicia-M gripper.")
-    add_port_argument(parser)
-    args = parser.parse_args()
 
     # 创建并连接机器人（无须指定模式，夹爪电机固件锁定 MIT）
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -85,4 +81,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Move Alicia-M gripper")
+    add_port_argument(parser)
+    args = parser.parse_args()
+    
+    main(args)

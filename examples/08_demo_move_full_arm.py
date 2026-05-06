@@ -9,7 +9,7 @@ import argparse
 import time
 import alicia_m_sdk
 from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # 预设安全关节位置 (度)
@@ -17,12 +17,8 @@ POSE_A = [90, -90.0, -90.0, 80.0, 0.0, 0.0]
 POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
 
-def main():
+def main(args):
     beauty_print("Demo: 关节+夹爪协同控制", type="module")
-
-    parser = argparse.ArgumentParser(description="Move Alicia-M arm and gripper.")
-    add_port_argument(parser)
-    args = parser.parse_args()
 
     # 创建并连接机器人（不指定模式，避免自动切换）
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -109,4 +105,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Move Alicia-M arm and gripper.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+    
+    main(args)

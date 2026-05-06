@@ -6,7 +6,7 @@ def add_port_argument(parser):
     parser.add_argument(
         "--port",
         type=str,
-        default="",
+        default="/dev/tty.usbmodem5B8F0429481",
         help="Alicia-M serial port, for example COM37. Omit to auto-detect.",
     )
     return parser

@@ -9,7 +9,6 @@
 - 输入超限时优先裁剪+警告（而非直接拒绝）
 """
 
-import logging
 import time
 from typing import List, Optional, Union
 
@@ -33,8 +32,7 @@ from ..utils.conversion import speed_user_to_firmware
 from ..utils.validation import (
     validate_joint_angles, validate_speed, validate_gripper_value,
 )
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 # MIT 默认增益查表（按电机索引）
 # M0~M2 大关节, M3~M6 小关节（含夹爪）
@@ -221,7 +219,7 @@ class JointController:
 
         # 发送 PV 帧
         self._device.send_pv(self._device.aim, positions, velocities)
-        logger.debug("PV 帧已发送: pos=%s, vel=%s", positions, velocities)
+        logger.debug(f"PV 帧已发送: pos={positions}, vel={velocities}")
 
         if wait:
             t0 = time.perf_counter()
@@ -280,7 +278,7 @@ class JointController:
             )
 
         self._device.send_mit(self._device.aim, filled_params)
-        logger.debug("MIT 帧已发送: %s", filled_params)
+        logger.debug(f"MIT 帧已发送: {filled_params}")
 
     def move_mit(
         self,
@@ -389,8 +387,9 @@ class JointController:
         self._device.send_mit(
             self._device.aim, mit_params, linear_velocities=linear_vels,
         )
-        logger.debug("MIT 帧已发送: target=%s, interpolation=%s",
-                     target_joints, use_interpolation)
+        logger.debug(
+            f"MIT 帧已发送: target={target_joints}, interpolation={use_interpolation}"
+        )
 
         # 步骤4: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
         # MIT PD 控制器存在稳态误差，容差需大于 PV 模式
@@ -531,74 +530,116 @@ class JointController:
                     return True
             time.sleep(POLL_INTERVAL)
 
-        logger.warning("等待夹爪到达目标超时 (%.1fs)", timeout)
+        logger.warning(f"等待夹爪到达目标超时 ({timeout:.1f}s)")
         return False
 
     # ========== 力矩与使能 ==========
 
     def torque_off(self, joints: Optional[List[int]] = None) -> bool:
-        """卸载力矩（仅 MIT 模式，发送 0x05 指令）
+        """卸载力矩（MIT 零阻抗实现）
 
-        原理: 将指定关节的 kp=kd 置零，使其自由运动。
-        未指定的关节保持原有 kp/kd，继续锁定。
-        如果当前为 PV 模式，先自动切换到 MIT。
+        通过发送 MIT 全参数帧，将目标关节 kp/kd/t_ref/vel_ref 置零，
+        并保持当前位置为 pos_ref，达到可拖动的零阻抗效果。
 
         Args:
-            joints: 需要卸力的关节索引列表 (0~5)，None 表示全部关节
+            joints: 需要卸力的关节索引列表 (0~5)，None 表示全部关节（含夹爪）
 
         Returns:
             True=指令发送成功
         """
-        # 如果不在 MIT 模式，自动切换
         if self._mode != ControlMode.MIT:
             self.switch_mode(ControlMode.MIT)
 
-        # 确定卸力关节范围（固件使用 1-indexed: 1~7）
-        if joints is None:
-            start_joint = 1
-            joint_count = NUM_MOTORS
-        else:
-            start_joint = min(joints) + 1  # 0-indexed → 1-indexed
-            joint_count = max(joints) - min(joints) + 1
+        state = self._device.joint_state
+        if state is None:
+            raise RobotStateError("无状态缓存，无法执行 torque_off")
 
-        # 发送 0x05 卸力指令
-        frame = self._device.codec.encode_torque_request(TorqueRequest(
-            aim=self._device.aim,
-            start_joint=start_joint,
-            joint_count=joint_count,
-        ))
-        self._device.send_frame(frame)
-        time.sleep(0.05)
+        q_cur = list(state.angles)
+        g_cur = state.gripper
+        selected = set(range(NUM_MOTORS)) if joints is None else set(int(j) for j in joints)
+        # If caller requests all joints (0~5), include gripper as well for full zero-impedance.
+        if joints is not None and all(j in selected for j in range(NUM_JOINTS)):
+            selected.add(NUM_JOINTS)
 
-        logger.info("卸力完成: joints=%s", joints or "全部")
+        kps = []
+        kds = []
+        torques = []
+        vel_refs = []
+        for i in range(NUM_MOTORS):
+            if i in selected:
+                kps.append(0.0)
+                kds.append(0.0)
+            else:
+                kps.append(None)
+                kds.append(None)
+            torques.append(0.0)
+            vel_refs.append(0.0)
+
+        self.move_mit(
+            target_joints=q_cur,
+            speed=5.0,
+            gripper=g_cur,
+            wait=False,
+            use_interpolation=False,
+            kp=kps,
+            kd=kds,
+            torque=torques,
+            vel_ref=vel_refs,
+        )
+        logger.info(f"卸力完成(MIT零阻抗): joints={joints or '全部'}")
         return True
 
     def torque_on(self, joints: Optional[List[int]] = None) -> bool:
-        """恢复力矩（仅 MIT 模式，发送 0x05 指令）
+        """恢复力矩（MIT 默认阻抗实现）
+
+        通过发送 MIT 全参数帧，将目标关节 kp/kd 恢复为默认值，
+        并保持当前位置为 pos_ref，避免恢复时产生突跳。
 
         Args:
-            joints: 需要恢复力矩的关节索引列表，None 表示全部
+            joints: 需要恢复力矩的关节索引列表，None 表示全部（含夹爪）
 
         Returns:
             True=成功恢复
         """
-        # 发送 0x05 恢复力矩指令（固件 1-indexed: 1~7）
-        if joints is None:
-            start_joint = 1
-            joint_count = NUM_MOTORS
-        else:
-            start_joint = min(joints) + 1
-            joint_count = max(joints) - min(joints) + 1
+        if self._mode != ControlMode.MIT:
+            self.switch_mode(ControlMode.MIT)
 
-        frame = self._device.codec.encode_torque_request(TorqueRequest(
-            aim=self._device.aim,
-            start_joint=start_joint,
-            joint_count=joint_count,
-        ))
-        self._device.send_frame(frame)
-        time.sleep(0.05)
+        state = self._device.joint_state
+        if state is None:
+            raise RobotStateError("无状态缓存，无法执行 torque_on")
 
-        logger.info("力矩恢复完成: joints=%s", joints or "全部")
+        q_cur = list(state.angles)
+        g_cur = state.gripper
+        selected = set(range(NUM_MOTORS)) if joints is None else set(int(j) for j in joints)
+        if joints is not None and all(j in selected for j in range(NUM_JOINTS)):
+            selected.add(NUM_JOINTS)
+
+        kps = []
+        kds = []
+        torques = []
+        vel_refs = []
+        for i in range(NUM_MOTORS):
+            if i in selected:
+                kps.append(None)
+                kds.append(None)
+            else:
+                kps.append(0.0)
+                kds.append(0.0)
+            torques.append(0.0)
+            vel_refs.append(0.0)
+
+        self.move_mit(
+            target_joints=q_cur,
+            speed=5.0,
+            gripper=g_cur,
+            wait=False,
+            use_interpolation=False,
+            kp=kps,
+            kd=kds,
+            torque=torques,
+            vel_ref=vel_refs,
+        )
+        logger.info(f"力矩恢复完成(MIT默认阻抗): joints={joints or '全部'}")
         return True
 
     def enable(self) -> bool:
@@ -654,13 +695,10 @@ class JointController:
             mode = ControlMode(mode.lower())
 
         if mode == self._mode:
-            logger.debug("已处于 %s 模式，无需切换", mode.value)
+            logger.debug(f"已处于 {mode.value} 模式，无需切换")
             return True
 
-        logger.warning(
-            "即将切换控制模式: %s → %s",
-            self._mode.value, mode.value,
-        )
+        logger.warning(f"即将切换控制模式: {self._mode.value} → {mode.value}")
 
         # 步骤1: 失能所有电机
         self.disable()
@@ -694,7 +732,7 @@ class JointController:
         self.enable()
         time.sleep(0.2)
 
-        logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
+        logger.info(f"控制模式已切换: {old_mode.value} → {mode.value}")
         return True
 
     def _send_mode_switch_command(self, ctrl_mode_value: int) -> None:
@@ -718,7 +756,7 @@ class JointController:
             self._device.flush()
             values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
             if values is None or len(values) < NUM_JOINTS:
-                logger.debug("模式验证第 %d 次查询未获得有效响应", attempt + 1)
+                logger.debug(f"模式验证第 {attempt + 1} 次查询未获得有效响应")
                 time.sleep(0.5)
                 continue
             # 检查所有关节电机是否已切换
@@ -726,8 +764,9 @@ class JointController:
             if not mismatched:
                 return True
             for i in mismatched:
-                logger.debug("电机 M%d 模式未切换: 期望 0x%02X, 实际 0x%02X",
-                             i, expected_value, values[i])
+                logger.debug(
+                    f"电机 M{i} 模式未切换: 期望 0x{expected_value:02X}, 实际 0x{values[i]:02X}"
+                )
             time.sleep(0.5)
 
         logger.warning("模式验证失败: 多次查询均未确认切换成功")
@@ -785,7 +824,7 @@ class JointController:
                     return True
             time.sleep(POLL_INTERVAL)
 
-        logger.warning("等待到达目标超时 (%.1fs)", timeout)
+        logger.warning(f"等待到达目标超时 ({timeout:.1f}s)")
         return False
 
     # ========== 内部辅助方法 ==========

@@ -4,10 +4,9 @@
 校验策略：超限时优先**裁剪 + 警告**（而非直接拒绝），降低用户使用门槛。
 """
 
-import logging
 from typing import List, Union, Optional
 
-logger = logging.getLogger(__name__)
+from .beauty_logger import logger
 
 # 夹爪值范围
 _GRIPPER_MIN = 0.0
@@ -41,16 +40,10 @@ def validate_joint_angles(
         upper = joint_limits_upper[i]
 
         if angle < lower:
-            logger.warning(
-                "关节%d超限: 目标=%.4f rad, 下限=%.4f rad, 已裁剪",
-                i, angle, lower
-            )
+            logger.warning(f"关节{i}超限: 目标={angle:.4f} rad, 下限={lower:.4f} rad, 已裁剪")
             clipped.append(lower)
         elif angle > upper:
-            logger.warning(
-                "关节%d超限: 目标=%.4f rad, 上限=%.4f rad, 已裁剪",
-                i, angle, upper
-            )
+            logger.warning(f"关节{i}超限: 目标={angle:.4f} rad, 上限={upper:.4f} rad, 已裁剪")
             clipped.append(upper)
         else:
             clipped.append(angle)
@@ -83,8 +76,7 @@ def validate_speed(
     # 长度校验
     if len(speeds) != num_joints:
         logger.warning(
-            "速度列表长度 (%d) 与关节数 (%d) 不匹配，将截断或补齐",
-            len(speeds), num_joints
+            f"速度列表长度 ({len(speeds)}) 与关节数 ({num_joints}) 不匹配，将截断或补齐"
         )
         if len(speeds) > num_joints:
             speeds = speeds[:num_joints]
@@ -96,16 +88,10 @@ def validate_speed(
     # 范围裁剪
     for i in range(len(speeds)):
         if speeds[i] < _SPEED_MIN:
-            logger.warning(
-                "关节%d速度超限: %.2f < %.2f, 已裁剪",
-                i, speeds[i], _SPEED_MIN
-            )
+            logger.warning(f"关节{i}速度超限: {speeds[i]:.2f} < {_SPEED_MIN:.2f}, 已裁剪")
             speeds[i] = _SPEED_MIN
         elif speeds[i] > _SPEED_MAX:
-            logger.warning(
-                "关节%d速度超限: %.2f > %.2f, 已裁剪",
-                i, speeds[i], _SPEED_MAX
-            )
+            logger.warning(f"关节{i}速度超限: {speeds[i]:.2f} > {_SPEED_MAX:.2f}, 已裁剪")
             speeds[i] = _SPEED_MAX
 
     return speeds
@@ -123,13 +109,9 @@ def validate_gripper_value(value: float) -> float:
         裁剪后的夹爪值 [0, 1000]
     """
     if value < _GRIPPER_MIN:
-        logger.warning(
-            "夹爪值超限: %.2f < %.2f, 已裁剪", value, _GRIPPER_MIN
-        )
+        logger.warning(f"夹爪值超限: {value:.2f} < {_GRIPPER_MIN:.2f}, 已裁剪")
         return _GRIPPER_MIN
     elif value > _GRIPPER_MAX:
-        logger.warning(
-            "夹爪值超限: %.2f > %.2f, 已裁剪", value, _GRIPPER_MAX
-        )
+        logger.warning(f"夹爪值超限: {value:.2f} > {_GRIPPER_MAX:.2f}, 已裁剪")
         return _GRIPPER_MAX
     return float(value)

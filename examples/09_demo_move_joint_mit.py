@@ -13,30 +13,22 @@ import argparse
 import time
 import alicia_m_sdk
 from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # 预设安全关节位置 (度)
 # ps: 注意mit是模式是柔性控制，最终位置有所偏差是正常的
-POSITION = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
+POSITION = [90, -90.0, -90.0, 80.0, 0.0, 0.0]
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KP = [150.0, 150.0, 100.0, 50.0, 40.0, 20.0, 20.0]
 MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
-def main():
+def main(args):
     beauty_print("Demo: 关节控制 (MIT)", type="module")
-
-    parser = argparse.ArgumentParser(description="关节控制示例 (MIT)")
-    parser.add_argument(
-        "--speed", type=float, default=30,
-        help="运动速度 (默认: 30, 范围: 0-400)"
-    )
-    add_port_argument(parser)
-    args = parser.parse_args()
 
     # 创建并连接机器人（不指定模式，避免自动切换）
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -84,4 +76,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="关节控制示例 (MIT)")
+    parser.add_argument(
+        "--speed", type=float, default=30,
+        help="运动速度 (默认: 30, 范围: 0-400)"
+    )
+    add_port_argument(parser)
+    args = parser.parse_args()
+    
+    main(args)

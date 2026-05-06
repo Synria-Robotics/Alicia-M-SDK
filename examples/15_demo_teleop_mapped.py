@@ -184,5 +184,6 @@ if __name__ == "__main__":
                         help="启动前 follower 先回零")
     parser.add_argument('--verbose', '-v', action='store_true',
                         help="打印遥操作过程中的关节状态（含映射前后对比）")
+    args = parser.parse_args()
 
-    main(parser.parse_args())
+    main(args)

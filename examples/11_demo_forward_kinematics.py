@@ -9,9 +9,9 @@ import argparse
 import math
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk import forward_kinematics, RobotModel
+from alicia_m_sdk import forward_kinematics
 from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.transform import matrix_to_euler, matrix_to_quaternion
 
 
@@ -35,12 +35,8 @@ def _print_pose(label: str, T: np.ndarray):
     beauty_print(f"    {beauty_print_array(rotation, precision=6)}", type="info")
 
 
-def main():
+def main(args):
     beauty_print("Demo: 正运动学 (FK)", type="module")
-
-    parser = argparse.ArgumentParser(description="Run Alicia-M forward kinematics demo.")
-    add_port_argument(parser)
-    args = parser.parse_args()
 
     # 创建并连接机器人
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -80,4 +76,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run Alicia-M forward kinematics demo.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
+    main(args)

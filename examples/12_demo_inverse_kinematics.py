@@ -10,10 +10,9 @@ import math
 import time
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk import forward_kinematics, inverse_kinematics, RobotModel
+from alicia_m_sdk import inverse_kinematics
 from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.transform import matrix_to_euler, matrix_to_quaternion
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.transform.conversions import quaternion_to_matrix
 from robocore.utils.backend import to_numpy
 
@@ -23,12 +22,8 @@ DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
 # DEFAULT_TARGET_POSE = [0, 0.20, +0.22, 0.0, 0.707, 0.0, 0.707]
 
 
-def main():
+def main(args):
     beauty_print("Demo: 逆运动学 (IK)", type="module")
-
-    parser = argparse.ArgumentParser(description="Run Alicia-M inverse kinematics demo.")
-    add_port_argument(parser)
-    args = parser.parse_args()
 
     # 创建并连接机器人（不指定模式，避免自动切换）
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -157,4 +152,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run Alicia-M inverse kinematics demo")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
+    main(args)

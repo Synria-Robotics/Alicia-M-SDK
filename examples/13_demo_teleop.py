@@ -32,18 +32,18 @@ import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
 from alicia_m_sdk.control.teleoperation import Teleoperation
-from robocore.utils.beauty_logger import beauty_print
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KP = [150.0, 150.0, 100.0, 50.0, 40.0, 20.0, 20.0]
 MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 def main(args):
-    mode = args.mode.lower()
+    mode = 'mit'
     target_mode = ControlMode(mode)
 
     beauty_print(f"遥操作: Alicia-D → Alicia-M ({mode.upper()} 模式)", type="module")
@@ -144,9 +144,6 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument('--mode', type=str, default="mit",
-                        choices=["pv", "mit"],
-                        help="控制模式: pv / mit (默认: mit)")
     parser.add_argument('--leader-port', type=str, default="/dev/ttyACM0",
                         help="Leader 串口 (Alicia-D)")
     parser.add_argument('--port', '--follower-port', dest='follower_port',
@@ -164,5 +161,6 @@ if __name__ == "__main__":
                         help="启动前 follower 先回零（默认跳过）")
     parser.add_argument('--verbose', '-v', action='store_true',
                         help="打印遥操作过程中的关节状态")
+    args = parser.parse_args()
 
-    main(parser.parse_args())
+    main(args)

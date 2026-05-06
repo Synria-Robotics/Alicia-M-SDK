@@ -26,6 +26,77 @@ _matrix_to_euler = None
 _matrix_to_quaternion = None
 
 
+def _rpy_xyz_to_matrix(rpy):
+    """Convert xyz Euler angles to rotation matrix.
+
+    :param rpy: Euler xyz angles
+    :return: Rotation matrix 3x3
+    """
+    rx, ry, rz = float(rpy[0]), float(rpy[1]), float(rpy[2])
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+    rx_m = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]], dtype=np.float64)
+    ry_m = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float64)
+    rz_m = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]], dtype=np.float64)
+    return rz_m @ ry_m @ rx_m
+
+
+def _quat_xyzw_to_matrix(quat):
+    """Convert xyzw quaternion to rotation matrix.
+
+    :param quat: Quaternion xyzw
+    :return: Rotation matrix 3x3
+    """
+    x, y, z, w = [float(v) for v in quat]
+    n = x * x + y * y + z * z + w * w
+    if n < 1e-12:
+        return np.eye(3, dtype=np.float64)
+    s = 2.0 / n
+    xx, yy, zz = x * x * s, y * y * s, z * z * s
+    xy, xz, yz = x * y * s, x * z * s, y * z * s
+    wx, wy, wz = w * x * s, w * y * s, w * z * s
+    return np.array(
+        [
+            [1.0 - (yy + zz), xy - wz, xz + wy],
+            [xy + wz, 1.0 - (xx + zz), yz - wx],
+            [xz - wy, yz + wx, 1.0 - (xx + yy)],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _normalize_target_pose(target_pose):
+    """Normalize pose input to 4x4 or [B,4,4] matrix form.
+
+    :param target_pose: Pose in 4x4 / [x,y,z,rpy] / [x,y,z,quat]
+    :return: Pose matrix (4x4 or [B,4,4])
+    """
+    arr = np.asarray(target_pose, dtype=np.float64)
+    if arr.shape == (4, 4):
+        return arr
+    if arr.ndim == 3 and arr.shape[1:] == (4, 4):
+        return arr
+    if arr.ndim == 1 and arr.shape[0] in (6, 7):
+        T = np.eye(4, dtype=np.float64)
+        T[:3, 3] = arr[:3]
+        if arr.shape[0] == 7:
+            T[:3, :3] = _quat_xyzw_to_matrix(arr[3:7])
+        else:
+            T[:3, :3] = _rpy_xyz_to_matrix(arr[3:6])
+        return T
+    if arr.ndim == 2 and arr.shape[1] in (6, 7):
+        out = np.tile(np.eye(4, dtype=np.float64), (arr.shape[0], 1, 1))
+        out[:, :3, 3] = arr[:, :3]
+        for i in range(arr.shape[0]):
+            if arr.shape[1] == 7:
+                out[i, :3, :3] = _quat_xyzw_to_matrix(arr[i, 3:7])
+            else:
+                out[i, :3, :3] = _rpy_xyz_to_matrix(arr[i, 3:6])
+        return out
+    return arr
+
+
 def _ensure_robocore():
     """确保 RoboCore 已导入"""
     global _rc, _fk, _ik, _jac, _to_numpy, _matrix_to_euler, _matrix_to_quaternion
@@ -119,8 +190,16 @@ def compute_inverse_kinematics(
     _ensure_robocore()
     ik_kwargs = dict(kwargs)
     ik_kwargs.setdefault('method', method)
+    # Compatible aliases across RoboCore versions.
+    if 'max_iterations' in ik_kwargs and 'max_iters' not in ik_kwargs:
+        ik_kwargs['max_iters'] = ik_kwargs.pop('max_iterations')
+    if 'tolerance' in ik_kwargs:
+        tol = ik_kwargs.pop('tolerance')
+        ik_kwargs.setdefault('pos_tol', tol)
+        ik_kwargs.setdefault('ori_tol', tol)
 
-    result = _ik(robot_model, target_pose, q_init=q_init, **ik_kwargs)
+    target_pose_norm = _normalize_target_pose(target_pose)
+    result = _ik(robot_model, target_pose_norm, q0=q_init, **ik_kwargs)
 
     if isinstance(result, dict):
         output = {

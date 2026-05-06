@@ -11,7 +11,8 @@ import argparse
 import time
 
 import alicia_m_sdk
-from robocore.utils.beauty_logger import beauty_print
+from demo_common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 try:
@@ -34,17 +35,6 @@ def _read_key():
             msvcrt.getwch()
         return None
     return key.lower()
-
-
-def _add_port_argument(parser):
-    """添加 Alicia-M 串口参数；不指定时使用 SDK 自动发现。"""
-    parser.add_argument(
-        "--port",
-        type=str,
-        default="",
-        help="Alicia-M 串口，例如 COM37；不指定时自动发现。",
-    )
-    return parser
 
 
 def _format_values(values, precision=4):
@@ -75,12 +65,8 @@ def _send_strong_zero_position(robot):
     robot.set_zero_position()
 
 
-def main():
+def main(args):
     beauty_print("Demo: 零位标定", type="module")
-
-    parser = argparse.ArgumentParser(description="Alicia-M 零位标定示例")
-    _add_port_argument(parser)
-    args = parser.parse_args()
 
     robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
@@ -121,4 +107,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Alicia-M 零位标定示例")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
+    main(args)

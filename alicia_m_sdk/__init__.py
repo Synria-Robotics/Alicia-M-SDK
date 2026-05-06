@@ -33,6 +33,7 @@ from .types.exceptions import (
     HardwareFaultError,
     MotionError,
 )
+from .utils.beauty_logger import logger, LogLevel
 
 # === RoboCore 转发（供用户直接使用）===
 try:
@@ -81,10 +82,10 @@ def create_robot(
     Returns:
         SynriaRobotAPI 实例
     """
-    import logging
-
     if debug_mode:
-        logging.basicConfig(level=logging.DEBUG)
+        logger.set_min_level(LogLevel.DEBUG)
+    else:
+        logger.set_min_level(LogLevel.INFO)
 
     # 1. 设置 RoboCore 后端
     robot_model = None
@@ -107,11 +108,9 @@ def create_robot(
         )
     except ImportError:
         # RoboCore 或 synriard 不可用时，运动学功能不可用
-        logging.getLogger(__name__).warning(
-            "RoboCore / synriard 未安装，运动学和规划功能不可用"
-        )
+        logger.warning("RoboCore / synriard 未安装，运动学和规划功能不可用")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"机器人模型加载失败: {e}")
+        logger.warning(f"机器人模型加载失败: {e}")
 
     # 3. 创建实例
     config = RobotConfig(

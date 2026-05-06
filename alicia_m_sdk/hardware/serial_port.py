@@ -5,15 +5,13 @@
 这是读线程可安全退出的关键前提。
 """
 
-import logging
 from typing import Optional, List
 
 import serial
 import serial.tools.list_ports
 
 from ..protocol.constants import FRAME_HEADER, FRAME_FOOTER
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class SerialPort:

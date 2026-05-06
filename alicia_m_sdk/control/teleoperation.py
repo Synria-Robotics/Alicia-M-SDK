@@ -15,13 +15,11 @@ Alicia-M 电机操作臂（follower）跟随运动。
 
 import time
 import threading
-import logging
 from typing import Optional, Union, List, Callable
 
 from ..control.joint_control import _normalize_mit_param
 from ..utils.timing import precise_sleep
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class Teleoperation:
@@ -174,7 +172,7 @@ class Teleoperation:
             except Exception as e:
                 self._error_count += 1
                 if self._error_count <= 5:
-                    logger.warning("遥操作循环异常: %s", e)
+                    logger.warning(f"遥操作循环异常: {e}")
                 elif self._error_count == 6:
                     logger.warning("后续遥操作异常已静默")
 
@@ -182,8 +180,7 @@ class Teleoperation:
             precise_sleep(interval - elapsed)
 
         logger.info(
-            "遥操作控制循环停止 (已发送 %d 帧, %d 次异常)",
-            self._loop_count, self._error_count,
+            f"遥操作控制循环停止 (已发送 {self._loop_count} 帧, {self._error_count} 次异常)"
         )
 
     # ========== 公开接口 ==========

@@ -1,14 +1,11 @@
-"""SynriaRobotAPI — Alicia-M 机器人 SDK 主接口
-
-精简的门面（Facade）类，将具体逻辑委托给控制层、运动学接口、规划接口。
-通过 create_robot() 工厂函数创建实例。
+"""
+SynriaRobotAPI — Alicia-M 机器人 SDK 主接口
 """
 
 from __future__ import annotations
 
 import math
 import time
-import logging
 import warnings
 from typing import Dict, List, Optional, Union, Any
 
@@ -33,8 +30,7 @@ from ..control.joint_control import JointController
 from ..control.trajectory_executor import TrajectoryExecutor
 from .. import kinematics as kin_module
 from .. import planning as plan_module
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class SynriaRobotAPI:
@@ -397,7 +393,7 @@ class SynriaRobotAPI:
         """
         count = POLL_ADDR_EXTENDED if enabled else POLL_ADDR_BASIC
         self._device.set_poll_addr_count(count)
-        logger.info("状态轮询模式: %s", "扩展 (7地址)" if enabled else "基础 (3地址)")
+        logger.info(f"状态轮询模式: {'扩展 (7地址)' if enabled else '基础 (3地址)'}")
 
     def set_zero_position(self) -> bool:
         """设置当前位姿为零位（强调零）"""
@@ -607,14 +603,14 @@ class SynriaRobotAPI:
             values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
             if values is not None and len(values) >= NUM_JOINTS:
                 break
-            logger.debug("模式检测第 %d 次查询未获得有效响应", attempt + 1)
+            logger.debug(f"模式检测第 {attempt + 1} 次查询未获得有效响应")
             time.sleep(0.5)
         else:
             return None
         # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
         joint_values = values[:NUM_JOINTS]
         if any(v != joint_values[0] for v in joint_values):
-            logger.warning("检测到关节电机混合控制模式: %s，将强制同步", joint_values)
+            logger.warning(f"检测到关节电机混合控制模式: {joint_values}，将强制同步")
             return None
         return _MODE_MAP.get(joint_values[0])
 
