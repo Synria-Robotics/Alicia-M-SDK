@@ -16,7 +16,7 @@ from robocore.transform import matrix_to_euler, matrix_to_quaternion
 
 
 # 预设关节角度 (度)
-PRESET_JOINTS_DEG = [90, 0, 0, 0, 0, 0]
+PRESET_JOINTS_DEG = [0, 0, 0, 0, 0, 90]
 
 
 def _print_pose(label: str, T: np.ndarray):

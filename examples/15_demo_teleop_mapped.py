@@ -166,9 +166,9 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default="mit",
                         choices=["pv", "mit"],
                         help="控制模式: pv / mit (默认: mit)")
-    parser.add_argument('--leader-port', type=str, default="COM55",
+    parser.add_argument('--leader-port', type=str, default="COM63",
                         help="Leader 串口 (Alicia-D)")
-    parser.add_argument('--port', '--follower-port', default="COM57", dest='follower_port',
+    parser.add_argument('--port', '--follower-port', default="COM62", dest='follower_port',
                         type=str,
                         help="Follower 串口 (Alicia-M)，不指定则自动发现")
     parser.add_argument('--follower-version', type=str, default="v1_1",

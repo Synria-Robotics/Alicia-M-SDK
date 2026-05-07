@@ -13,7 +13,7 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
-POSE_A = [90, -90.0, -90.0, 80.0, 0.0, 0.0]
+POSE_A = [0, -90.0, -90.0, 80.0, 0.0, 0.0]
 POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
 

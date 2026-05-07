@@ -142,7 +142,7 @@ python examples/16_demo_gripper_params.py --port COM57
 # 仅读取指定掩码，例如 0x09 = 目标夹持力 + 最大保持力矩
 python examples/16_demo_gripper_params.py --port COM57 --mask 0x09
 
-# 设置目标夹持力为 80N ~= 80*0.018N·m，最大保持力矩为 70N·m
+# 设置目标夹持力为 80N，最大保持力矩为 70N·m
 python examples/16_demo_gripper_params.py --port COM57 --target-force 80 --hold-torque 70
 ```
 

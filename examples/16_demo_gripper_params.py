@@ -15,6 +15,7 @@
 """
 
 import argparse
+import math
 import struct
 import time
 from dataclasses import dataclass
@@ -130,22 +131,29 @@ def collect_write_values(args) -> Dict[int, float]:
 
 
 def add_write_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--target-force", type=float, default=None,
+    parser.add_argument("--target-force", type=finite_float, default=None,
                         help="目标夹持力 (N)，掩码 0x01")
-    parser.add_argument("--open-feedforward", type=float, default=None,
+    parser.add_argument("--open-feedforward", type=finite_float, default=None,
                         help="张开前馈力矩 (N·m)，掩码 0x02")
-    parser.add_argument("--close-feedforward", type=float, default=None,
+    parser.add_argument("--close-feedforward", type=finite_float, default=None,
                         help="闭合前馈力矩 (N·m)，掩码 0x04")
-    parser.add_argument("--hold-torque", type=float, default=None,
+    parser.add_argument("--hold-torque", type=finite_float, default=None,
                         help="最大保持力矩 (N·m)，掩码 0x08")
-    parser.add_argument("--force-kp", type=float, default=None,
+    parser.add_argument("--force-kp", type=finite_float, default=None,
                         help="力控比例，掩码 0x10")
-    parser.add_argument("--force-ki", type=float, default=None,
+    parser.add_argument("--force-ki", type=finite_float, default=None,
                         help="力控积分，掩码 0x20")
-    parser.add_argument("--integral-limit", type=float, default=None,
+    parser.add_argument("--integral-limit", type=finite_float, default=None,
                         help="积分限幅，掩码 0x40")
-    parser.add_argument("--close-torque-scale", type=float, default=None,
+    parser.add_argument("--close-torque-scale", type=finite_float, default=None,
                         help="接近闭合时的力矩缩放，掩码 0x80")
+
+
+def finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError("参数值必须是有限数字，不能是 NaN 或 inf")
+    return value
 
 
 def parse_mask(text: str) -> int:
@@ -173,8 +181,11 @@ def main():
     add_write_arguments(parser)
     args = parser.parse_args()
 
-    aim = AIM_FOLLOWER if args.aim == "follower" else AIM_LEADER
     write_values = collect_write_values(args)
+    if write_values and args.mask != 0:
+        parser.error("--mask 仅用于读取；写入时请使用具体参数选项，掩码会自动生成")
+
+    aim = AIM_FOLLOWER if args.aim == "follower" else AIM_LEADER
 
     robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
@@ -183,6 +194,7 @@ def main():
         if write_values:
             mask = mask_from_values(write_values)
             beauty_print(f"即将写入 0x17 参数，掩码 0x{mask:02X}", type="warning")
+            beauty_print("写入不会主动闭合夹爪，但会影响后续夹爪动作。", type="warning")
             for spec in PARAMS:
                 if spec.mask in write_values:
                     unit = f" {spec.unit}" if spec.unit else ""
