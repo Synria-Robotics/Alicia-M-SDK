@@ -37,10 +37,9 @@ alicia_m_sdk/
 ├── api/            # 用户 API 层（SynriaRobotAPI 门面类）
 ├── hardware/       # 硬件层（串口驱动、设备抽象、状态缓存）
 ├── execution/      # 高级执行层（关节控制、轨迹执行、遥操作）
+├── integrations/   # 外部库适配层（RoboCore FK/IK/trajectory planning）
 ├── types/          # 类型定义（状态、配置、枚举、异常）
-├── utils/          # 工具层（单位转换、参数校验）
-├── kinematics.py   # 运动学接口（RoboCore 封装）
-└── planning.py     # 规划接口（RoboCore 封装）
+└── utils/          # 工具层（单位转换、参数校验）
 ```
 
 ## 快速开始

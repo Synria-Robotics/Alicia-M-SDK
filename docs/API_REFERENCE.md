@@ -194,6 +194,18 @@ from alicia_m_sdk import JointController, TrajectoryExecutor, Teleoperation
 
 这些入口面向扩展和集成场景。普通用户优先使用 `SynriaRobotAPI`，高级入口仍按公开 API 保留，但内部硬件层 `alicia_m_sdk.hardware` 不建议直接依赖。
 
+RoboCore 的低层 FK/IK/规划适配入口位于集成层，不再从包根导出：
+
+```python
+from alicia_m_sdk.integrations.robocore import (
+    compute_forward_kinematics,
+    compute_inverse_kinematics,
+    compute_jacobian,
+    plan_joint_trajectory,
+    plan_cartesian_trajectory,
+)
+```
+
 `Teleoperation` 用于 Alicia-D 示教臂到 Alicia-M 操作臂的遥操作场景，安装时需要可选依赖：
 
 ```bash

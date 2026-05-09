@@ -6,14 +6,12 @@
 """
 
 import argparse
-import math
 import time
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk import forward_kinematics, inverse_kinematics, RobotModel
+from alicia_m_sdk.integrations.robocore import compute_inverse_kinematics
 from _common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.transform import matrix_to_euler, matrix_to_quaternion
 # robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
 try:
     from robocore.transform.conversions import quaternion_to_matrix
@@ -66,7 +64,7 @@ def main():
             # 以当前关节角度为初始猜测求解 IK
             q_current = robot.get_robot_state("joint")
             start_time = time.time()
-            ik_result = inverse_kinematics(
+            ik_result = compute_inverse_kinematics(
                 robot_model,
                 T_current,
                 q_current,
@@ -84,8 +82,7 @@ def main():
             beauty_print(f"  IK 求解结果 (deg): {beauty_print_array(q_ik_deg, precision=2)}", type="info")
             beauty_print(f"  IK 求解结果 (rad): {beauty_print_array(q_ik, precision=4)}", type="info")
             beauty_print(f"  求解成功: {ik_result.get('success', False)}", type="info")
-            beauty_print(f"  位置误差: {ik_result.get('pos_err', 'N/A')}", type="info")
-            beauty_print(f"  姿态误差: {ik_result.get('ori_err', 'N/A')}", type="info")
+            beauty_print(f"  残差: {ik_result.get('residual', 'N/A')}", type="info")
             beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
         else:
             beauty_print("  无法获取当前位姿", type="warning")
@@ -104,7 +101,7 @@ def main():
 
         # 求解 IK
         start_time = time.time()
-        ik_result = inverse_kinematics(
+        ik_result = compute_inverse_kinematics(
             robot_model,
             T_target,
             None,  # 无初始猜测，使用多起点
@@ -127,8 +124,7 @@ def main():
         beauty_print(f"  IK 求解结果 (deg): {beauty_print_array(q_ik_deg, precision=2)}", type="info")
         beauty_print(f"  IK 求解结果 (rad): {beauty_print_array(q_ik, precision=4)}", type="info")
         beauty_print(f"  求解成功: {ik_success}", type="info")
-        beauty_print(f"  位置误差: {ik_result.get('pos_err', 'N/A')}", type="info")
-        beauty_print(f"  姿态误差: {ik_result.get('ori_err', 'N/A')}", type="info")
+        beauty_print(f"  残差: {ik_result.get('residual', 'N/A')}", type="info")
         beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
 
         # 可选：执行运动到 IK 解

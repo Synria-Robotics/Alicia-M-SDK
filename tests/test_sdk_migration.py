@@ -1,4 +1,5 @@
 import math
+import importlib
 import struct
 import unittest
 from unittest.mock import Mock, patch
@@ -37,6 +38,7 @@ from alicia_m_sdk.hardware.constants import (
 from alicia_m_sdk.hardware.frame import Frame
 from alicia_m_sdk.hardware.messages import ZeroResetRequest
 from alicia_m_sdk.types.config import RobotConfig
+from alicia_m_sdk.types.state import JointState
 from alicia_m_sdk.user_settings import (
     gripper_type_config_value,
     is_write_accepted,
@@ -244,6 +246,58 @@ class SynriaRobotAPILifecycleTest(unittest.TestCase):
 
             connect.assert_not_called()
             robot.disconnect.assert_called_once()
+
+
+class RoboCoreIntegrationLayoutTest(unittest.TestCase):
+    def test_root_robocore_forwards_are_not_exported(self):
+        self.assertNotIn("RobotModel", alicia_m_sdk.__all__)
+        self.assertFalse(hasattr(alicia_m_sdk, "forward_kinematics"))
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("alicia_m_sdk.kinematics")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("alicia_m_sdk.planning")
+
+    def test_robocore_adapters_export_from_integration_package(self):
+        module = importlib.import_module("alicia_m_sdk.integrations.robocore")
+        self.assertTrue(hasattr(module, "compute_forward_kinematics"))
+        self.assertTrue(hasattr(module, "compute_inverse_kinematics"))
+        self.assertTrue(hasattr(module, "plan_joint_trajectory"))
+        self.assertTrue(hasattr(module, "plan_cartesian_trajectory"))
+
+    def test_get_pose_uses_robocore_integration_adapter(self):
+        robot = SynriaRobotAPI(RobotConfig(auto_connect=False), robot_model=object())
+        robot._device._state_cache.update_joint_state(JointState(
+            angles=[0.0] * 6,
+            gripper=0.0,
+            timestamp=0.0,
+            run_status=0,
+        ))
+        expected = {"position": np.array([1.0, 2.0, 3.0])}
+        with patch(
+            "alicia_m_sdk.api.synria_robot_api.kin_module.compute_forward_kinematics",
+            return_value=expected,
+        ) as compute_fk:
+            self.assertIs(robot.get_pose(), expected)
+
+        compute_fk.assert_called_once_with(robot.robot_model, [0.0] * 6)
+
+    def test_planning_methods_use_robocore_integration_adapter(self):
+        robot = SynriaRobotAPI(RobotConfig(auto_connect=False))
+        joint_result = {"success": True, "kind": "joint"}
+        cart_result = {"success": True, "kind": "cartesian"}
+        with patch(
+            "alicia_m_sdk.api.synria_robot_api.plan_module.plan_joint_trajectory",
+            return_value=joint_result,
+        ) as plan_joint:
+            self.assertIs(robot.plan_joint_trajectory([[0.0] * 6, [0.1] * 6]), joint_result)
+        with patch(
+            "alicia_m_sdk.api.synria_robot_api.plan_module.plan_cartesian_trajectory",
+            return_value=cart_result,
+        ) as plan_cartesian:
+            self.assertIs(robot.plan_cartesian_trajectory([[0.0] * 7, [0.1] * 7]), cart_result)
+
+        plan_joint.assert_called_once()
+        plan_cartesian.assert_called_once()
 
 
 class JointMappingTest(unittest.TestCase):

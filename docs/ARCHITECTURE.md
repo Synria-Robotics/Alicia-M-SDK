@@ -84,9 +84,8 @@ alicia_m_sdk/
 │   ├── timing.py                   # 时间工具：高精度休眠、FPS 统计
 │   └── logger.py                   # 日志系统：统一格式化日志
 │
-├── kinematics.py                   # 【运动学接口】对 RoboCore 的薄封装（FK/IK/Jacobian）
-│
-└── planning.py                     # 【规划接口】对 RoboCore 轨迹规划的薄封装
+└── integrations/                   # 【集成层】外部库适配
+    └── robocore/                   # RoboCore FK/IK/Jacobian/trajectory planning 适配
 ```
 
 ```
@@ -1127,7 +1126,7 @@ class SynriaRobotAPI:
 
 ---
 
-### 5.6 运动学与规划接口 (`kinematics.py`, `planning.py`)
+### 5.6 RoboCore 集成接口 (`integrations/robocore`)
 
 对 RoboCore 的薄封装，提供便捷的调用入口。
 
@@ -1140,7 +1139,7 @@ class SynriaRobotAPI:
 > - 默认使用 `numpy` 后端，可选 `torch` 后端加速批量 IK
 
 ```python
-# kinematics.py
+# integrations/robocore/kinematics.py
 import robocore as rc
 from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from robocore.transform import matrix_to_euler, matrix_to_quaternion
@@ -1170,7 +1169,7 @@ def compute_jacobian(robot_model, q: List[float]) -> np.ndarray:
 ```
 
 ```python
-# planning.py
+# integrations/robocore/planning.py
 # 规划器延迟导入（按需加载，避免不使用规划功能时的导入开销）
 def plan_joint_trajectory(waypoints, planner_type='b_spline', **kwargs) -> Dict:
     """关节空间轨迹规划（同步调用，离线计算）"""
@@ -2363,7 +2362,7 @@ if __name__ == "__main__":
 9. 实现 `control/teleoperation.py`（遥操作控制器）
 
 ### 阶段四：API 层与接口
-10. 实现 `kinematics.py` 和 `planning.py`（RoboCore 封装）
+10. 实现 `integrations/robocore/`（RoboCore 封装）
 11. 实现 `api/synria_robot_api.py`（门面类）
 12. 实现 `__init__.py`（包入口和 `create_robot()`）
 
@@ -2391,7 +2390,7 @@ if __name__ == "__main__":
 | `utils/unit_conversion.py` | `utils/conversion.py` | 扩展为含协议值转换 |
 | `utils/calculate.py` | _(合并到 conversion/validation)_ | 消除碎片文件 |
 | `utils/fps_utils.py` | `utils/timing.py` | 扩展为时间工具 |
-| `utils/trajectory_utils.py` | _(部分合并到 planning.py)_ | 精简 |
+| `utils/trajectory_utils.py` | _(部分合并到 `integrations/robocore/planning.py`)_ | 精简 |
 | `utils/logger/beauty_logger.py` | `utils/logger.py` | SDK 内部日志 + beauty_logger 转发 |
 | _(无)_ | `protocol/constants.py` | **新增**：协议常量集中管理 |
 | _(无)_ | `protocol/frame.py` | **新增**：帧结构与 CRC |
@@ -2402,5 +2401,5 @@ if __name__ == "__main__":
 | _(无)_ | `types/enums.py` | **新增**：枚举定义 |
 | _(无)_ | `types/exceptions.py` | **新增**：统一异常体系 |
 | _(无)_ | `control/joint_control.py` | **新增**：关节控制 |
-| _(无)_ | `kinematics.py` | **新增**：运动学薄封装 |
-| _(无)_ | `planning.py` | **新增**：规划薄封装 |
+| _(无)_ | `integrations/robocore/kinematics.py` | **新增**：运动学薄封装 |
+| _(无)_ | `integrations/robocore/planning.py` | **新增**：规划薄封装 |

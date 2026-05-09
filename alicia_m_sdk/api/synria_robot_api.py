@@ -6,20 +6,19 @@ from __future__ import annotations
 
 import math
 import time
-import warnings
 from typing import Dict, List, Optional, Union, Any
 
 import numpy as np
 
-from ..types.state import JointState, MitParams
+from ..types.state import MitParams
 from ..types.config import RobotConfig
-from ..types.enums import ControlMode, ControlAim
+from ..types.enums import ControlMode
 from ..types.exceptions import (
-    ConnectionError, TimeoutError, RobotStateError,
+    ConnectionError, RobotStateError,
 )
 from ..hardware.codec import MessageCodec
 from ..hardware.constants import (
-    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
+    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
     CMD_GRIPPER_PARAM,
     NUM_JOINTS,
@@ -33,8 +32,8 @@ from ..diagnostics import DiagnosticResult, run_diagnostic as _run_diagnostic
 from ..user_settings import UserSettings
 from ..user_settings import get_user_settings as _get_user_settings
 from ..user_settings import set_gripper_type as _set_gripper_type
-from .. import kinematics as kin_module
-from .. import planning as plan_module
+from ..integrations.robocore import kinematics as kin_module
+from ..integrations.robocore import planning as plan_module
 from ..utils.beauty_logger import logger
 from ..utils.version import supports_min_version
 
@@ -267,7 +266,7 @@ class SynriaRobotAPI:
         :return, 固件版本字符串，如 "v1.1.0"
         """
         frame = self._codec.encode_version_request()
-        resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
+        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
         info = self._device.version_info
         return info.firmware_version if info else None
 
@@ -671,7 +670,8 @@ class SynriaRobotAPI:
             def beauty_print(content: Any, type: Optional[str] = None):
                 print(content)
 
-            beauty_print_array = lambda arr, **kw: str(arr)
+            def beauty_print_array(arr, **kw):
+                return str(arr)
 
         def _print_once():
             state = self._device.joint_state
@@ -784,7 +784,7 @@ class SynriaRobotAPI:
         请通过 create_robot(control_aim="leader") 显式指定。
         """
         frame = self._codec.encode_version_request()
-        resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
+        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
         info = self._device.version_info
         if info and info.device_type:
             dt = info.device_type.upper()

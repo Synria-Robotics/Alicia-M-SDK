@@ -39,18 +39,6 @@ from .types.exceptions import (
     MotionError,
 )
 from .utils.beauty_logger import logger, LogLevel
-
-# === RoboCore 转发（供用户直接使用）===
-try:
-    from robocore.modeling import RobotModel
-    from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-except ImportError:
-    RobotModel = None
-    forward_kinematics = None
-    inverse_kinematics = None
-    jacobian = None
-
-
 def create_robot(
     port: str = "",
     version: str = "v1_1",
@@ -156,6 +144,4 @@ __all__ = [
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',
     'HardwareFaultError', 'MotionError',
-    # RoboCore 转发
-    'RobotModel', 'forward_kinematics', 'inverse_kinematics', 'jacobian',
 ]
