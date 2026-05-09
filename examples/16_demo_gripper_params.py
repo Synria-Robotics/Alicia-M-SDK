@@ -25,13 +25,13 @@ import alicia_m_sdk
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from demo_utils.demo_common import add_port_argument
-from alicia_m_sdk.protocol.constants import (
+from alicia_m_sdk.hardware.constants import (
     AIM_FOLLOWER,
     AIM_LEADER,
     CMD_GRIPPER_PARAM,
     FUNC_WRITE_BIT,
 )
-from alicia_m_sdk.protocol.frame import Frame
+from alicia_m_sdk.hardware.frame import Frame
 from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 

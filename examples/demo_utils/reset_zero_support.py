@@ -5,8 +5,8 @@
 
 import time
 
-from alicia_m_sdk.protocol.constants import NUM_MOTORS, ZERO_RESET_WEAK
-from alicia_m_sdk.protocol.messages import ZeroResetRequest
+from alicia_m_sdk.hardware.constants import NUM_MOTORS, ZERO_RESET_WEAK
+from alicia_m_sdk.hardware.messages import ZeroResetRequest
 
 
 PRINT_INTERVAL = 0.2

@@ -147,7 +147,7 @@ class SynriaRobotAPI:
             self._sync_control_mode()
 
             self._connected = True
-            logger.info("机器人连接成功: %s", self.connected_port)
+            logger.info(f"机器人连接成功: {self.connected_port}")
             return True
         except Exception:
             self.disconnect()
@@ -657,13 +657,13 @@ class SynriaRobotAPI:
         if firmware_mode == desired:
             # 固件已是目标模式，同步 SDK 状态即可（固件侧已处理目标位置初始化）
             self._joint_ctrl.mode = desired
-            logger.info("固件控制模式: %s", desired.value.upper())
+            logger.info(f"固件控制模式: {desired.value.upper()}")
         else:
             # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
             # 设为对端模式确保 switch_mode 不会因 mode == desired 而跳过
             opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
             self._joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
-            logger.info("切换固件模式 → %s", desired.value.upper())
+            logger.info(f"切换固件模式 → {desired.value.upper()}")
             self._joint_ctrl.switch_mode(desired)
 
     def _auto_detect_aim(self, timeout: float) -> None:
