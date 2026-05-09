@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
-    "synria-robocore>=2.5.0rc2,<3.0",
+    "synria-robocore[torch]>=2.5.0rc2,<3.0",
     "synriard>=1.2.1,<2.0",
 ]
 
