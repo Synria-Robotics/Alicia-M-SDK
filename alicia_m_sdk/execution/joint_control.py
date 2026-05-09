@@ -11,7 +11,7 @@
 
 import math
 import time
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 from ..hardware.device import Device
 from ..hardware.constants import (
@@ -67,7 +67,7 @@ def _fill_mit_defaults(motor_index: int, kp: Optional[float],
 
 
 def _normalize_mit_param(
-    value: Optional[Union[float, List[Optional[float]]]],
+    value: Optional[Union[float, Sequence[Optional[float]]]],
     name: str,
     default: Optional[float] = None,
 ) -> List[Optional[float]]:
@@ -100,8 +100,18 @@ def _normalize_mit_param(
     return result
 
 
+def _normalize_mit_param_with_default(
+    value: Optional[Union[float, Sequence[Optional[float]]]],
+    name: str,
+    default: float,
+) -> List[float]:
+    """Normalize a MIT parameter list and replace all None values."""
+    normalized = _normalize_mit_param(value, name, default=default)
+    return [float(v if v is not None else default) for v in normalized]
+
+
 def _filled_mit_gain_list(
-    value: Optional[Union[float, List[Optional[float]]]],
+    value: Optional[Union[float, Sequence[Optional[float]]]],
     name: str,
     defaults: List[float],
 ) -> List[float]:
@@ -257,7 +267,7 @@ class JointController:
 
         velocities = [max(0.0, min(10.0, v)) for v in velocities]
         self._device.send_linear_velocity(self._device.aim, velocities)
-        logger.debug("线性插值速度帧已发送: %s", velocities)
+        logger.debug(f"Linear interpolation velocity frame sent: {velocities}")
         return True
 
     # ========== MIT 模式 ==========
@@ -352,8 +362,8 @@ class JointController:
 
         target_kps = _filled_mit_gain_list(kp, "kp", _DEFAULT_KP)
         target_kds = _filled_mit_gain_list(kd, "kd", _DEFAULT_KD)
-        torques = _normalize_mit_param(torque, "torque", default=0.0)
-        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
 
         current_kps, current_kds = self._read_current_mit_gains(read_timeout)
 
@@ -462,8 +472,8 @@ class JointController:
         # torque/vel_ref: None → 0.0，无需按电机区分
         kps = _normalize_mit_param(kp, "kp")
         kds = _normalize_mit_param(kd, "kd")
-        torques = _normalize_mit_param(torque, "torque", default=0.0)
-        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
 
         # 步骤3: 构建 MIT 帧（始终 6 地址）
         #   插值模式: 线性速度为用户指定值
@@ -562,8 +572,8 @@ class JointController:
         # 标准化 MIT 参数为逐电机列表
         kps = _normalize_mit_param(kp, "kp")
         kds = _normalize_mit_param(kd, "kd")
-        torques = _normalize_mit_param(torque, "torque", default=0.0)
-        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
 
         # 读取当前关节位置，保持不变
         current = self._get_current_angles()

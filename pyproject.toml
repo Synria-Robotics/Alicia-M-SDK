@@ -7,6 +7,7 @@ name = "alicia_m_sdk"
 version = "1.1.0"
 description = "Python SDK for controlling the Alicia M robotic arm."
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.8"
 authors = [
     {name = "Synria Robotics", email = "support@synriarobotics.ai"}
@@ -27,9 +28,8 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
-    "synria-robocore==2.5.0rc2",
+    "synria-robocore>=2.5.0rc2,<3.0",
     "synriard>=1.2.1,<2.0",
-    "alicia_d_sdk",
 ]
 
 [project.optional-dependencies]
@@ -42,13 +42,17 @@ visualization = [
 sparkvis = [
     "websockets>=13.0",
 ]
+teleop = [
+    "alicia_d_sdk",
+]
 torch = [
-    "synria-robocore[torch]==2.5.0rc2",
+    "synria-robocore[torch]>=2.5.0rc2,<3.0",
 ]
 all = [
     "scipy>=1.7.0",
     "matplotlib>=3.3.0",
     "websockets>=13.0",
+    "alicia_d_sdk",
 ]
 
 [project.urls]

@@ -93,10 +93,7 @@ class TrajectoryExecutor:
                     precise_sleep(target_time - now)
 
                 pos_frame = [float(positions[frame_idx, m]) for m in range(NUM_MOTORS)]
-                pos_frame[-1] = 0
-                # vel_frame = [float(velocities[frame_idx, m]) for m in range(NUM_MOTORS)]
-                vel_frame = [float(10) for m in range(NUM_MOTORS)]
-                vel_frame[-1] = 0
+                vel_frame = [float(velocities[frame_idx, m]) for m in range(NUM_MOTORS)]
 
                 self._device.send_pv(self._device.aim, pos_frame, vel_frame)
 

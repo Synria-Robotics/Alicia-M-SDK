@@ -4,6 +4,8 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 
 基于 [RoboCore](https://github.com/Synria-Robotics/RoboCore) 构建，通过串口通信协议提供对机械臂的完整控制能力。
 
+English summary: Alicia-M-SDK is a Python SDK for Alicia-M robotic arms. The recommended public entry point is `create_robot()` / `SynriaRobotAPI`; advanced users can also import `JointController`, `TrajectoryExecutor`, and `Teleoperation`.
+
 ## 核心功能
 
 - **关节控制**：6 关节位置/速度控制，支持平滑插值运动
@@ -22,6 +24,7 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 |------|------|
 | **双控制模式** | PV（位置-速度，固件插值）/ MIT（阻抗控制，支持直接 PD / 线性轨迹插值） |
 | **统一 API** | `set_robot_state()` 自动适配当前模式，屏蔽底层差异 |
+| **高级入口** | 顶层导出 `JointController`、`TrajectoryExecutor`、`Teleoperation`，供高级用户扩展 |
 | **安全切换** | 模式切换采用失能→切换→使能流程，固件侧处理目标位置初始化 |
 | **模式同步** | 连接时自动检测固件控制模式，按需切换到目标模式 |
 | **异步轮询** | 200Hz 后台状态轮询，缓存读取微秒级返回 |
@@ -32,9 +35,8 @@ Synria 云擎（Alicia-M）系列 6-DOF 机械臂 Python SDK。
 ```
 alicia_m_sdk/
 ├── api/            # 用户 API 层（SynriaRobotAPI 门面类）
-├── protocol/       # 协议层（帧结构、编解码、常量定义）
 ├── hardware/       # 硬件层（串口驱动、设备抽象、状态缓存）
-├── control/        # 控制层（关节控制、轨迹执行、示教、遥操作）
+├── execution/      # 高级执行层（关节控制、轨迹执行、遥操作）
 ├── types/          # 类型定义（状态、配置、枚举、异常）
 ├── utils/          # 工具层（单位转换、参数校验）
 ├── kinematics.py   # 运动学接口（RoboCore 封装）
@@ -67,6 +69,14 @@ pip install -e .
 
 源码安装可随时修改代码并立即生效，适合开发和调试。
 
+可选功能：
+
+```bash
+pip install -e ".[teleop]"  # Alicia-D -> Alicia-M 遥操作示例
+pip install -e ".[torch]"   # RoboCore torch 后端
+pip install -e ".[all]"     # 常用可选依赖
+```
+
 **方法二：从 PyPI 安装：**
 
 ```bash
@@ -78,30 +88,24 @@ pip install alicia_m_sdk
 ```python
 import alicia_m_sdk
 
-# 创建并自动连接（自动检测控制模式，串口自动发现）
-robot = alicia_m_sdk.create_robot()
+with alicia_m_sdk.create_robot(control_mode="pv") as robot:
+	# 关节运动（默认单位: deg）
+	robot.set_robot_state(target_joints=[90, -90, -90, 90, 0, 0], speed=15)
 
-# 指定控制模式（若固件当前模式不匹配则自动切换）
-robot = alicia_m_sdk.create_robot(control_mode="pv")
+	# 夹爪控制
+	robot.set_robot_state(gripper_value=1000)  # 打开
+	robot.set_robot_state(gripper_value=0)     # 关闭
 
-# 关节运动（度）
-robot.set_robot_state(target_joints=[90, -90, -90, 90, 0, 0], speed=15)
-
-# 夹爪控制
-robot.set_robot_state(gripper_value=1000)  # 打开
-robot.set_robot_state(gripper_value=0)     # 关闭
-
-# 关节 + 夹爪同时控制
-robot.set_robot_state(target_joints=[0, 0, 0, 0, 0, 0], gripper_value=500, speed=15)
-
-# 读取状态
-state = robot.get_robot_state("all")
-print(state.angles)        # 关节角度 (rad)
-print(state.gripper)       # 夹爪值 (0~1000)
-print(state.temperatures)  # 线圈温度 (°C)
-
-robot.disconnect()
+	# 读取状态
+	state = robot.get_robot_state("all")
+	print(state.angles)        # 关节角度 (rad)
+	print(state.gripper)       # 夹爪值 (0~1000)
+	print(state.temperatures)  # 扩展轮询开启后可用
 ```
+
+MIT 参数约定：`kp`/`kd` 传 `None` 表示按电机使用 SDK 安全默认值，显式传 `0` 表示真实零增益；标量会广播到 7 个电机，长度 6 的列表表示仅关节、夹爪使用默认值，长度 7 的列表表示逐电机设置。
+
+夹爪类型可使用 `GripperType.MM_50` / `GripperType.MM_100`，也兼容固件值 `0/2`、示例选项 `10/40`、字符串 `"50mm"` / `"100mm"`。
 
 ## 示例程序
 

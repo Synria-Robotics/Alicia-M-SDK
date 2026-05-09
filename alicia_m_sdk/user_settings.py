@@ -17,23 +17,18 @@ from .hardware.frame import Frame
 from .types.enums import GripperType
 
 GRIPPER_TYPE_VALUES = {
-    0: "默认小夹爪",
-    2: "大夹爪",
+    GripperType.MM_50.firmware_value: "默认小夹爪",
+    GripperType.MM_100.firmware_value: GripperType.MM_100.label,
 }
 
 GRIPPER_TYPE_OPTIONS = {
-    10: 0,
-    40: 2,
+    GripperType.MM_50.option_value: GripperType.MM_50.firmware_value,
+    GripperType.MM_100.option_value: GripperType.MM_100.firmware_value,
 }
 
 GRIPPER_TYPE_OPTION_LABELS = {
-    10: "小夹爪",
-    40: "大夹爪",
-}
-
-GRIPPER_TYPE_OPTION_LABELS = {
-    10: "小夹爪",
-    40: "大夹爪",
+    GripperType.MM_50.option_value: GripperType.MM_50.label,
+    GripperType.MM_100.option_value: GripperType.MM_100.label,
 }
 
 SETTING_NAMES = [
@@ -147,28 +142,12 @@ def is_write_accepted(frame: Frame) -> bool:
 
 def normalize_gripper_type(gripper_type: Union[int, str, GripperType]) -> int:
     """Normalize public gripper type inputs to firmware config values 0 or 2."""
-    if isinstance(gripper_type, GripperType):
-        return 2 if gripper_type == GripperType.MM_100 else 0
-    if isinstance(gripper_type, str):
-        text = gripper_type.strip().lower()
-        if text in {"small", "mini", "50", "50mm"}:
-            return 0
-        if text in {"large", "big", "100", "100mm"}:
-            return 2
-        value = int(text, 0)
-    else:
-        value = int(gripper_type)
-
-    if value in GRIPPER_TYPE_OPTIONS:
-        return GRIPPER_TYPE_OPTIONS[value]
-    if value in GRIPPER_TYPE_VALUES:
-        return value
-    raise ValueError("夹爪类型只支持 0/2 或用户选项 10/40")
+    return GripperType.parse(gripper_type).firmware_value
 
 
 def gripper_type_config_value(value: int) -> int:
     """Parse gripper type by protocol bit1."""
-    return 2 if int(value) & 0x02 else 0
+    return GripperType.from_firmware_value(value).firmware_value
 
 
 def gripper_type_label(value: int) -> str:

@@ -64,6 +64,23 @@ class SynriaRobotAPI:
         self._robot_model = robot_model
         self._connected = False
 
+    def __enter__(self) -> "SynriaRobotAPI":
+        """Enter a managed robot session, connecting if needed."""
+        if not self.is_connected():
+            self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Always disconnect when leaving a managed robot session."""
+        self.disconnect()
+        return False
+
+    def __del__(self):
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+
     @property
     def robot_model(self):
         """获取 RoboCore 机器人模型实例"""
@@ -89,32 +106,35 @@ class SynriaRobotAPI:
         :param timeout, 总超时（秒）
         :return, 连接成功返回 True
         """
+        if self.is_connected():
+            return True
+
         if self._config.port:
             self._connect_once(timeout)
-            print(f"已连接串口: {self.connected_port}", flush=True)
+            logger.info(f"Connected to serial port: {self.connected_port}")
             return True
 
         ports = SerialPort.find_ports()
         if not ports:
-            raise ConnectionError("未找到可用串口设备")
+            raise ConnectionError("No serial ports found")
 
         ports = list(reversed(ports))
-        print(f"发现串口: {', '.join(ports)}", flush=True)
+        logger.info(f"Found serial ports: {', '.join(ports)}")
         errors = []
         for port in ports:
-            print(f"自动尝试连接串口: {port}", flush=True)
+            logger.info(f"Trying serial port: {port}")
             try:
                 self._serial_port.set_port(port)
                 self._connect_once(timeout)
-                print(f"已自动连接串口: {self.connected_port}", flush=True)
+                logger.info(f"Auto-connected to serial port: {self.connected_port}")
                 return True
             except Exception as exc:
                 errors.append(f"{port}: {exc}")
-                logger.debug("串口 %s 自动识别失败: %s", port, exc)
+                logger.debug(f"Serial port {port} auto-detection failed: {exc}")
                 self.disconnect()
 
         detail = "; ".join(errors)
-        raise ConnectionError(f"自动识别 Alicia-M 串口失败。候选端口: {', '.join(ports)}。{detail}")
+        raise ConnectionError(f"Failed to auto-detect Alicia-M serial port. Candidates: {', '.join(ports)}. {detail}")
 
     def _connect_once(self, timeout: float) -> bool:
         """在当前 SerialPort.port_name 上完成一次 Alicia-M 握手。"""
@@ -122,7 +142,7 @@ class SynriaRobotAPI:
 
         # 1. 打开串口。
         if not self._serial_port.connect():
-            raise ConnectionError("串口连接失败，请检查设备连接和端口权限")
+            raise ConnectionError("Failed to open serial port; check device connection and permissions")
 
         try:
             # 2. 启动后台读线程和状态轮询线程。
@@ -140,7 +160,7 @@ class SynriaRobotAPI:
             remaining = max(deadline - time.time(), 0.5)
             firmware_version = self.get_firmware_version(timeout=remaining)
             if firmware_version is None:
-                raise ConnectionError("未收到 Alicia-M 固件版本响应")
+                raise ConnectionError("No Alicia-M firmware version response received")
 
             # 5. 等待首次状态缓存填充。
             poll_deadline = min(deadline, time.time() + 2.0)
@@ -153,7 +173,7 @@ class SynriaRobotAPI:
             self._sync_control_mode()
 
             self._connected = True
-            logger.info(f"机器人连接成功: {self.connected_port}")
+            logger.info(f"Robot connected: {self.connected_port}")
             return True
         except Exception:
             self.disconnect()
@@ -161,10 +181,12 @@ class SynriaRobotAPI:
 
     def disconnect(self) -> None:
         """断开连接：停止后台线程 → 关闭串口"""
+        was_connected = self._connected or self._serial_port.is_connected()
         self._device.stop()
         self._serial_port.disconnect()
         self._connected = False
-        logger.info("机器人已断开")
+        if was_connected:
+            logger.info("Robot disconnected")
 
     def is_connected(self) -> bool:
         """检查连接状态"""
@@ -636,9 +658,19 @@ class SynriaRobotAPI:
     def print_state(self, continuous: bool = False, output_format: str = "deg") -> None:
         """打印当前状态"""
         try:
-            from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+            from robocore.utils.beauty_logger import beauty_print as _rc_beauty_print
+            from robocore.utils.beauty_logger import beauty_print_array
+
+            def beauty_print(content: Any, type: Optional[str] = None):
+                if type is None:
+                    _rc_beauty_print(content)
+                else:
+                    _rc_beauty_print(content, type=type)
+
         except ImportError:
-            beauty_print = print
+            def beauty_print(content: Any, type: Optional[str] = None):
+                print(content)
+
             beauty_print_array = lambda arr, **kw: str(arr)
 
         def _print_once():

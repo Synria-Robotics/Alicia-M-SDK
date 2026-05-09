@@ -1,6 +1,15 @@
 import math
 import struct
 import unittest
+from unittest.mock import Mock, patch
+
+import numpy as np
+
+import alicia_m_sdk
+from alicia_m_sdk.api.synria_robot_api import SynriaRobotAPI
+from alicia_m_sdk.execution.trajectory_executor import TrajectoryExecutor
+from alicia_m_sdk.hardware.device import Device
+from alicia_m_sdk.types.enums import GripperType
 
 from alicia_m_sdk.diagnostics import (
     DIAGNOSTIC_BLOCK_LEN,
@@ -27,6 +36,7 @@ from alicia_m_sdk.hardware.constants import (
 )
 from alicia_m_sdk.hardware.frame import Frame
 from alicia_m_sdk.hardware.messages import ZeroResetRequest
+from alicia_m_sdk.types.config import RobotConfig
 from alicia_m_sdk.user_settings import (
     gripper_type_config_value,
     is_write_accepted,
@@ -39,6 +49,9 @@ from alicia_m_sdk.utils.version import parse_firmware_version, supports_min_vers
 
 
 class VersionHelpersTest(unittest.TestCase):
+    def test_runtime_version_matches_project_version(self):
+        self.assertEqual(alicia_m_sdk.__version__, "1.1.0")
+
     def test_parse_supported_version_formats(self):
         self.assertEqual(parse_firmware_version(106), (1, 0, 6))
         self.assertEqual(parse_firmware_version("106"), (1, 0, 6))
@@ -120,8 +133,22 @@ class UserSettingsTest(unittest.TestCase):
         self.assertEqual(normalize_gripper_type("10"), 0)
         self.assertEqual(normalize_gripper_type("40"), 2)
         self.assertEqual(normalize_gripper_type("large"), 2)
+        self.assertEqual(normalize_gripper_type(GripperType.MM_100), 2)
         self.assertEqual(gripper_type_config_value(6), 2)
         self.assertEqual(gripper_type_config_value(4), 0)
+
+    def test_gripper_type_enum_metadata(self):
+        self.assertEqual(GripperType.MM_50.value, "50mm")
+        self.assertEqual(GripperType.MM_50.firmware_value, 0)
+        self.assertEqual(GripperType.MM_100.firmware_value, 2)
+        self.assertEqual(GripperType.MM_50.option_value, 10)
+        self.assertEqual(GripperType.MM_100.option_value, 40)
+        self.assertIs(GripperType.parse("100mm"), GripperType.MM_100)
+        self.assertIs(GripperType.parse(10), GripperType.MM_50)
+
+    def test_advanced_api_exports_are_available(self):
+        self.assertIs(alicia_m_sdk.JointController, __import__("alicia_m_sdk.execution").execution.JointController)
+        self.assertIs(alicia_m_sdk.Teleoperation, __import__("alicia_m_sdk.execution").execution.Teleoperation)
 
     def test_write_response_acceptance(self):
         accepted = Frame(
@@ -136,6 +163,87 @@ class UserSettingsTest(unittest.TestCase):
         )
         self.assertTrue(is_write_accepted(accepted))
         self.assertFalse(is_write_accepted(rejected))
+
+
+class DeviceStatusTest(unittest.TestCase):
+    def test_follower_status_does_not_report_button_events(self):
+        status = Device._parse_run_status(0xC3, device_type="F")
+        self.assertTrue(status.is_locked)
+        self.assertTrue(status.is_synced)
+        self.assertTrue(status.has_motor_error)
+        self.assertTrue(status.gripper_torque_locked)
+        self.assertFalse(status.single_click)
+        self.assertFalse(status.double_click)
+        self.assertFalse(status.long_press)
+
+    def test_leader_status_reports_button_events(self):
+        status = Device._parse_run_status(0x07, device_type="L")
+        self.assertFalse(status.is_locked)
+        self.assertFalse(status.is_synced)
+        self.assertTrue(status.single_click)
+        self.assertTrue(status.double_click)
+        self.assertTrue(status.long_press)
+
+
+class TrajectoryExecutorTest(unittest.TestCase):
+    def test_execute_pv_uses_supplied_positions_and_velocities(self):
+        device = Mock()
+        device.aim = AIM_FOLLOWER
+        device.joint_state = None
+        executor = TrajectoryExecutor(device)
+        timestamps = np.array([0.0])
+        positions = np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 700.0]])
+        velocities = np.array([[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 25.0]])
+
+        self.assertTrue(executor.execute_pv(timestamps, positions, velocities))
+
+        device.send_pv.assert_called_once_with(
+            AIM_FOLLOWER,
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 700.0],
+            [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 25.0],
+        )
+
+
+class DeviceCommandTest(unittest.TestCase):
+    def test_send_linear_velocity_uses_codec_frame(self):
+        port = Mock()
+        codec = Mock()
+        frame = Frame(cmd_id=0x06, func_code=AIM_FOLLOWER, data=b"frame")
+        codec.encode_linear_velocity_control.return_value = frame
+        device = Device(port, codec)
+        device.send_frame = Mock()
+
+        velocities = [1.0] * NUM_MOTORS
+        device.send_linear_velocity(AIM_FOLLOWER, velocities)
+
+        codec.encode_linear_velocity_control.assert_called_once_with(AIM_FOLLOWER, velocities)
+        device.send_frame.assert_called_once_with(frame)
+
+
+class SynriaRobotAPILifecycleTest(unittest.TestCase):
+    def test_context_manager_connects_and_disconnects(self):
+        with patch.object(SynriaRobotAPI, "connect", return_value=True) as connect:
+            robot = SynriaRobotAPI(RobotConfig(auto_connect=False))
+            robot.disconnect = Mock()
+            robot.is_connected = Mock(return_value=False)
+
+            with robot as managed:
+                self.assertIs(managed, robot)
+
+            connect.assert_called_once()
+            robot.disconnect.assert_called_once()
+
+    def test_context_manager_does_not_reconnect_existing_connection(self):
+        with patch.object(SynriaRobotAPI, "connect", return_value=True) as connect:
+            robot = SynriaRobotAPI(RobotConfig(auto_connect=False))
+            robot.disconnect = Mock()
+            robot.is_connected = Mock(return_value=True)
+
+            with robot:
+                pass
+
+            connect.assert_not_called()
+            robot.disconnect.assert_called_once()
 
 
 class JointMappingTest(unittest.TestCase):

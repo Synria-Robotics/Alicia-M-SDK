@@ -93,6 +93,7 @@ class StateCache:
     def get_pending_response(self, cmd_id: int) -> Optional[Frame]:
         """获取 send_and_wait 的响应帧"""
         with self._lock:
+            self._pending_events.pop(cmd_id, None)
             return self._pending_responses.pop(cmd_id, None)
 
     def clear_pending(self, cmd_id: int) -> None:
@@ -239,6 +240,11 @@ class Device:
         )
         self.send_frame(frame)
 
+    def send_linear_velocity(self, aim: int, velocities: List[float]) -> None:
+        """Send a linear interpolation velocity frame."""
+        frame = self._codec.encode_linear_velocity_control(aim, velocities)
+        self.send_frame(frame)
+
     def send_and_wait(self, frame: Frame, expected_cmd: int,
                       timeout: float = 1.0) -> Optional[Frame]:
         """发送请求帧并等待响应
@@ -252,9 +258,13 @@ class Device:
         :return, 匹配的响应帧，超时返回 None
         """
         event = self._state_cache.register_pending(expected_cmd)
-        self.send_frame(frame)
-        event.wait(max(timeout, 0))
-        return self._state_cache.get_pending_response(expected_cmd)
+        try:
+            self.send_frame(frame)
+            if event.wait(max(timeout, 0)):
+                return self._state_cache.get_pending_response(expected_cmd)
+            return None
+        finally:
+            self._state_cache.clear_pending(expected_cmd)
 
     def send_and_wait_first(
         self,
@@ -382,15 +392,15 @@ class Device:
         """根据指令 ID 分发响应到对应处理器"""
         cmd_id = frame.cmd_id
 
-        # 尝试触发 send_and_wait 的 pending event
-        self._state_cache.resolve_pending(cmd_id, frame)
-
         if cmd_id == CMD_JOINT_STATE:
             self._handle_joint_state(frame)
         elif cmd_id == CMD_VERSION:
             self._handle_version(frame)
         elif cmd_id == CMD_ERROR:
             self._handle_error(frame)
+
+        # Wake send_and_wait callers after handlers update state caches.
+        self._state_cache.resolve_pending(cmd_id, frame)
         # 其他指令的响应（0x03, 0x05, 0x09, 0x11）通过 send_and_wait 处理
 
     def _handle_joint_state(self, frame: Frame) -> None:
@@ -434,7 +444,9 @@ class Device:
             # 解析运行状态字节
             run_status = phys.get('run_status', 0)
             if run_status is not None:
-                status = self._parse_run_status(run_status)
+                version = self._state_cache.get_version()
+                device_type = version.device_type if version else ""
+                status = self._parse_run_status(run_status, device_type=device_type)
                 self._state_cache.update_robot_status(status)
 
         except Exception as e:
@@ -461,20 +473,26 @@ class Device:
         if len(frame.data) >= 1:
             error_type = frame.func_code
             error_data = frame.data[0] if frame.data else 0
-            desc = ERROR_DESCRIPTIONS.get(error_type, f"未知错误(0x{error_type:02X})")
+            desc = ERROR_DESCRIPTIONS.get(error_type, f"Unknown error(0x{error_type:02X})")
             logger.warning(
-                f"固件错误: {desc} (type=0x{error_type:02X}, data=0x{error_data:02X})"
+                f"Firmware error: {desc} (type=0x{error_type:02X}, data=0x{error_data:02X})"
             )
 
     @staticmethod
-    def _parse_run_status(status_byte: int) -> RobotStatus:
+    def _parse_run_status(status_byte: int, device_type: str = "") -> RobotStatus:
         """解析运行状态字节"""
+        device_type = (device_type or "F").upper()
+        if device_type == "L":
+            return RobotStatus(
+                has_motor_error=bool(status_byte & 0x80),
+                gripper_torque_locked=bool(status_byte & 0x40),
+                single_click=bool(status_byte & 0x01),
+                double_click=bool(status_byte & 0x02),
+                long_press=bool(status_byte & 0x04),
+            )
         return RobotStatus(
             is_locked=bool(status_byte & 0x01),
             is_synced=bool(status_byte & 0x02),
             has_motor_error=bool(status_byte & 0x80),
             gripper_torque_locked=bool(status_byte & 0x40),
-            single_click=bool(status_byte & 0x01),
-            double_click=bool(status_byte & 0x02),
-            long_press=bool(status_byte & 0x04),
         )

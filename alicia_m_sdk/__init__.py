@@ -16,13 +16,16 @@
     robot.disconnect()
 """
 
-__version__ = "1.0.1"
+from typing import Literal, Optional
+
+__version__ = "1.1.0"
 
 # === 核心类型 ===
 from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams, RobotStatus, VersionInfo
 from .diagnostics import DiagnosticResult, DiagnosticArmSnapshot
 from .user_settings import UserSettings
+from .execution import JointController, Teleoperation, TrajectoryExecutor
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
 from .types.exceptions import (
@@ -51,11 +54,11 @@ except ImportError:
 def create_robot(
     port: str = "",
     version: str = "v1_1",
-    variant: str = None,
-    control_aim: str = None,
-    control_mode: str = None,
+    variant: Optional[str] = None,
+    control_aim: Optional[str] = None,
+    control_mode: Optional[str] = None,
     baudrate: int = 1_000_000,
-    backend: str = "cpp",
+    backend: Literal["numpy", "torch", "cpp"] = "cpp",
     debug_mode: bool = False,
     auto_connect: bool = True,
     extended_polling: bool = False,
@@ -93,6 +96,7 @@ def create_robot(
         rc.set_backend(backend)
 
         # 2. 加载机器人模型
+        from robocore.modeling import RobotModel as RobotModelClass
         from synriard import get_model_path
         # synriard 的 Alicia_M 模型必须指定 variant
         model_variant = variant if variant else "follower"
@@ -100,16 +104,16 @@ def create_robot(
             "Alicia_M", version=version,
             variant=model_variant, model_format="urdf",
         )
-        robot_model = RobotModel(
+        robot_model = RobotModelClass(
             str(model_path),
             base_link="base_link",
             end_link="tool0",
         )
     except ImportError:
         # RoboCore 或 synriard 不可用时，运动学功能不可用
-        logger.warning("RoboCore / synriard 未安装，运动学和规划功能不可用")
+        logger.warning("RoboCore / synriard is not installed; kinematics and planning are unavailable")
     except Exception as e:
-        logger.warning(f"机器人模型加载失败: {e}")
+        logger.warning(f"Failed to load robot model: {e}")
 
     # 3. 创建实例
     config = RobotConfig(
@@ -146,6 +150,8 @@ __all__ = [
     'RobotConfig',
     'ControlAim', 'ControlMode', 'GripperType',
     'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
+    # 高级控制入口
+    'JointController', 'Teleoperation', 'TrajectoryExecutor',
     # 异常
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',

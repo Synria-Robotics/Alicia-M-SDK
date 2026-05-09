@@ -1,24 +1,6 @@
-# Copyright (c) 2025 Synria Robotics Co., Ltd.
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-#
-# Author: Synria Robotics Team
-# Website: https://synriarobotics.ai
-
 import os
 from datetime import datetime
-from typing import List, Any
+from typing import Any, List, Optional, cast
 
 # 定义日志级别常量
 class LogLevel:
@@ -130,7 +112,6 @@ class BeautyLogger:
         if self._should_print(LogLevel.ERROR) and local_verbose:
             beauty_print(content, type="error")
         self._write_log(content, type="error")
-        raise Exception(content)
 
     def success(self, content, local_verbose=True):
         """
@@ -144,7 +125,7 @@ class BeautyLogger:
         self._write_log(content, type="success")
 
 
-def beauty_print(content, type: str = None):
+def beauty_print(content: Any, type: Optional[str] = None) -> None:
     """
     使用不同颜色打印内容
 
@@ -220,12 +201,15 @@ def beauty_print_matrix(name: str, data: Any, precision: int = 4, max_batch_item
     # Simple scalar
     if isinstance(arr, (int, float)) or (hasattr(arr, "ndim") and getattr(arr, "ndim") == 0):
         print(" " * indent + f"{name} = {float(arr):.{precision}f}")
+        return
 
     # If still something unexpected, just print raw
     if not hasattr(arr, "ndim"):
         print(" " * indent + f"{name} = {arr}")
+        return
 
-    ndim = arr.ndim  # type: ignore
+    arr = cast(Any, arr)
+    ndim = arr.ndim
     fmt = f"{{:>{precision + 6}.{precision}f}}"
     pad = " " * indent
 
@@ -246,7 +230,7 @@ def beauty_print_matrix(name: str, data: Any, precision: int = 4, max_batch_item
                 row_str = "  ".join(str(v) for v in row)
             print(pad + "  [" + row_str + "]")
     elif ndim == 3:
-        n = arr.shape[0]
+        n = getattr(arr, "shape", [0])[0]
         print(pad + f"{name} (batch size={n})")
         preview = min(max_batch_items, n)
         for bi in range(preview):
@@ -304,19 +288,22 @@ def beauty_print_array(arr: Any, precision: int = 5, sign: bool = True) -> str:
         fmt = f"%{'+' if sign else ''}.{precision}f"
         return fmt % float(arr)
 
-    if _np is None or not hasattr(arr, 'ndim'):
+    ndim = getattr(arr, 'ndim', None)
+    if _np is None or ndim is None:
         return str(arr)
 
-    if arr.ndim == 0:
+    arr = cast(Any, arr)
+
+    if ndim == 0:
         fmt = f"%{'+' if sign else ''}.{precision}f"
         return fmt % float(arr)
 
     number_fmt = f"{{:{'+' if sign else ''}.{precision}f}}"
 
-    if arr.ndim == 1:
+    if ndim == 1:
         values = ', '.join(number_fmt.format(float(x)) for x in arr)
         return f"[{values}]"
-    elif arr.ndim == 2:
+    elif ndim == 2:
         lines = []
         for row in arr:
             row_str = '  '.join(number_fmt.format(float(x)) for x in row)
