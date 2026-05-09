@@ -27,8 +27,8 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
-    "synria-robocore>=2.0.0alpha1",
-    "synriard>=1.2.1",
+    "synria-robocore==2.5.0rc2",
+    "synriard>=1.2.1,<2.0",
     "alicia_d_sdk",
 ]
 
@@ -41,6 +41,9 @@ visualization = [
 ]
 sparkvis = [
     "websockets>=13.0",
+]
+torch = [
+    "synria-robocore[torch]==2.5.0rc2",
 ]
 all = [
     "scipy>=1.7.0",

@@ -18,7 +18,7 @@ import alicia_m_sdk
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from demo_utils.demo_common import add_port_argument
-from robocore.transform import matrix_to_quaternion
+from robocore.transform import matrix_to_quaternion  # stable in robocore 2.x
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 

@@ -79,7 +79,7 @@ class RobotConfig:
     model_format: str = "urdf"                  # 模型格式
     base_link: str = "base_link"                # 基座链接名
     end_link: str = "tool0"                     # 末端链接名
-    backend: str = "numpy"                      # 计算后端 ("numpy" / "torch")
+    backend: str = "cpp"                       # 计算后端 ("numpy" / "torch" / "cpp")
 
     # --- 关节限位 (rad) ---
     joint_limits_lower: List[float] = field(

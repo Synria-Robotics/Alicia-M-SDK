@@ -53,7 +53,7 @@ def create_robot(
     control_aim: str = None,
     control_mode: str = None,
     baudrate: int = 1_000_000,
-    backend: str = "numpy",
+    backend: str = "cpp",
     debug_mode: bool = False,
     auto_connect: bool = True,
     extended_polling: bool = False,
@@ -73,7 +73,7 @@ def create_robot(
     :param control_aim, 控制目标 ("leader"/"follower"/None=自动检测)
     :param control_mode, 控制模式 ("pv"/"mit"/None=检测固件当前模式)
     :param baudrate, 串口波特率
-    :param backend, RoboCore 计算后端 ("numpy"/"torch")
+    :param backend, RoboCore 计算后端 ("numpy"/"torch"/"cpp")；"cpp" 需要 synria-robocore 2.5.0+ 且已编译 C++ 扩展
     :param debug_mode, 调试模式（启用 DEBUG 级别日志）
     :param auto_connect, 是否自动连接
     :param extended_polling, 扩展轮询（查询插补速度、温度等，需新固件支持）
@@ -84,7 +84,7 @@ def create_robot(
     else:
         logger.set_min_level(LogLevel.INFO)
 
-    # 1. 设置 RoboCore 后端
+    # 1. 设置 RoboCore 后端（2.5.0rc2：'cpp' 是合法值，不会抛 ValueError）
     robot_model = None
     try:
         import robocore as rc

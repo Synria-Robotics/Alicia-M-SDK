@@ -98,7 +98,12 @@ def _normalize_target_pose(target_pose):
 
 
 def _ensure_robocore():
-    """确保 RoboCore 已导入"""
+    """确保 RoboCore 已导入
+
+    兼容 synria-robocore 2.5.0rc2 的三种后端（numpy / torch / cpp）。
+    robocore.utils.backend.to_numpy 在所有后端下均可将原生张量转换为 numpy
+    ndarray，包括 2.5.0rc2 新增的 C++ CppTensor 类型，无需额外处理。
+    """
     global _rc, _fk, _ik, _jac, _to_numpy, _matrix_to_euler, _matrix_to_quaternion
     if _rc is not None:
         return
@@ -115,7 +120,10 @@ def _ensure_robocore():
         _matrix_to_euler = matrix_to_euler
         _matrix_to_quaternion = matrix_to_quaternion
     except ImportError:
-        raise ImportError("RoboCore 未安装，运动学功能不可用。请安装 synria-robocore。")
+        raise ImportError(
+            "RoboCore 未安装，运动学功能不可用。"
+            "请执行: pip install 'synria-robocore==2.5.0rc2'"
+        )
 
 
 def compute_forward_kinematics(robot_model, q: List[float]) -> Dict[str, Any]:
