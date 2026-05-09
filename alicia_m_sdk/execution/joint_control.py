@@ -219,6 +219,30 @@ class JointController:
             return joint_ok
         return True
 
+    def set_linear_interpolation_velocity(
+        self,
+        velocity_rad_s: Union[float, List[float]] = 2.0,
+    ) -> bool:
+        """一次性配置固件线性轨迹插值速度.
+
+        发送 0x06 写帧，start_addr=ADDR_LINEAR_VEL，addr_count=1。
+        速度单位为 rad/s，范围按协议裁剪到 [0, 10]。
+        """
+        if isinstance(velocity_rad_s, (int, float)):
+            velocities = [float(velocity_rad_s)] * NUM_MOTORS
+        else:
+            velocities = [float(v) for v in velocity_rad_s]
+
+        if len(velocities) != NUM_MOTORS:
+            raise ValidationError(
+                f"线性插值速度数量错误: 期望 {NUM_MOTORS}, 实际 {len(velocities)}"
+            )
+
+        velocities = [max(0.0, min(10.0, v)) for v in velocities]
+        self._device.send_linear_velocity(self._device.aim, velocities)
+        logger.debug("线性插值速度帧已发送: %s", velocities)
+        return True
+
     # ========== MIT 模式 ==========
 
     def send_mit(

@@ -7,7 +7,7 @@
 import argparse
 import math
 import alicia_m_sdk
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -21,9 +21,13 @@ def _print_joints(robot, label: str):
     else:
         beauty_print("无法读取关节角度", type="warning")
 
-
-def main(args):
+def main():
     beauty_print("Demo: 失能/使能交互", type="module")
+
+    parser = argparse.ArgumentParser(description="Disable and enable Alicia-M.")
+    add_port_argument(parser)
+    args = parser.parse_args()
+
     # 创建并连接机器人
     robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
@@ -61,8 +65,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Disable and enable Alicia-M")
-    add_port_argument(parser)
-    args = parser.parse_args()
-    
-    main(args)
+    main()

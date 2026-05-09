@@ -414,6 +414,36 @@ class MessageCodec:
             motor_data=motor_data,
         ))
 
+    def encode_linear_velocity_control(
+        self,
+        aim: int,
+        linear_velocities: List[float],
+    ) -> Frame:
+        """编码线性轨迹插值速度控制帧（物理量输入）.
+
+        该帧只写入 0x06 指令的 ADDR_LINEAR_VEL 地址（addr=0x05,
+        addr_count=1），用于一次性配置固件侧线性轨迹插值速度。
+
+        Args:
+            aim: 目标部位（AIM_LEADER / AIM_FOLLOWER）
+            linear_velocities: 7 个电机的线性轨迹插值速度 (rad/s)
+
+        Returns:
+            编码后的 Frame 对象
+        """
+        self._validate_motor_list(linear_velocities, "linear_velocities")
+
+        motor_data: List[List[int]] = []
+        for velocity in linear_velocities:
+            motor_data.append([encode_linear_velocity(velocity)])
+
+        return self.encode_joint_control(JointControlRequest(
+            aim=aim,
+            start_addr=ADDR_LINEAR_VEL,
+            addr_count=1,
+            motor_data=motor_data,
+        ))
+
     def encode_mit_control(
         self,
         aim: int,

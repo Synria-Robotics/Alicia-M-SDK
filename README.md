@@ -123,6 +123,7 @@ robot.disconnect()
 | 13 | `demo_teleop.py` | 遥操作：Alicia-D → Alicia-M（PV / MIT，逐电机阻抗参数） |
 | 14 | `demo_reset_zero.py` | 零位标定 |
 | 15 | `demo_teleop_mapped.py` | 遥操作 + URDF 限位映射（逐电机阻抗参数） |
+| 16 | `demo_gripper_params.py` | 0x17 夹爪夹持参数读写 |
 
 运行示例：
 
@@ -130,6 +131,23 @@ robot.disconnect()
 conda activate msdk
 python examples/07_demo_move_joint.py --speed 15
 ```
+
+### 16 夹爪夹持参数读写
+
+`16_demo_gripper_params.py` 使用公开协议 `0x17` 读取或修改夹爪夹持参数。默认目标为操作臂 `follower`，默认动作是读取全部参数，不会写入。
+
+```bash
+# 读取操作臂全部夹爪参数
+python examples/16_demo_gripper_params.py --port COM57
+
+# 仅读取指定掩码，例如 0x09 = 目标夹持力 + 最大保持力矩
+python examples/16_demo_gripper_params.py --port COM57 --mask 0x09
+
+# 设置目标夹持力为 80N，最大保持力矩为 70N·m
+python examples/16_demo_gripper_params.py --port COM57 --target-force 80 --hold-torque 70
+```
+
+写入前程序会打印即将写入的参数并等待确认；确认机械臂安全后按 Enter 发送。若需要自动执行，可加 `-y` 跳过确认；默认写入后会读回全部参数，可加 `--skip-readback` 跳过读回。
 
 ## License
 

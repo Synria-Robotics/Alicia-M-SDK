@@ -68,6 +68,11 @@ class SynriaRobotAPI:
         """获取当前控制模式"""
         return self._joint_ctrl.mode
 
+    @property
+    def connected_port(self) -> str:
+        """获取当前连接的串口名。"""
+        return self._serial_port.port_name
+
     # ========== 连接管理 ==========
 
     def connect(self, timeout: float = 5.0) -> bool:
@@ -78,41 +83,75 @@ class SynriaRobotAPI:
         :param timeout, 总超时（秒）
         :return, 连接成功返回 True
         """
+        if self._config.port:
+            self._connect_once(timeout)
+            print(f"已连接串口: {self.connected_port}", flush=True)
+            return True
+
+        ports = SerialPort.find_ports()
+        if not ports:
+            raise ConnectionError("未找到可用串口设备")
+
+        ports = list(reversed(ports))
+        print(f"发现串口: {', '.join(ports)}", flush=True)
+        errors = []
+        for port in ports:
+            print(f"自动尝试连接串口: {port}", flush=True)
+            try:
+                self._serial_port.set_port(port)
+                self._connect_once(timeout)
+                print(f"已自动连接串口: {self.connected_port}", flush=True)
+                return True
+            except Exception as exc:
+                errors.append(f"{port}: {exc}")
+                logger.debug("串口 %s 自动识别失败: %s", port, exc)
+                self.disconnect()
+
+        detail = "; ".join(errors)
+        raise ConnectionError(f"自动识别 Alicia-M 串口失败。候选端口: {', '.join(ports)}。{detail}")
+
+    def _connect_once(self, timeout: float) -> bool:
+        """在当前 SerialPort.port_name 上完成一次 Alicia-M 握手。"""
         deadline = time.time() + timeout
 
-        # 1. 打开串口
+        # 1. 打开串口。
         if not self._serial_port.connect():
             raise ConnectionError("串口连接失败，请检查设备连接和端口权限")
 
-        # 2. 启动后台线程
-        self._device.start()
+        try:
+            # 2. 启动后台读线程和状态轮询线程。
+            self._device.start()
 
-        # 3. 自动检测控制目标
-        if self._config.control_aim:
-            aim_str = self._config.control_aim.lower()
-            aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
-            self._device.set_aim(aim)
-        else:
-            # 通过版本查询自动检测
-            self._auto_detect_aim(max(deadline - time.time(), 0.5))
+            # 3. 设置或自动检测控制目标。
+            if self._config.control_aim:
+                aim_str = self._config.control_aim.lower()
+                aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
+                self._device.set_aim(aim)
+            else:
+                self._auto_detect_aim(max(deadline - time.time(), 0.5))
 
-        # 4. 等待首次状态缓存填充
-        poll_deadline = min(deadline, time.time() + 2.0)
-        while time.time() < poll_deadline:
-            if self._device.joint_state is not None:
-                break
-            time.sleep(0.05)
+            # 4. 先验证版本响应；没有响应就跳过当前串口。
+            remaining = max(deadline - time.time(), 0.5)
+            firmware_version = self.get_firmware_version(timeout=remaining)
+            if firmware_version is None:
+                raise ConnectionError("未收到 Alicia-M 固件版本响应")
 
-        # 5. 查询固件版本
-        remaining = max(deadline - time.time(), 0.5)
-        self.get_firmware_version(timeout=remaining)
+            # 5. 等待首次状态缓存填充。
+            poll_deadline = min(deadline, time.time() + 2.0)
+            while time.time() < poll_deadline:
+                if self._device.joint_state is not None:
+                    break
+                time.sleep(0.05)
 
-        # 6. 检测固件控制模式并同步 SDK 内部状态
-        self._sync_control_mode()
+            # 6. 检测固件控制模式并同步 SDK 内部状态。
+            self._sync_control_mode()
 
-        self._connected = True
-        logger.info("机器人连接成功")
-        return True
+            self._connected = True
+            logger.info("机器人连接成功: %s", self.connected_port)
+            return True
+        except Exception:
+            self.disconnect()
+            raise
 
     def disconnect(self) -> None:
         """断开连接：停止后台线程 → 关闭串口"""
@@ -304,6 +343,19 @@ class SynriaRobotAPI:
         if value is None:
             return False
         return self._joint_ctrl.move_gripper(value, wait=wait_for_completion)
+
+    def set_linear_interpolation_velocity(
+        self,
+        velocity_rad_s: Union[float, List[float]] = 2.0,
+    ) -> bool:
+        """一次性设置固件线性轨迹插值速度.
+
+        发送一帧只包含线性插值速度（0x06/addr=0x05）的数据帧。
+        速度单位为 rad/s，可传标量广播到 7 个电机，或传长度 7 的列表。
+        """
+        return self._joint_ctrl.set_linear_interpolation_velocity(
+            velocity_rad_s,
+        )
 
     # ========== MIT 专用接口 ==========
 

@@ -9,12 +9,20 @@ import argparse
 import math
 import time
 import alicia_m_sdk
-from demo_common import add_port_argument
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
-def main(args):
+def main():
     beauty_print("Demo: 读取关节状态（循环打印）", type="module")
+
+    parser = argparse.ArgumentParser(description="读取关节状态示例")
+    parser.add_argument(
+        "--extend", action="store_true",
+        help="启用扩展查询（插补速度、线圈温度，需新固件支持）"
+    )
+    add_port_argument(parser)
+    args = parser.parse_args()
 
     # 创建并连接机器人
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -79,12 +87,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="读取关节状态示例")
-    parser.add_argument(
-        "--extend", action="store_true",
-        help="启用扩展查询（插补速度、线圈温度，需新固件支持）"
-    )
-    add_port_argument(parser)
-    args = parser.parse_args()
-    
-    main(args)
+    main()

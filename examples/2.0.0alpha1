@@ -1,0 +1,2 @@
+Requirement already satisfied: synria-robocore in d:\anaconda3\envs\amsdk\lib\site-packages (1.0.0)
+Requirement already satisfied: numpy>=1.21 in d:\anaconda3\envs\amsdk\lib\site-packages (from synria-robocore) (2.2.6)

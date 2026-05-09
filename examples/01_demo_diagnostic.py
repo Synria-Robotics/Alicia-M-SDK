@@ -7,12 +7,16 @@
 import argparse
 
 import alicia_m_sdk
-from demo_common import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print
+from alicia_m_sdk.demo_utils.demo_common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
-def main(args):
+def main():
     beauty_print("Demo: 自检功能（底层待更新）", type="module")
+
+    parser = argparse.ArgumentParser(description="Run Alicia-M diagnostic demo.")
+    add_port_argument(parser)
+    args = parser.parse_args()
 
     # 创建并连接机器人
     robot = alicia_m_sdk.create_robot(port=args.port)
@@ -45,8 +49,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Alicia-M diagnostic demo")
-    add_port_argument(parser)
-    args = parser.parse_args()
-    
-    main(args)
+    main()

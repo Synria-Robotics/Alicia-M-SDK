@@ -33,6 +33,17 @@ class SerialPort:
         self._serial: Optional[serial.Serial] = None
         self._rx_buffer = bytearray()
 
+    @property
+    def port_name(self) -> str:
+        """当前配置或已连接的串口名。"""
+        return self._port_name
+
+    def set_port(self, port: str) -> None:
+        """设置待连接串口名；仅允许在未连接时调用。"""
+        if self.is_connected():
+            raise serial.SerialException("串口已连接，不能切换端口")
+        self._port_name = port
+
     def connect(self) -> bool:
         """连接串口
 
