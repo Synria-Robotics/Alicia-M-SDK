@@ -1,17 +1,17 @@
-"""16_demo_gripper_params.py — 0x17 夹爪夹持参数读写
+"""15_demo_gripper_params.py — 0x17 夹爪夹持参数读写
 
 默认读取操作臂全部夹爪夹持参数。传入任意参数选项时，按 0x17 协议写入
 对应掩码位，并可在写入后自动读回全部参数。
 
 用法:
     # 读取操作臂全部夹爪参数
-    python 16_demo_gripper_params.py
+    python 15_demo_gripper_params.py
 
     # 设置目标夹持力为 80N，最大保持力矩为 70N·m
-    python 16_demo_gripper_params.py --target-force 80 --hold-torque 70
+    python 15_demo_gripper_params.py --target-force 80 --hold-torque 70
 
     # 读取指定掩码，例如 0x09 = 目标夹持力 + 最大保持力矩
-    python 16_demo_gripper_params.py --mask 0x09
+    python 15_demo_gripper_params.py --mask 0x09
 """
 
 import argparse
@@ -22,9 +22,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import alicia_m_sdk
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from demo_utils.demo_common import add_port_argument
+from _common import add_port_argument
 from alicia_m_sdk.hardware.constants import (
     AIM_FOLLOWER,
     AIM_LEADER,
@@ -86,7 +84,7 @@ def make_write_frame(aim: int, values: Dict[int, float]) -> Frame:
 
 def send_frame(robot, frame: Frame, timeout: float) -> Optional[Frame]:
     beauty_print(f"TX: {format_bytes(frame.encode())}", type="info")
-    response = robot._device.send_and_wait(frame, CMD_GRIPPER_PARAM, timeout=timeout)
+    response = robot.send_gripper_param_frame(frame, timeout=timeout)
     if response is None:
         beauty_print("未收到 0x17 响应", type="warning")
         return None

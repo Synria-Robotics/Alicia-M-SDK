@@ -56,6 +56,8 @@ from .beauty_logger import (
     format_array,
     logger,
 )
+from .protocol import format_bytes
+from .version import parse_firmware_version, supports_min_version
 from .trajectory_plot import (
     plot_trajectory,
     plot_joint_tracking,
@@ -101,6 +103,9 @@ __all__ = [
     "format_array",
     "get_sdk_log_file_path",
     "logger",
+    "format_bytes",
+    "parse_firmware_version",
+    "supports_min_version",
     # trajectory_plot
     "plot_trajectory",
     "plot_joint_tracking",

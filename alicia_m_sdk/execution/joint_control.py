@@ -9,8 +9,9 @@
 - 输入超限时优先裁剪+警告（而非直接拒绝）
 """
 
+import math
 import time
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 from ..hardware.device import Device
 from ..hardware.constants import (
@@ -20,7 +21,8 @@ from ..hardware.constants import (
     NUM_JOINTS, NUM_MOTORS,
     DEFAULT_KP_LARGE, DEFAULT_KD_LARGE,
     DEFAULT_KP_SMALL, DEFAULT_KD_SMALL,
-    ZERO_RESET_STRONG,
+    POLL_ADDR_EXTENDED,
+    ZERO_RESET_STRONG, ZERO_RESET_WEAK,
 )
 from ..hardware.messages import (
     TorqueRequest, EnableRequest, MotorParamRequest, ZeroResetRequest,
@@ -29,6 +31,7 @@ from ..types.enums import ControlMode
 from ..types.state import MitParams
 from ..types.exceptions import RobotStateError, ValidationError
 from ..utils.conversion import speed_user_to_firmware
+from ..utils.timing import precise_sleep
 from ..utils.validation import (
     validate_joint_angles, validate_speed, validate_gripper_value,
 )
@@ -97,6 +100,20 @@ def _normalize_mit_param(
     return result
 
 
+def _filled_mit_gain_list(
+    value: Optional[Union[float, List[Optional[float]]]],
+    name: str,
+    defaults: List[float],
+) -> List[float]:
+    """按电机编号填充 MIT 增益默认值"""
+    normalized = _normalize_mit_param(value, name)
+    result: List[float] = []
+    for i in range(NUM_MOTORS):
+        v = normalized[i]
+        result.append(v if v is not None else defaults[i])
+    return result
+
+
 class JointController:
     """关节级运动控制
 
@@ -122,8 +139,8 @@ class JointController:
             self._mode = ControlMode(control_mode.lower())
         else:
             self._mode = control_mode
-        self._joint_limits_lower = joint_limits_lower or _DEFAULT_JOINT_LIMITS_LOWER
-        self._joint_limits_upper = joint_limits_upper or _DEFAULT_JOINT_LIMITS_UPPER
+        self._joint_limits_lower = list(joint_limits_lower or _DEFAULT_JOINT_LIMITS_LOWER)
+        self._joint_limits_upper = list(joint_limits_upper or _DEFAULT_JOINT_LIMITS_UPPER)
 
     # ========== 属性 ==========
 
@@ -289,6 +306,93 @@ class JointController:
 
         self._device.send_mit(self._device.aim, filled_params)
         logger.debug(f"MIT 帧已发送: {filled_params}")
+
+    def initialize_mit_gains(
+        self,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
+        duration: float = 1.0,
+        frequency_hz: float = 50.0,
+        read_timeout: float = 1.0,
+    ) -> bool:
+        """@brief 在 MIT 运动前线性初始化 Kp/Kd。
+
+        @details
+        读取机械臂当前 Kp/Kd，与目标增益逐电机比较，并在保持当前位置的
+        情况下按固定频率线性过渡到目标值。该流程适合 demo 或产品启动
+        阶段使用，避免第一帧 MIT 命令直接写入较大增益造成电机跳动。
+        如果固件不支持扩展状态读回，SDK 会记录警告并从 0 开始平滑过渡。
+
+        @param kp 目标位置增益 [0, 500]。None 使用 SDK 默认值；标量广播；
+            长度 6/7 的列表表示逐电机设置。
+        @param kd 目标速度增益 [0, 5]。格式同 kp。
+        @param torque 预热帧使用的前馈力矩。None 表示 0。
+        @param vel_ref 预热帧使用的速度参考。None 表示 0。
+        @param duration 线性过渡时长，单位秒；0 表示只发送最终目标增益。
+        @param frequency_hz 过渡帧发送频率，单位 Hz。
+        @param read_timeout 读取当前 Kp/Kd 的最长等待时间，单位秒。
+        @return True 表示预热帧已发送完成。
+        @throws RobotStateError 当前状态缓存不可用时抛出。
+        @throws ValidationError 参数长度或时间参数不合法时抛出。
+        """
+        if duration < 0.0:
+            raise ValidationError("MIT 增益初始化 duration 不能为负数")
+        if frequency_hz <= 0.0:
+            raise ValidationError("MIT 增益初始化 frequency_hz 必须大于 0")
+        if read_timeout < 0.0:
+            raise ValidationError("MIT 增益初始化 read_timeout 不能为负数")
+
+        state = self._device.joint_state
+        if state is None or len(state.angles) < NUM_JOINTS:
+            raise RobotStateError(
+                "无法初始化 MIT 增益: 当前关节状态不可用"
+            )
+
+        target_kps = _filled_mit_gain_list(kp, "kp", _DEFAULT_KP)
+        target_kds = _filled_mit_gain_list(kd, "kd", _DEFAULT_KD)
+        torques = _normalize_mit_param(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+
+        current_kps, current_kds = self._read_current_mit_gains(read_timeout)
+
+        state = self._device.joint_state or state
+        positions = list(state.angles[:NUM_JOINTS]) + [state.gripper]
+        max_kp_delta = max(
+            abs(target_kps[i] - current_kps[i]) for i in range(NUM_MOTORS)
+        )
+        max_kd_delta = max(
+            abs(target_kds[i] - current_kds[i]) for i in range(NUM_MOTORS)
+        )
+        already_ready = max_kp_delta < 1e-3 and max_kd_delta < 1e-4
+        steps = 1 if already_ready or duration == 0.0 else max(
+            1, int(math.ceil(duration * frequency_hz))
+        )
+        interval = duration / steps if steps > 0 else 0.0
+
+        logger.info(
+            f"初始化 MIT 增益: max ΔKp={max_kp_delta:.3f}, max ΔKd={max_kd_delta:.4f}, steps={steps}"
+        )
+
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            mit_params = []
+            for i in range(NUM_MOTORS):
+                mit_params.append(MitParams(
+                    pos_ref=positions[i],
+                    vel_ref=float(vel_refs[i] or 0.0),
+                    t_ref=float(torques[i] or 0.0),
+                    kp=current_kps[i] + (target_kps[i] - current_kps[i]) * ratio,
+                    kd=current_kds[i] + (target_kds[i] - current_kds[i]) * ratio,
+                ))
+
+            self._device.send_mit(self._device.aim, mit_params)
+            if step < steps and interval > 0.0:
+                precise_sleep(interval)
+
+        logger.info("MIT 增益初始化完成")
+        return True
 
     def move_mit(
         self,
@@ -527,6 +631,54 @@ class JointController:
         logger.warning(f"等待夹爪到达目标超时 ({timeout:.1f}s)")
         return False
 
+    def _read_current_mit_gains(
+        self,
+        timeout: float,
+    ) -> Tuple[List[float], List[float]]:
+        """读取当前 MIT Kp/Kd，失败时返回保守起点"""
+        previous_count = self._device.poll_addr_count
+        request_time = time.time()
+        cached_gains: Optional[Tuple[List[float], List[float]]] = None
+
+        if previous_count != POLL_ADDR_EXTENDED:
+            self._device.set_poll_addr_count(POLL_ADDR_EXTENDED)
+
+        try:
+            deadline = time.perf_counter() + timeout
+            while True:
+                state = self._device.joint_state
+                if (
+                    state is not None
+                    and state.kps is not None
+                    and state.kds is not None
+                    and len(state.kps) >= NUM_MOTORS
+                    and len(state.kds) >= NUM_MOTORS
+                ):
+                    gains = (
+                        list(state.kps[:NUM_MOTORS]),
+                        list(state.kds[:NUM_MOTORS]),
+                    )
+                    if state.timestamp >= request_time:
+                        return gains
+                    cached_gains = gains
+                if timeout == 0.0 or time.perf_counter() >= deadline:
+                    break
+                time.sleep(0.01)
+        finally:
+            if previous_count != POLL_ADDR_EXTENDED:
+                self._device.set_poll_addr_count(previous_count)
+
+        if cached_gains is not None:
+            logger.warning(
+                "未获取到新的 MIT Kp/Kd 状态，使用缓存值进行增益初始化"
+            )
+            return cached_gains
+
+        logger.warning(
+            "无法读取当前 MIT Kp/Kd，使用 0 作为线性初始化起点"
+        )
+        return [0.0] * NUM_MOTORS, [0.0] * NUM_MOTORS
+
     # ========== 力矩与使能 ==========
 
     def torque_off(self, joints: Optional[List[int]] = None) -> bool:
@@ -534,6 +686,7 @@ class JointController:
 
         通过发送 MIT 全参数帧，将目标关节 kp/kd/t_ref/vel_ref 置零，
         并保持当前位置为 pos_ref，达到可拖动的零阻抗效果。
+        若当前模式不是 MIT，会自动切换至 MIT 模式。
 
         :param joints, 需要卸力的关节索引列表 (0~5)，None 表示全部关节（含夹爪）
         :return, True=指令发送成功
@@ -585,6 +738,7 @@ class JointController:
 
         通过发送 MIT 全参数帧，将目标关节 kp/kd 恢复为默认值，
         并保持当前位置为 pos_ref，避免恢复时产生突跳。
+        若当前模式不是 MIT，会自动切换至 MIT 模式。
 
         :param joints, 需要恢复力矩的关节索引列表，None 表示全部（含夹爪）
         :return, True=成功恢复
@@ -755,21 +909,32 @@ class JointController:
         logger.warning("模式验证失败: 多次查询均未确认切换成功")
         return False
 
-    def set_zero_position(self) -> bool:
+    def set_zero_position(self, mode: str = "strong") -> bool:
         """设置当前位姿为零位（发送 0x03 指令）
 
+        :param mode, "strong"=强调零, "weak"=弱调零
         :return, True=设置成功
         """
+        mode_key = mode.lower()
+        if mode_key == "strong":
+            reset_mode = ZERO_RESET_STRONG
+            mode_name = "强调零"
+        elif mode_key == "weak":
+            reset_mode = ZERO_RESET_WEAK
+            mode_name = "弱调零"
+        else:
+            raise ValidationError("调零模式只支持 'strong' 或 'weak'")
+
         frame = self._device.codec.encode_zero_reset(ZeroResetRequest(
             aim=self._device.aim,
             start_joint=0,
             joint_count=NUM_MOTORS,
-            reset_mode=ZERO_RESET_STRONG,
+            reset_mode=reset_mode,
         ))
         self._device.send_frame(frame)
         time.sleep(0.1)  # 等待固件处理零位标定
 
-        logger.info("强调零完成")
+        logger.info(f"{mode_name}完成")
         return True
 
     # ========== 等待到达 ==========
@@ -846,4 +1011,3 @@ class JointController:
                 sign = 1.0 if diff > 0 else -1.0
             velocities.append(sign * magnitude)
         return velocities
-

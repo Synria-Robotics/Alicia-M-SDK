@@ -52,7 +52,7 @@ class Frame:
         length = len(self.data)
         # 构建校验数据：指令ID + 功能码 + 有效数据长度 + 有效数据
         check_payload = bytes([self.cmd_id, self.func_code, length]) + self.data
-        self.checksum = crc32_check(check_payload)
+        checksum = crc32_check(check_payload)
 
         # 组装完整帧
         frame = bytes([
@@ -61,7 +61,7 @@ class Frame:
             self.func_code,
             length,
         ]) + self.data + bytes([
-            self.checksum,
+            checksum,
             FRAME_FOOTER,
         ])
         return frame

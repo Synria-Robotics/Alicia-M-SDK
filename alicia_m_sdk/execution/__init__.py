@@ -7,7 +7,17 @@
 """
 
 from .joint_control import JointController
+from .joint_mapping import (
+    convert_joints_deg_from_alicia_d_to_alicia_m,
+    convert_joints_rad_from_alicia_d_to_alicia_m,
+)
 from .trajectory_executor import TrajectoryExecutor
 from .teleoperation import Teleoperation
 
-__all__ = ['JointController', 'TrajectoryExecutor', 'Teleoperation']
+__all__ = [
+    'JointController',
+    'TrajectoryExecutor',
+    'Teleoperation',
+    'convert_joints_deg_from_alicia_d_to_alicia_m',
+    'convert_joints_rad_from_alicia_d_to_alicia_m',
+]

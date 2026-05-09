@@ -1,6 +1,6 @@
-"""15_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
+"""14_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
 
-与 13_demo_teleop.py 功能相同，但使用 demo_utils/joint_mapping.py 中的
+使用 Alicia-D 伺服示教臂实时控制 Alicia-M 电机操作臂，并使用 SDK 内置的
 URDF 限位映射代替简单的符号翻转，具备:
 - D 零位 → M 区间中点对齐
 - 关节 3 按比例缩放（D/M 行程不同）
@@ -12,34 +12,30 @@ MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
 用法:
     # MIT 模式（默认）
-    python 15_demo_teleop_mapped.py
+    python 14_demo_teleop_mapped.py
 
     # MIT 模式 + 线性轨迹插值
-    python 15_demo_teleop_mapped.py --interpolation --speed 200
+    python 14_demo_teleop_mapped.py --interpolation --speed 200
 
     # PV 模式
-    python 15_demo_teleop_mapped.py --mode pv
+    python 14_demo_teleop_mapped.py --mode pv
 
     # 指定串口
-    python 15_demo_teleop_mapped.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
+    python 14_demo_teleop_mapped.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
 
     # 跳过回零
-    python 15_demo_teleop_mapped.py --skip-home
+    python 14_demo_teleop_mapped.py --skip-home
 """
 
 import argparse
-import math
 import numpy as np
 
 import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
+from alicia_m_sdk.execution.joint_mapping import convert_joints_rad_from_alicia_d_to_alicia_m
 from alicia_m_sdk.execution.teleoperation import Teleoperation
 from alicia_m_sdk.utils.beauty_logger import beauty_print
-
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from demo_utils.joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
@@ -55,9 +51,7 @@ def make_joint_mapper_rad():
     内部流程: leader 弧度 → 角度 → URDF 限位映射 → 弧度
     """
     def mapper(leader_joints_rad: list[float]) -> list[float]:
-        leader_deg = [math.degrees(r) for r in leader_joints_rad]
-        follower_deg = convert_joints_deg_from_alicia_d_to_alicia_m(leader_deg)
-        return [math.radians(d) for d in follower_deg]
+        return convert_joints_rad_from_alicia_d_to_alicia_m(leader_joints_rad)
     return mapper
 
 def main(args):
@@ -105,6 +99,15 @@ def main(args):
             input(f"按 Enter 切换到 {mode.upper()} 模式...")
             follower.switch_mode(mode)
             beauty_print(f"已切换到 {mode.upper()} 模式", type="success")
+
+        if target_mode == ControlMode.MIT:
+            beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+            follower.initialize_mit_gains(
+                kp=MIT_KP,
+                kd=MIT_KD,
+                torque=MIT_TORQUE,
+                vel_ref=MIT_VEL_REF,
+            )
 
         # --- 打印初始状态 ---
         leader_joints = leader.get_robot_state("joint")

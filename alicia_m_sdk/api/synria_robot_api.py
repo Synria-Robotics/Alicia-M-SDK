@@ -21,6 +21,7 @@ from ..hardware.codec import MessageCodec
 from ..hardware.constants import (
     AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
+    CMD_GRIPPER_PARAM,
     NUM_JOINTS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
 )
@@ -28,9 +29,14 @@ from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
 from ..execution.joint_control import JointController
 from ..execution.trajectory_executor import TrajectoryExecutor
+from ..diagnostics import DiagnosticResult, run_diagnostic as _run_diagnostic
+from ..user_settings import UserSettings
+from ..user_settings import get_user_settings as _get_user_settings
+from ..user_settings import set_gripper_type as _set_gripper_type
 from .. import kinematics as kin_module
 from .. import planning as plan_module
 from ..utils.beauty_logger import logger
+from ..utils.version import supports_min_version
 
 
 class SynriaRobotAPI:
@@ -374,6 +380,46 @@ class SynriaRobotAPI:
         """
         self._joint_ctrl.send_mit(joint_params, gripper=gripper)
 
+    def initialize_mit_gains(
+        self,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
+        duration: float = 1.0,
+        frequency_hz: float = 50.0,
+        read_timeout: float = 1.0,
+    ) -> bool:
+        """@brief 在 MIT 运动开始前线性初始化 Kp/Kd。
+
+        @details
+        SDK 会读取当前机械臂 Kp/Kd，与目标增益逐电机比较，并保持当前
+        关节/夹爪位置不变，将 Kp/Kd 线性过渡到目标值。建议在 demo、
+        遥操作或产品流程第一次进入 MIT 运动前调用一次。
+
+        @param kp 目标位置增益 [0, 500]。None 使用默认值；标量广播；
+            长度 6/7 的列表表示逐电机设置。
+        @param kd 目标速度增益 [0, 5]。格式同 kp。
+        @param torque 预热帧使用的前馈力矩。None 表示 0。
+        @param vel_ref 预热帧使用的速度参考。None 表示 0。
+        @param duration 线性过渡时长，单位秒。
+        @param frequency_hz 过渡帧发送频率，单位 Hz。
+        @param read_timeout 读取当前 Kp/Kd 的最长等待时间，单位秒。
+        @return True 表示初始化完成。
+        """
+        result = self._joint_ctrl.initialize_mit_gains(
+            kp=kp,
+            kd=kd,
+            torque=torque,
+            vel_ref=vel_ref,
+            duration=duration,
+            frequency_hz=frequency_hz,
+            read_timeout=read_timeout,
+        )
+        if result:
+            print("MIT 阻抗增益初始化结束", flush=True)
+        return result
+
     # ========== 系统控制 ==========
 
     def torque_control(
@@ -422,9 +468,52 @@ class SynriaRobotAPI:
         self._device.set_poll_addr_count(count)
         logger.info(f"状态轮询模式: {'扩展 (7地址)' if enabled else '基础 (3地址)'}")
 
-    def set_zero_position(self) -> bool:
-        """设置当前位姿为零位（强调零）"""
-        return self._joint_ctrl.set_zero_position()
+    def set_zero_position(self, mode: str = "strong") -> bool:
+        """设置当前位姿为零位。
+
+        :param mode, "strong"=强调零（默认）, "weak"=弱调零（固件 >= 1.0.6）
+        """
+        mode_key = mode.lower()
+        if mode_key == "weak":
+            version = self.get_firmware_version(timeout=1.0)
+            if not supports_min_version(version, (1, 0, 6)):
+                raise RobotStateError(
+                    f"弱调零需要固件版本 >= v1.0.6，当前版本: {version or '未知'}"
+                )
+        return self._joint_ctrl.set_zero_position(mode=mode_key)
+
+    def run_diagnostic(self, timeout: float = 3.0) -> DiagnosticResult:
+        """运行自检并返回结构化结果。"""
+        return _run_diagnostic(self._device, timeout=timeout)
+
+    def get_user_settings(self, timeout: float = 1.0) -> Optional[UserSettings]:
+        """读取全部个性化设置。"""
+        return _get_user_settings(self._device, timeout=timeout)
+
+    def set_gripper_type(
+        self,
+        gripper_type,
+        timeout: float = 3.0,
+        readback: bool = True,
+    ) -> bool:
+        """写入夹爪类型配置。
+
+        gripper_type 支持规范配置值 0/2、示例选项 10/40、字符串 small/large/50mm/100mm，
+        以及 GripperType 枚举。
+        """
+        return _set_gripper_type(
+            self._device,
+            gripper_type,
+            timeout=timeout,
+            readback=readback,
+        )
+
+    def send_gripper_param_frame(self, frame, timeout: float = 1.0):
+        """发送 0x17 夹爪夹持参数帧并等待响应。
+
+        这是为低层夹爪参数 demo 保留的过渡 API，避免示例直接访问内部 Device。
+        """
+        return self._device.send_and_wait(frame, CMD_GRIPPER_PARAM, timeout=timeout)
 
     # ========== 运动学 ==========
 
@@ -585,18 +674,6 @@ class SynriaRobotAPI:
                 pass
         else:
             _print_once()
-
-    # ========== 废弃方法 ==========
-
-    def set_home(self, **kwargs):
-        """已废弃，请使用 go_home()"""
-        warnings.warn("set_home() 已废弃，请使用 go_home()", DeprecationWarning, stacklevel=2)
-        return self.go_home(**kwargs)
-
-    def set_pose_target(self, **kwargs):
-        """已废弃，请使用 set_pose()"""
-        warnings.warn("set_pose_target() 已废弃，请使用 set_pose()", DeprecationWarning, stacklevel=2)
-        return self.set_pose(**kwargs)
 
     # ========== 内部方法 ==========
 

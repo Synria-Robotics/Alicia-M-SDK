@@ -107,23 +107,26 @@ robot.disconnect()
 
 | 编号 | 文件 | 说明 |
 |------|------|------|
-| 00 | `demo_read_version.py` | 读取固件版本与设备信息 |
-| 01 | `demo_diagnostic.py` | 自检（待开发） |
-| 02 | `demo_read_status.py` | 读取控制模式与运行状态 |
-| 03 | `demo_read_states.py` | 循环读取关节角度、速度、力矩、插补速度、温度（含夹爪） |
-| 04 | `demo_switch_mode.py` | PV / MIT 模式切换 |
-| 05 | `demo_disable_enable.py` | 使能 / 失能 |
-| 06 | `demo_move_gripper.py` | 夹爪控制（MIT，逐电机阻抗参数） |
-| 07 | `demo_move_joint.py` | 关节运动（PV） |
-| 08 | `demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
-| 09 | `demo_move_joint_mit.py` | 关节运动（MIT，逐电机阻抗参数） |
-| 10 | `demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT，逐电机阻抗参数） |
-| 11 | `demo_forward_kinematics.py` | 正运动学计算 |
-| 12 | `demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
-| 13 | `demo_teleop.py` | 遥操作：Alicia-D → Alicia-M（PV / MIT，逐电机阻抗参数） |
-| 14 | `demo_reset_zero.py` | 零位标定 |
-| 15 | `demo_teleop_mapped.py` | 遥操作 + URDF 限位映射（逐电机阻抗参数） |
-| 16 | `demo_gripper_params.py` | 0x17 夹爪夹持参数读写 |
+| 00 | `00_demo_read_version.py` | 读取固件版本与设备信息 |
+| 01 | `01_demo_diagnostic.py` | 自检 |
+| 02 | `02_demo_read_status.py` | 读取控制模式与运行状态 |
+| 03 | `03_demo_read_states.py` | 循环读取关节角度、速度、力矩、插补速度、温度（含夹爪） |
+| 04 | `04_demo_switch_mode.py` | PV / MIT 模式切换 |
+| 05 | `05_demo_disable_enable.py` | 使能 / 失能 |
+| 06 | `06_demo_move_gripper.py` | 夹爪控制（MIT，逐电机阻抗参数） |
+| 07 | `07_demo_move_joint.py` | 关节运动（PV） |
+| 08 | `08_demo_move_full_arm.py` | 关节 + 夹爪协同（PV） |
+| 09 | `09_demo_move_joint_mit.py` | 关节运动（MIT，逐电机阻抗参数） |
+| 10 | `10_demo_move_full_arm_mit.py` | 关节 + 夹爪协同（MIT，逐电机阻抗参数） |
+| 11 | `11_demo_forward_kinematics.py` | 正运动学计算 |
+| 12 | `12_demo_inverse_kinematics.py` | 逆运动学求解 + 可选执行 |
+| 13 | `13_demo_reset_zero.py` | 零位标定 |
+| 14 | `14_demo_teleop_mapped.py` | 遥操作 + URDF 限位映射（逐电机阻抗参数） |
+| 15 | `15_demo_gripper_params.py` | 0x17 夹爪夹持参数读写 |
+| 16 | `16_demo_joint_traj.py` | 关节空间轨迹规划与执行 |
+| 17 | `17_demo_cartesian_traj.py` | 笛卡尔轨迹规划 + 批量 IK + 执行 |
+| 18 | `18_demo_mit_torque_switch.py` | MIT 力矩开关测试 |
+| 19 | `19_demo_user_settings.py` | 0x02 个性化设置 |
 
 运行示例：
 
@@ -132,19 +135,19 @@ conda activate msdk
 python examples/07_demo_move_joint.py --speed 15
 ```
 
-### 16 夹爪夹持参数读写
+### 15 夹爪夹持参数读写
 
-`16_demo_gripper_params.py` 使用公开协议 `0x17` 读取或修改夹爪夹持参数。默认目标为操作臂 `follower`，默认动作是读取全部参数，不会写入。
+`15_demo_gripper_params.py` 使用公开协议 `0x17` 读取或修改夹爪夹持参数。默认目标为操作臂 `follower`，默认动作是读取全部参数，不会写入。
 
 ```bash
 # 读取操作臂全部夹爪参数
-python examples/16_demo_gripper_params.py --port COM57
+python examples/15_demo_gripper_params.py --port COM57
 
 # 仅读取指定掩码，例如 0x09 = 目标夹持力 + 最大保持力矩
-python examples/16_demo_gripper_params.py --port COM57 --mask 0x09
+python examples/15_demo_gripper_params.py --port COM57 --mask 0x09
 
 # 设置目标夹持力为 80N，最大保持力矩为 70N·m
-python examples/16_demo_gripper_params.py --port COM57 --target-force 80 --hold-torque 70
+python examples/15_demo_gripper_params.py --port COM57 --target-force 80 --hold-torque 70
 ```
 
 写入前程序会打印即将写入的参数并等待确认；确认机械臂安全后按 Enter 发送。若需要自动执行，可加 `-y` 跳过确认；默认写入后会读回全部参数，可加 `--skip-readback` 跳过读回。

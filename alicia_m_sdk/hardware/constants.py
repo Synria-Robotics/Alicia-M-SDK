@@ -11,12 +11,14 @@ PLACEHOLDER = 0xFE             # 占位符
 
 # === 指令 ID ===
 CMD_VERSION        = 0x01      # 版本与设备信息获取
+CMD_USER_SETTINGS  = 0x02      # 个性化设置读取/写入
 CMD_ZERO_RESET     = 0x03      # 位姿重置（设置当前位姿为初始位姿）
 CMD_TORQUE         = 0x05      # 肢体力矩控制（关节力矩开关）
 CMD_JOINT_STATE    = 0x06      # 关节与夹具状态控制
 CMD_ENABLE         = 0x09      # 机器人部位失能/使能
 CMD_MOTOR_PARAM    = 0x11      # 关节控制幅值和驱动参数设置
 CMD_GRIPPER_PARAM  = 0x17      # 夹爪夹持参数读取/设置
+CMD_DIAGNOSTIC     = 0xFE      # 自检快照
 CMD_ERROR          = 0xEE      # 错误反馈
 
 # === 0x03 零位标定方式 ===
@@ -35,6 +37,11 @@ AIM_FOLLOWER       = 0x02      # bit1=1 → 操作臂
 # === 0x01 版本信息：专用功能码 ===
 FUNC_VERSION_REQ   = 0x7E      # 版本请求功能码
 FUNC_VERSION_RESP  = 0xFE      # 版本响应功能码 (0x80 + 0x7E)
+
+# === 0x02 个性化设置 ===
+FUNC_READ_ALL_SETTINGS    = 0x07
+FUNC_WRITE_GRIPPER_TYPE   = 0x82
+USER_SETTING_WRITE_ACCEPT = 0x81
 
 # === 0x06 指令：自定义数据地址表 ===
 ADDR_POSITION      = 0x00      # 当前位置/期望位置  16bit  rad
@@ -82,6 +89,9 @@ ERR_SYSTEM_MODE     = 0x03     # 系统模式错误（机械臂类型检测失�
 ERR_ANGLE_LIMIT     = 0x04     # 电机角度限位中
 ERR_MOTOR_OFFSET    = 0x05     # motorData 偏移与部位数量不符
 ERR_ADDR_OVERFLOW   = 0x06     # insID 偏移超过最大地址
+ERR_WINDOW_MODE     = 0x07     # 当前窗口模式不允许
+ERR_LINEAR_TRAJ     = 0x08     # 线性轨迹状态异常
+ERR_MODE_SWITCH     = 0xEE     # 模式切换被拒绝
 
 # === 0xEE 错误描述映射 ===
 ERROR_DESCRIPTIONS = {
@@ -92,6 +102,9 @@ ERROR_DESCRIPTIONS = {
     ERR_ANGLE_LIMIT:     "电机角度限位中",
     ERR_MOTOR_OFFSET:    "motorData 偏移与部位数量不符",
     ERR_ADDR_OVERFLOW:   "insID 偏移超过最大地址",
+    ERR_WINDOW_MODE:     "当前窗口模式不允许",
+    ERR_LINEAR_TRAJ:     "线性轨迹状态异常",
+    ERR_MODE_SWITCH:     "模式切换被拒绝",
 }
 
 # === 0x09 使能/失能数据值 ===

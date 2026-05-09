@@ -11,9 +11,7 @@ MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 import argparse
 import time
 import alicia_m_sdk
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from demo_utils.demo_common import add_port_argument
+from _common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -47,6 +45,14 @@ def main():
         beauty_print("已切换到 MIT 模式", type="success")
 
     try:
+        beauty_print("初始化 MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+        robot.initialize_mit_gains(
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
+
         # --- 初始化：回零位 + 夹爪打开 ---
         beauty_print("初始化: 回零位，夹爪打开...", type="info")
         robot.set_robot_state(

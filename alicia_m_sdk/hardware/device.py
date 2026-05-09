@@ -95,6 +95,12 @@ class StateCache:
         with self._lock:
             return self._pending_responses.pop(cmd_id, None)
 
+    def clear_pending(self, cmd_id: int) -> None:
+        """清理等待中的 pending（超时后清理，避免后台响应触发旧等待）"""
+        with self._lock:
+            self._pending_events.pop(cmd_id, None)
+            self._pending_responses.pop(cmd_id, None)
+
 
 class Device:
     """机器人设备抽象：非阻塞通信、异步状态更新
@@ -127,6 +133,11 @@ class Device:
     def aim(self) -> int:
         """获取当前控制目标部位"""
         return self._aim
+
+    @property
+    def poll_addr_count(self) -> int:
+        """获取当前轮询地址数量"""
+        return self._poll_addr_count
 
     def set_aim(self, aim: int) -> None:
         """设置控制目标部位（connect 自动检测后调用）"""
@@ -244,6 +255,37 @@ class Device:
         self.send_frame(frame)
         event.wait(max(timeout, 0))
         return self._state_cache.get_pending_response(expected_cmd)
+
+    def send_and_wait_first(
+        self,
+        frame: Frame,
+        cmd_ids: List[int],
+        timeout: float = 1.0,
+    ) -> Optional[Frame]:
+        """发送请求帧并等待多个 cmd_id 中任意一个响应先到达
+
+        用于需要同时监听正常响应与错误帧 (0xEE) 的场景。
+        返回最先收到的那个帧，超时后清理所有注册的 pending。
+
+        :param frame, 要发送的请求帧
+        :param cmd_ids, 期望响应的指令 ID 列表
+        :param timeout, 等待超时（秒）
+        :return, 最先到达的响应帧，超时返回 None
+        """
+        events = {cmd_id: self._state_cache.register_pending(cmd_id)
+                  for cmd_id in cmd_ids}
+        self.send_frame(frame)
+        deadline = time.perf_counter() + max(timeout, 0)
+        try:
+            while time.perf_counter() <= deadline:
+                for cmd_id, event in events.items():
+                    if event.is_set():
+                        return self._state_cache.get_pending_response(cmd_id)
+                time.sleep(0.01)
+            return None
+        finally:
+            for cmd_id in cmd_ids:
+                self._state_cache.clear_pending(cmd_id)
 
     # ========== 一次性查询 ==========
 

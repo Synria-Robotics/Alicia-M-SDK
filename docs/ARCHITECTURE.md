@@ -100,11 +100,17 @@ examples/                               # 示例脚本
 ├── 06_demo_move_gripper.py             # 夹爪控制（PV + MIT）
 ├── 07_demo_move_joint.py               # 关节控制（PV + MIT）
 ├── 08_demo_move_full_arm.py            # 关节+夹爪协同控制（PV + MIT）
-├── 09_demo_forward_kinematics.py       # 正运动学
-├── 10_demo_inverse_kinematics.py       # 逆运动学
-├── 13_demo_teleop.py                   # 遥操作
-├── 14_demo_reset_zero.py               # 零位标定
-└── 15_demo_teleop_mapped.py            # 遥操作 + URDF 限位映射
+├── 09_demo_move_joint_mit.py           # 关节控制（MIT）
+├── 10_demo_move_full_arm_mit.py        # 关节+夹爪协同控制（MIT）
+├── 11_demo_forward_kinematics.py       # 正运动学
+├── 12_demo_inverse_kinematics.py       # 逆运动学
+├── 13_demo_reset_zero.py               # 零位标定
+├── 14_demo_teleop_mapped.py            # 遥操作 + URDF 限位映射
+├── 15_demo_gripper_params.py           # 夹爪夹持参数读写
+├── 16_demo_joint_traj.py               # 关节空间轨迹
+├── 17_demo_cartesian_traj.py           # 笛卡尔轨迹
+├── 18_demo_mit_torque_switch.py        # MIT 力矩开关
+└── 19_demo_user_settings.py            # 个性化设置
 ```
 
 ---
@@ -2247,14 +2253,14 @@ def encode_kd(kd: float) -> int:
 → 断开
 ```
 
-#### `13_demo_teleop.py` — 遥操作
+#### `14_demo_teleop_mapped.py` — 遥操作
 ```
 连接
 → 启动 WebSocket 服务 → 实时推送关节状态到 SparkVis
 → Ctrl+C 退出
 ```
 
-#### `14_demo_reset_zero.py` — 零位标定
+#### `13_demo_reset_zero.py` — 零位标定
 ```
 方案一（MIT 模式，当前可用）:
   连接（MIT 模式）

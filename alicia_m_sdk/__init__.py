@@ -21,6 +21,8 @@ __version__ = "1.0.1"
 # === 核心类型 ===
 from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams, RobotStatus, VersionInfo
+from .diagnostics import DiagnosticResult, DiagnosticArmSnapshot
+from .user_settings import UserSettings
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
 from .types.exceptions import (
@@ -143,6 +145,7 @@ __all__ = [
     'JointState', 'MitParams', 'RobotStatus', 'VersionInfo',
     'RobotConfig',
     'ControlAim', 'ControlMode', 'GripperType',
+    'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
     # 异常
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',
