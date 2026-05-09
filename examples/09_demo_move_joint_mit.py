@@ -46,6 +46,14 @@ def main():
         beauty_print("已切换到 MIT 模式", type="success")
 
     try:
+        beauty_print("初始化 MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+        robot.initialize_mit_gains(
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
+
         # --- 回零位 ---
         beauty_print("回零位...", type="info")
         robot.go_home(speed=args.speed)

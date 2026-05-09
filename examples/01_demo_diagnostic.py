@@ -1,21 +1,31 @@
 """01_demo_diagnostic.py — 自检功能
 
-演示自检功能的调用方式。
-注意: 底层自检功能尚未更新，当前以占位形式实现。
+演示 Alicia-M 固件 1.0.6 的自检功能调用方式。
 """
 
 import argparse
 
 import alicia_m_sdk
 from alicia_m_sdk.demo_utils.demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from alicia_m_sdk.demo_utils.diagnostic_support import (
+    print_diagnostic_response,
+    send_diagnostic,
+    supports_diagnostic,
+)
+from robocore.utils.beauty_logger import beauty_print
 
 
 def main():
-    beauty_print("Demo: 自检功能（底层待更新）", type="module")
+    beauty_print("Demo: 自检功能（固件 1.0.6）", type="module")
 
     parser = argparse.ArgumentParser(description="Run Alicia-M diagnostic demo.")
     add_port_argument(parser)
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="等待自检响应的超时时间（秒）。",
+    )
     args = parser.parse_args()
 
     # 创建并连接机器人
@@ -23,23 +33,18 @@ def main():
     beauty_print("机器人连接成功", type="success")
 
     try:
-        # --- 执行自检 ---
-        beauty_print("正在执行自检...", type="info")
-        self_check = robot.get_robot_state("self_check")
+        firmware_version = robot.get_firmware_version(timeout=args.timeout)
+        if not supports_diagnostic(firmware_version):
+            beauty_print(
+                f"当前固件版本为 {firmware_version or '未知'}，自检功能仅支持 1.0.6",
+                type="warning",
+            )
+            return
 
-        if self_check is not None:
-            beauty_print("自检结果:", type="info")
-            # 自检返回的数据结构取决于固件实现
-            # 预期包含各关节电机健康状态
-            if isinstance(self_check, dict):
-                for key, value in self_check.items():
-                    beauty_print(f"  {key}: {value}", type="info")
-            else:
-                beauty_print(f"  原始数据: {self_check}", type="info")
+        beauty_print("正在执行自检...", type="info")
+        response = send_diagnostic(robot, args.timeout)
+        if response is not None and print_diagnostic_response(response):
             beauty_print("自检完成", type="success")
-        else:
-            beauty_print("自检功能暂未实现（底层待更新）", type="warning")
-            beauty_print("预留接口: robot.get_robot_state('self_check')", type="info")
 
     except KeyboardInterrupt:
         beauty_print("\n用户中断", type="warning")

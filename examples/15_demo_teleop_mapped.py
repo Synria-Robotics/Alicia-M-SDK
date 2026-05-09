@@ -104,6 +104,15 @@ def main(args):
             follower.switch_mode(mode)
             beauty_print(f"已切换到 {mode.upper()} 模式", type="success")
 
+        if target_mode == ControlMode.MIT:
+            beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+            follower.initialize_mit_gains(
+                kp=MIT_KP,
+                kd=MIT_KD,
+                torque=MIT_TORQUE,
+                vel_ref=MIT_VEL_REF,
+            )
+
         # --- 打印初始状态 ---
         leader_joints = leader.get_robot_state("joint")
         follower_joints = follower.get_robot_state("joint")

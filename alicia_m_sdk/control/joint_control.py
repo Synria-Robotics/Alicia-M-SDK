@@ -10,8 +10,9 @@
 """
 
 import logging
+import math
 import time
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 from ..hardware.device import Device
 from ..protocol.constants import (
@@ -21,6 +22,7 @@ from ..protocol.constants import (
     NUM_JOINTS, NUM_MOTORS,
     DEFAULT_KP_LARGE, DEFAULT_KD_LARGE,
     DEFAULT_KP_SMALL, DEFAULT_KD_SMALL,
+    POLL_ADDR_EXTENDED,
     ZERO_RESET_STRONG,
 )
 from ..protocol.messages import (
@@ -30,6 +32,7 @@ from ..types.enums import ControlMode
 from ..types.state import MitParams
 from ..types.exceptions import RobotStateError, ValidationError
 from ..utils.conversion import speed_user_to_firmware
+from ..utils.timing import precise_sleep
 from ..utils.validation import (
     validate_joint_angles, validate_speed, validate_gripper_value,
 )
@@ -106,6 +109,19 @@ def _normalize_mit_param(
     if len(result) == NUM_JOINTS:
         result.append(default)  # 夹爪使用默认值
     return result
+
+
+def _filled_mit_gain_list(
+    value: Optional[Union[float, List[Optional[float]]]],
+    name: str,
+    defaults: List[float],
+) -> List[float]:
+    """按电机编号填充 MIT 增益默认值"""
+    normalized = _normalize_mit_param(value, name)
+    return [
+        float(defaults[i] if normalized[i] is None else normalized[i])
+        for i in range(NUM_MOTORS)
+    ]
 
 
 class JointController:
@@ -305,6 +321,94 @@ class JointController:
 
         self._device.send_mit(self._device.aim, filled_params)
         logger.debug("MIT 帧已发送: %s", filled_params)
+
+    def initialize_mit_gains(
+        self,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
+        duration: float = 1.0,
+        frequency_hz: float = 50.0,
+        read_timeout: float = 1.0,
+    ) -> bool:
+        """@brief 在 MIT 运动前线性初始化 Kp/Kd。
+
+        @details
+        读取机械臂当前 Kp/Kd，与目标增益逐电机比较，并在保持当前位置的
+        情况下按固定频率线性过渡到目标值。该流程适合 demo 或产品启动
+        阶段使用，避免第一帧 MIT 命令直接写入较大增益造成电机跳动。
+        如果固件不支持扩展状态读回，SDK 会记录警告并从 0 开始平滑过渡。
+
+        @param kp 目标位置增益 [0, 500]。None 使用 SDK 默认值；标量广播；
+            长度 6/7 的列表表示逐电机设置。
+        @param kd 目标速度增益 [0, 5]。格式同 kp。
+        @param torque 预热帧使用的前馈力矩。None 表示 0。
+        @param vel_ref 预热帧使用的速度参考。None 表示 0。
+        @param duration 线性过渡时长，单位秒；0 表示只发送最终目标增益。
+        @param frequency_hz 过渡帧发送频率，单位 Hz。
+        @param read_timeout 读取当前 Kp/Kd 的最长等待时间，单位秒。
+        @return True 表示预热帧已发送完成。
+        @throws RobotStateError 当前状态缓存不可用时抛出。
+        @throws ValidationError 参数长度或时间参数不合法时抛出。
+        """
+        if duration < 0.0:
+            raise ValidationError("MIT 增益初始化 duration 不能为负数")
+        if frequency_hz <= 0.0:
+            raise ValidationError("MIT 增益初始化 frequency_hz 必须大于 0")
+        if read_timeout < 0.0:
+            raise ValidationError("MIT 增益初始化 read_timeout 不能为负数")
+
+        state = self._device.joint_state
+        if state is None or len(state.angles) < NUM_JOINTS:
+            raise RobotStateError(
+                "无法初始化 MIT 增益: 当前关节状态不可用"
+            )
+
+        target_kps = _filled_mit_gain_list(kp, "kp", _DEFAULT_KP)
+        target_kds = _filled_mit_gain_list(kd, "kd", _DEFAULT_KD)
+        torques = _normalize_mit_param(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+
+        current_kps, current_kds = self._read_current_mit_gains(read_timeout)
+
+        state = self._device.joint_state or state
+        positions = list(state.angles[:NUM_JOINTS]) + [state.gripper]
+        max_kp_delta = max(
+            abs(target_kps[i] - current_kps[i]) for i in range(NUM_MOTORS)
+        )
+        max_kd_delta = max(
+            abs(target_kds[i] - current_kds[i]) for i in range(NUM_MOTORS)
+        )
+        already_ready = max_kp_delta < 1e-3 and max_kd_delta < 1e-4
+        steps = 1 if already_ready or duration == 0.0 else max(
+            1, int(math.ceil(duration * frequency_hz))
+        )
+        interval = duration / steps if steps > 0 else 0.0
+
+        logger.info(
+            "初始化 MIT 增益: max ΔKp=%.3f, max ΔKd=%.4f, steps=%d",
+            max_kp_delta, max_kd_delta, steps,
+        )
+
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            mit_params = []
+            for i in range(NUM_MOTORS):
+                mit_params.append(MitParams(
+                    pos_ref=positions[i],
+                    vel_ref=vel_refs[i],
+                    t_ref=torques[i],
+                    kp=current_kps[i] + (target_kps[i] - current_kps[i]) * ratio,
+                    kd=current_kds[i] + (target_kds[i] - current_kds[i]) * ratio,
+                ))
+
+            self._device.send_mit(self._device.aim, mit_params)
+            if step < steps and interval > 0.0:
+                precise_sleep(interval)
+
+        logger.info("MIT 增益初始化完成")
+        return True
 
     def move_mit(
         self,
@@ -528,6 +632,54 @@ class JointController:
         if wait:
             return self._wait_for_gripper(value, timeout=timeout)
         return True
+
+    def _read_current_mit_gains(
+        self,
+        timeout: float,
+    ) -> Tuple[List[float], List[float]]:
+        """读取当前 MIT Kp/Kd，失败时返回保守起点"""
+        previous_count = self._device.poll_addr_count
+        request_time = time.time()
+        cached_gains: Optional[Tuple[List[float], List[float]]] = None
+
+        if previous_count != POLL_ADDR_EXTENDED:
+            self._device.set_poll_addr_count(POLL_ADDR_EXTENDED)
+
+        try:
+            deadline = time.perf_counter() + timeout
+            while True:
+                state = self._device.joint_state
+                if (
+                    state is not None
+                    and state.kps is not None
+                    and state.kds is not None
+                    and len(state.kps) >= NUM_MOTORS
+                    and len(state.kds) >= NUM_MOTORS
+                ):
+                    gains = (
+                        list(state.kps[:NUM_MOTORS]),
+                        list(state.kds[:NUM_MOTORS]),
+                    )
+                    if state.timestamp >= request_time:
+                        return gains
+                    cached_gains = gains
+                if timeout == 0.0 or time.perf_counter() >= deadline:
+                    break
+                time.sleep(0.01)
+        finally:
+            if previous_count != POLL_ADDR_EXTENDED:
+                self._device.set_poll_addr_count(previous_count)
+
+        if cached_gains is not None:
+            logger.warning(
+                "未获取到新的 MIT Kp/Kd 状态，使用缓存值进行增益初始化"
+            )
+            return cached_gains
+
+        logger.warning(
+            "无法读取当前 MIT Kp/Kd，使用 0 作为线性初始化起点"
+        )
+        return [0.0] * NUM_MOTORS, [0.0] * NUM_MOTORS
 
     def _wait_for_gripper(
         self,

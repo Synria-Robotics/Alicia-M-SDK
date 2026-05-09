@@ -131,6 +131,11 @@ class Device:
         """获取当前控制目标部位"""
         return self._aim
 
+    @property
+    def poll_addr_count(self) -> int:
+        """获取当前轮询地址数量"""
+        return self._poll_addr_count
+
     def set_aim(self, aim: int) -> None:
         """设置控制目标部位（connect 自动检测后调用）"""
         self._aim = aim

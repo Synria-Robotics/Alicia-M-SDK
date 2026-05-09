@@ -32,6 +32,14 @@ def main():
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
 
     try:
+        beauty_print("初始化 MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+        robot.initialize_mit_gains(
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
+
         # --- 半开夹爪 (500) ---
         beauty_print("移动夹爪到半开 (500)...", type="info")
         robot.set_robot_state(

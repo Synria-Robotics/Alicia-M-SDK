@@ -74,6 +74,25 @@ robot.set_robot_state(
 | 方法 | 说明 |
 |------|------|
 | `send_mit_command(joint_params, gripper)` | MIT 全参数直接发送（低延迟） |
+| `initialize_mit_gains(kp, kd, duration=1.0, frequency_hz=50.0)` | 运动前线性初始化 Kp/Kd，降低首次 MIT 命令的跳变风险 |
+
+```cpp
+/**
+ * @brief 在 MIT 运动开始前线性初始化 Kp/Kd。
+ * @details SDK 先读取当前机械臂 Kp/Kd，与目标增益逐电机比较；
+ *          随后保持当前位置不变，将 Kp/Kd 按固定频率线性过渡到目标值。
+ *          建议在 demo、遥操作或产品流程第一次进入 MIT 运动前调用一次。
+ * @param kp 目标位置增益 [0, 500]。None 使用默认值；标量广播；列表逐电机设置。
+ * @param kd 目标速度增益 [0, 5]。格式同 kp。
+ * @param duration 线性过渡时长，单位秒。
+ * @param frequency_hz 过渡帧发送频率，单位 Hz。
+ * @return True 表示初始化完成。
+ */
+robot.initialize_mit_gains(
+    kp=[150, 150, 150, 150, 150, 150, 150],
+    kd=[2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+)
+```
 
 ```python
 from alicia_m_sdk import MitParams
@@ -93,7 +112,7 @@ MitParams(
 | 电机组 | 编号 | Kp | Kd |
 |--------|------|----|----|
 | 大关节 | M0~M2 | 150 | 2.0 |
-| 小关节 | M3~M6 | 20 | 1.0 |
+| 小关节 | M3~M6 | 150 | 2.0 |
 
 ### 系统控制
 
@@ -130,6 +149,10 @@ class JointState:
     run_status: int                        # 运行状态字节
     velocities: Optional[List[float]]      # 速度 (rad/s)
     torques: Optional[List[float]]         # 力矩 (N·m)
+    kps: Optional[List[float]]             # MIT 位置增益 Kp
+    kds: Optional[List[float]]             # MIT 速度增益 Kd
+    linear_vels: Optional[List[float]]     # 线性轨迹插值速度 (rad/s)
+    temperatures: Optional[List[float]]    # 线圈温度 (°C)
 ```
 
 ### 枚举
