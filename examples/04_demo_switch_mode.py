@@ -11,7 +11,9 @@ import argparse
 
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from alicia_m_sdk.demo_utils.demo_common import add_port_argument
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from demo_utils.demo_common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 

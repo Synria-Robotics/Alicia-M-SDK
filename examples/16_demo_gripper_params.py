@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import alicia_m_sdk
-from alicia_m_sdk.demo_utils.demo_common import add_port_argument
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from demo_utils.demo_common import add_port_argument
 from alicia_m_sdk.protocol.constants import (
     AIM_FOLLOWER,
     AIM_LEADER,

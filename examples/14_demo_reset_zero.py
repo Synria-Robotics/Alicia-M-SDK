@@ -8,8 +8,10 @@ import argparse
 import time
 
 import alicia_m_sdk
-from alicia_m_sdk.demo_utils.demo_common import NonBlockingKeyReader, add_port_argument
-from alicia_m_sdk.demo_utils.reset_zero_support import (
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from demo_utils.demo_common import NonBlockingKeyReader, add_port_argument
+from demo_utils.reset_zero_support import (
     PRINT_INTERVAL,
     print_robot_state,
     send_strong_zero_position,

@@ -37,7 +37,9 @@ from alicia_m_sdk import ControlMode
 from alicia_m_sdk.execution.teleoperation import Teleoperation
 from alicia_m_sdk.utils.beauty_logger import beauty_print
 
-from alicia_m_sdk.demo_utils.joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from demo_utils.joint_mapping import convert_joints_deg_from_alicia_d_to_alicia_m
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
