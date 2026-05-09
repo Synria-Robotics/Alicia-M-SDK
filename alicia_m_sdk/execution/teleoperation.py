@@ -119,8 +119,8 @@ class Teleoperation:
         mode_str = self.follower.control_mode.value.upper()
 
         logger.info(
-            "遥操作控制循环启动: %.0f Hz, %s 模式, 插值=%s",
-            self.frequency_hz, mode_str, self.use_interpolation,
+            f"遥操作控制循环启动: {self.frequency_hz:.0f} Hz, "
+            f"{mode_str} 模式, 插值={self.use_interpolation}"
         )
 
         while self._running.is_set():
