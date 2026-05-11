@@ -1,4 +1,4 @@
-"""19_demo_user_settings.py — 个性化设置。
+"""18_demo_user_settings.py — 个性化设置。
 
 默认读取全部个性化设置；可通过 10 或 40 写入夹爪类型。
 """

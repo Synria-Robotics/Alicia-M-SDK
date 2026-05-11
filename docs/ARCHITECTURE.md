@@ -107,9 +107,8 @@ examples/                               # 示例脚本
 ├── 14_demo_teleop_mapped.py            # 遥操作 + URDF 限位映射
 ├── 15_demo_gripper_params.py           # 夹爪夹持参数读写
 ├── 16_demo_joint_traj.py               # 关节空间轨迹
-├── 17_demo_cartesian_traj.py           # 笛卡尔轨迹
-├── 18_demo_mit_torque_switch.py        # MIT 力矩开关
-└── 19_demo_user_settings.py            # 个性化设置
+├── 17_demo_mit_torque_switch.py        # MIT 力矩开关
+└── 18_demo_user_settings.py            # 个性化设置
 ```
 
 ---

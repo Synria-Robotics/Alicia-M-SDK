@@ -52,7 +52,7 @@ from alicia_m_sdk.utils.version import parse_firmware_version, supports_min_vers
 
 class VersionHelpersTest(unittest.TestCase):
     def test_runtime_version_matches_project_version(self):
-        self.assertEqual(alicia_m_sdk.__version__, "1.1.0")
+        self.assertEqual(alicia_m_sdk.__version__, "1.1.1rc1")
 
     def test_parse_supported_version_formats(self):
         self.assertEqual(parse_firmware_version(106), (1, 0, 6))

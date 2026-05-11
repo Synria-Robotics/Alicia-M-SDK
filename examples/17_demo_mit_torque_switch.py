@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""18_demo_mit_torque_switch.py — MIT 力矩开关测试
+"""17_demo_mit_torque_switch.py — MIT 力矩开关测试
 
 测试流程：
 1. 连接机器人并切到 MIT 模式

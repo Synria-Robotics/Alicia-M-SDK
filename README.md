@@ -127,9 +127,8 @@ MIT 参数约定：`kp`/`kd` 传 `None` 表示按电机使用 SDK 安全默认�
 | 14 | `14_demo_teleop_mapped.py` | 遥操作 + URDF 限位映射（逐电机阻抗参数） |
 | 15 | `15_demo_gripper_params.py` | 0x17 夹爪夹持参数读写 |
 | 16 | `16_demo_joint_traj.py` | 关节空间轨迹规划与执行 |
-| 17 | `17_demo_cartesian_traj.py` | 笛卡尔轨迹规划 + 批量 IK + 执行 |
-| 18 | `18_demo_mit_torque_switch.py` | MIT 力矩开关测试 |
-| 19 | `19_demo_user_settings.py` | 0x02 个性化设置 |
+| 17 | `17_demo_mit_torque_switch.py` | MIT 力矩开关测试 |
+| 18 | `18_demo_user_settings.py` | 0x02 个性化设置 |
 
 运行示例：
 
