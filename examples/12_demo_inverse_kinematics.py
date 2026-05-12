@@ -21,7 +21,7 @@ from robocore.utils.backend import to_numpy
 
 
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
-DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
+DEFAULT_TARGET_POSE = [0.31,  0.11, 0.49, 0.0, 0.74, 0.0, 0.68]
 # DEFAULT_TARGET_POSE = [0, 0.20, +0.22, 0.0, 0.707, 0.0, 0.707]
 
 
@@ -100,17 +100,25 @@ def main():
         T_target[:3, :3] = quaternion_to_matrix(target[3:])
 
         # 求解 IK
+        q_current = robot.get_robot_state("joint")
+        if q_current is not None:
+            beauty_print(f"  使用当前关节角作为 IK 初始猜测 (rad): {beauty_print_array(q_current, precision=4)}", type="info")
+            beauty_print(f"  使用当前关节角作为 IK 初始猜测 (deg): {beauty_print_array(np.rad2deg(q_current), precision=2)}", type="info")
+        else:
+            beauty_print("  无法获取当前关节角，使用零位作为初始猜测", type="warning")
+
         start_time = time.time()
         ik_result = compute_inverse_kinematics(
             robot_model,
             T_target,
-            None,  # 无初始猜测，使用多起点
+            q_current,
             method='dls',
             max_iters=500,
-            pos_tol=1e-2,
-            ori_tol=1e-2,
+            pos_tol=1e-3,
+            ori_tol=1e-3,
             num_initial_guesses=10,
-            initial_guess_strategy='random',
+            initial_guess_scale=1.0,
+            initial_guess_strategy='current',
             use_analytic_jacobian=True,
         )
         elapsed = (time.time() - start_time) * 1000.0

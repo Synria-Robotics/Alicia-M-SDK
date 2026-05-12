@@ -179,6 +179,10 @@ def compute_inverse_kinematics(
         tol = ik_kwargs.pop('tolerance')
         ik_kwargs.setdefault('pos_tol', tol)
         ik_kwargs.setdefault('ori_tol', tol)
+    if ik_kwargs.get('initial_guess_strategy') == 'current':
+        # RoboCore does not accept "current" directly. In this SDK, callers
+        # express "current" by passing the current joint state as q_init.
+        ik_kwargs['initial_guess_strategy'] = 'random' if q_init is not None else 'zero'
 
     target_pose_norm = _normalize_target_pose(target_pose)
     result = _ik(robot_model, target_pose_norm, q0=q_init, **ik_kwargs)
