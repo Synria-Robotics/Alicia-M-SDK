@@ -21,8 +21,8 @@ from robocore.utils.backend import to_numpy
 
 
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
-DEFAULT_TARGET_POSE = [0.31,  0.11, 0.49, 0.0, 0.74, 0.0, 0.68]
-# DEFAULT_TARGET_POSE = [0, 0.20, +0.22, 0.0, 0.707, 0.0, 0.707]
+# DEFAULT_TARGET_POSE = [0.32,  -0.07, 0.37, 0.0,0.74, 0.0, 0.68]
+DEFAULT_TARGET_POSE = [0.33, - 0.21, 0.33, 0.0, 0.85, 0.0, 0.53]
 
 
 def main():
