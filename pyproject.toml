@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "pyserial>=3.0",
     "numpy>=1.21.0",
-    "synria-robocore[torch]>=2.5.0rc2,<3.0",
+    "synria-robocore[torch]>=2.5.0rc3,<3.0",
     "synriard>=1.2.2,<2.0",
 ]
 
@@ -46,7 +46,7 @@ teleop = [
     "alicia_d_sdk",
 ]
 torch = [
-    "synria-robocore[torch]>=2.5.0rc2,<3.0",
+    "synria-robocore[torch]>=2.5.0rc3,<3.0",
 ]
 all = [
     "scipy>=1.7.0",

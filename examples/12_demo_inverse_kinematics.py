@@ -9,7 +9,7 @@ import argparse
 import time
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk.integrations.robocore import compute_inverse_kinematics
+from alicia_m_sdk.integrations.robocore import compute_forward_kinematics, compute_inverse_kinematics
 from _common import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 # robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
@@ -134,6 +134,30 @@ def main():
         beauty_print(f"  求解成功: {ik_success}", type="info")
         beauty_print(f"  残差: {ik_result.get('residual', 'N/A')}", type="info")
         beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
+
+        # === 3. 目标位姿 vs 最终 FK 偏差 ===
+        beauty_print("3. 目标位姿 vs 最终 FK 偏差", type="module")
+        fk_final = compute_forward_kinematics(robot_model, q_ik.tolist())
+        final_position = fk_final["position"]
+        final_rotation = fk_final["rotation"]
+        target_position = np.asarray(target[:3], dtype=float)
+        target_rotation = quaternion_to_matrix(target[3:])
+        position_delta = final_position - target_position
+        position_error = float(np.linalg.norm(position_delta))
+        rotation_delta = target_rotation.T @ final_rotation
+        orientation_error_vector = np.array([
+            rotation_delta[2, 1] - rotation_delta[1, 2],
+            rotation_delta[0, 2] - rotation_delta[2, 0],
+            rotation_delta[1, 0] - rotation_delta[0, 1],
+        ]) * 0.5
+        orientation_error_norm = float(np.linalg.norm(orientation_error_vector))
+        beauty_print(f"  目标位置 (m):       {np.array2string(np.asarray(target_position, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  最终位置 (m):       {np.array2string(np.asarray(final_position, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  位置偏差 (m):       {np.array2string(np.asarray(position_delta, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  位置误差范数 (m):   {position_error:.6f}", type="info")
+        beauty_print(f"  目标四元数 (xyzw):  {np.array2string(np.asarray(target[3:7], dtype=float), precision=6, separator=', ')}", type="info")
+        beauty_print(f"  姿态误差向量 (rad): {np.array2string(np.asarray(orientation_error_vector, dtype=float), precision=6, separator=', ')}", type="info")
+        beauty_print(f"  姿态误差范数 (rad): {orientation_error_norm:.6f}", type="info")
 
         # 可选：执行运动到 IK 解
         if ik_success:
