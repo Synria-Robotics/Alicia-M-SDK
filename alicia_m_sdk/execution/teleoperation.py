@@ -184,7 +184,6 @@ class Teleoperation:
             return
 
         logger.info("禁用 leader 力矩以自由拖动...")
-        self.leader.torque_control('off')
 
         self._loop_count = 0
         self._error_count = 0
@@ -203,7 +202,6 @@ class Teleoperation:
             self._thread = None
 
         logger.info("恢复 leader 力矩...")
-        self.leader.torque_control('on')
 
     def run_interactive(self) -> None:
         """交互式运行: 启动遥操作，等待用户按 Enter 或 Ctrl+C 停止"""
