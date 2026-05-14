@@ -11,8 +11,9 @@ from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
-POSITION = [0.0, -150.0, -150.0, 0.0, 0.0, 0.0]
+# POSITION = [0.0, -150.0, -150.0, 0.0, 0.0, 0.0]
 # POSITION = [0, 0, 0, 0, 0, 20]
+POSITION = [21, -67, -19, 8, 56, -7]
 
 def main():
     beauty_print("Demo: 关节控制 (PV)", type="module")

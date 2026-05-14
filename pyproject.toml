@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "alicia_m_sdk"
 version = "1.1.1rc1"
 description = "Python SDK for controlling the Alicia M robotic arm."
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
     {name = "Synria Robotics", email = "support@synriarobotics.ai"}
@@ -16,11 +17,10 @@ keywords = ["robotics", "robotic-arm", "alicia-m", "sdk", "serial-communication"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
@@ -59,5 +59,5 @@ all = [
 Homepage = "https://github.com/Synria-Robotics/Alicia-M-SDK"
 
 [tool.setuptools]
-packages = {find = {exclude = ["examples*"]}}
+packages = {find = {exclude = ["examples*", "tests*"]}}
 include-package-data = true
