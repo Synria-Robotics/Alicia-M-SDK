@@ -39,8 +39,8 @@ from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
-MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_KP = [500.0, 500.0, 500.0, 20.0, 60.0, 20.0, 150.0]
+MIT_KD = [5.0, 5.0, 5.0, 1.0, 2.0, 1.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -200,7 +200,7 @@ if __name__ == "__main__":
                         help="控制模式: pv / mit (默认: mit)")
     parser.add_argument('--leader-port', type=str, default="COM63",
                         help="Leader 串口 (Alicia-D)")
-    parser.add_argument('--port', '--follower-port', default="COM62", dest='follower_port',
+    parser.add_argument('--port', '--follower-port', default="COM51", dest='follower_port',
                         type=str,
                         help="Follower 串口 (Alicia-M)，不指定则自动发现")
     parser.add_argument('--follower-version', type=str, default="v1_1",
