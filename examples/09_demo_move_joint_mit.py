@@ -17,8 +17,8 @@ from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 POSITION = [0.0, -90.0, -90.0, 90.0, 0.0, 0.0]
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
-MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_KP = [500.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
+MIT_KD = [5.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -56,7 +56,16 @@ def main():
 
         # --- 回零位 ---
         beauty_print("回零位...", type="info")
-        robot.go_home(speed=args.speed)
+        robot.set_robot_state(
+            target_joints=[0.0] * 6,
+            joint_format="rad",
+            speed=args.speed,
+            wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
         beauty_print("已到达零位", type="success")
         time.sleep(1.0)
 
@@ -77,7 +86,16 @@ def main():
 
         # --- 回零位 ---
         beauty_print("回零位...", type="info")
-        robot.go_home(speed=args.speed)
+        robot.set_robot_state(
+            target_joints=[0.0] * 6,
+            joint_format="rad",
+            speed=args.speed,
+            wait_for_completion=True,
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
         beauty_print("已到达零位", type="success")
 
     except KeyboardInterrupt:

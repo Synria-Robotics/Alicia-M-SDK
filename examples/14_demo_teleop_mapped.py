@@ -83,14 +83,41 @@ def main(args):
     beauty_print(f"Follower 当前模式: {follower.control_mode.value.upper()}", type="info")
 
     try:
+        mit_gains_initialized = False
+
         # --- 可选: follower 先回零 ---
         if args.home:
-            if follower.control_mode != ControlMode.PV:
+            if target_mode == ControlMode.MIT:
+                if follower.control_mode != ControlMode.MIT:
+                    beauty_print("需要切换到 MIT 模式以使用指定阻抗参数回零", type="warning")
+                    input("按 Enter 切换到 MIT 模式...")
+                    follower.switch_mode("mit")
+                beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+                follower.initialize_mit_gains(
+                    kp=MIT_KP,
+                    kd=MIT_KD,
+                    torque=MIT_TORQUE,
+                    vel_ref=MIT_VEL_REF,
+                )
+                mit_gains_initialized = True
+            elif follower.control_mode != ControlMode.PV:
                 beauty_print("需要临时切换到 PV 模式以执行回零", type="warning")
                 input("按 Enter 切换到 PV 模式...")
                 follower.switch_mode("pv")
             beauty_print("Follower 回零位...", type="info")
-            follower.go_home(speed=20)
+            if target_mode == ControlMode.MIT:
+                follower.set_robot_state(
+                    target_joints=[0.0] * 6,
+                    joint_format="rad",
+                    speed=20,
+                    wait_for_completion=True,
+                    kp=MIT_KP,
+                    kd=MIT_KD,
+                    torque=MIT_TORQUE,
+                    vel_ref=MIT_VEL_REF,
+                )
+            else:
+                follower.go_home(speed=20)
             beauty_print("Follower 已归零", type="success")
 
         # --- 检测并切换到目标控制模式 ---
@@ -100,7 +127,7 @@ def main(args):
             follower.switch_mode(mode)
             beauty_print(f"已切换到 {mode.upper()} 模式", type="success")
 
-        if target_mode == ControlMode.MIT:
+        if target_mode == ControlMode.MIT and not mit_gains_initialized:
             beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
             follower.initialize_mit_gains(
                 kp=MIT_KP,
