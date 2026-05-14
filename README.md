@@ -56,7 +56,7 @@ cd Alicia-M-SDK
 创建虚拟环境：
 
 ```
-conda create -n msdk python=3.10
+conda create -n msdk python=3.11
 conda activate msdk
 ```
 
