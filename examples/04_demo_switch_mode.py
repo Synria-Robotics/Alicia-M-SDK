@@ -11,8 +11,8 @@ import argparse
 
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 def main():

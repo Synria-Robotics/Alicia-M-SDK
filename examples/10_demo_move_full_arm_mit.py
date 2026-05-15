@@ -6,26 +6,22 @@
 使用逐电机 MIT 阻抗参数，展示 kp/kd/torque/vel_ref 的逐关节设置方式。
 
 MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!! MIT模式用于柔性的阻抗控制，此例程仅作API参考，不保证机械臂完全运动到位. !!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 """
 
 import argparse
 import time
 import alicia_m_sdk
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
-# ps: 注意mit是模式是柔性控制，最终位置有所偏差是正常的
-POSE_A = [90, -90.0, -90.0, 90.0, 0.0, 0.0]
+POSE_A = [0.0, -90.0, -90.0, 90.0, 0.0, 0.0]
 POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
-MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_KP = [500.0, 500.0, 500.0, 150.0, 500.0, 150.0, 150.0]
+MIT_KD = [5.0, 5.0, 5.0, 2.0, 5.0, 2.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -49,6 +45,14 @@ def main():
         beauty_print("已切换到 MIT 模式", type="success")
 
     try:
+        beauty_print("初始化 MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+        robot.initialize_mit_gains(
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
+
         # --- 初始化：回零位 + 夹爪打开 ---
         beauty_print("初始化: 回零位，夹爪打开...", type="info")
         robot.set_robot_state(

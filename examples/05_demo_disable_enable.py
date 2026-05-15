@@ -7,8 +7,8 @@
 import argparse
 import math
 import alicia_m_sdk
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def _print_joints(robot, label: str):
@@ -20,7 +20,6 @@ def _print_joints(robot, label: str):
         beauty_print(f"{label} (rad): {beauty_print_array(joints, precision=4)}", type="info")
     else:
         beauty_print("无法读取关节角度", type="warning")
-
 
 def main():
     beauty_print("Demo: 失能/使能交互", type="module")

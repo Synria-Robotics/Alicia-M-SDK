@@ -46,13 +46,23 @@ from .timing import (
     FPSCounter,
 )
 
-from .logger import (
+from .beauty_logger import (
     get_logger,
+    get_sdk_log_file_path,
     print_info,
     print_success,
     print_warning,
     print_error,
     format_array,
+    logger,
+)
+from .protocol import format_bytes
+from .version import parse_firmware_version, supports_min_version
+from .trajectory_plot import (
+    plot_trajectory,
+    plot_joint_tracking,
+    plot_joint_velocity_tracking,
+    waypoint_times_for_plot,
 )
 
 __all__ = [
@@ -91,4 +101,14 @@ __all__ = [
     "print_warning",
     "print_error",
     "format_array",
+    "get_sdk_log_file_path",
+    "logger",
+    "format_bytes",
+    "parse_firmware_version",
+    "supports_min_version",
+    # trajectory_plot
+    "plot_trajectory",
+    "plot_joint_tracking",
+    "plot_joint_velocity_tracking",
+    "waypoint_times_for_plot",
 ]

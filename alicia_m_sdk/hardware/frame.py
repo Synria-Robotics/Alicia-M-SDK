@@ -21,11 +21,8 @@ from .constants import FRAME_HEADER, FRAME_FOOTER
 def crc32_check(data: bytes) -> int:
     """CRC32 校验，取低 8 位
 
-    Args:
-        data: 需要校验的字节序列（指令ID + 功能码 + 有效数据长度 + 有效数据）
-
-    Returns:
-        CRC32 结果的低 8 位（0x00~0xFF）
+    :param data, 需要校验的字节序列（指令ID + 功能码 + 有效数据长度 + 有效数据）
+    :return, CRC32 结果的低 8 位（0x00~0xFF）
     """
     return binascii.crc32(data) & 0xFF
 
@@ -50,13 +47,12 @@ class Frame:
 
         帧结构: [0xAA][cmd_id][func_code][length][data...][CRC8][0xFF]
 
-        Returns:
-            完整的二进制帧字节
+        :return, 完整的二进制帧字节
         """
         length = len(self.data)
         # 构建校验数据：指令ID + 功能码 + 有效数据长度 + 有效数据
         check_payload = bytes([self.cmd_id, self.func_code, length]) + self.data
-        self.checksum = crc32_check(check_payload)
+        checksum = crc32_check(check_payload)
 
         # 组装完整帧
         frame = bytes([
@@ -65,7 +61,7 @@ class Frame:
             self.func_code,
             length,
         ]) + self.data + bytes([
-            self.checksum,
+            checksum,
             FRAME_FOOTER,
         ])
         return frame
@@ -77,14 +73,8 @@ class Frame:
         基于长度字段解析，不依赖 0xFF 边界检测（数据中可能包含 0xFF）。
         包含 CRC 校验验证。
 
-        Args:
-            raw: 原始字节流（必须包含完整帧：帧头 + 指令ID + 功能码 + 长度 + 数据 + 校验 + 帧尾）
-
-        Returns:
-            解析后的 Frame 对象
-
-        Raises:
-            ValueError: 帧格式错误、长度不足或 CRC 校验失败
+        :param raw, 原始字节流（必须包含完整帧：帧头 + 指令ID + 功能码 + 长度 + 数据 + 校验 + 帧尾）
+        :return, 解析后的 Frame 对象
         """
         # 最小帧长度：帧头(1) + 指令ID(1) + 功能码(1) + 长度(1) + 校验(1) + 帧尾(1) = 6
         if len(raw) < 6:
@@ -142,14 +132,8 @@ class Frame:
         用于硬件层的帧边界检测：先读取前 4 字节获取 length 字段，
         再按长度读取剩余数据。
 
-        Args:
-            raw: 已接收的字节（至少 4 字节：帧头 + 指令ID + 功能码 + 长度）
-
-        Returns:
-            完整帧的总字节数
-
-        Raises:
-            ValueError: 字节不足，无法确定长度
+        :param raw, 已接收的字节（至少 4 字节：帧头 + 指令ID + 功能码 + 长度）
+        :return, 完整帧的总字节数
         """
         if len(raw) < 4:
             raise ValueError(f"需要至少 4 字节来确定帧长度，当前仅 {len(raw)} 字节")

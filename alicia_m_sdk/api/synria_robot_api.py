@@ -1,40 +1,41 @@
-"""SynriaRobotAPI — Alicia-M 机器人 SDK 主接口
-
-精简的门面（Facade）类，将具体逻辑委托给控制层、运动学接口、规划接口。
-通过 create_robot() 工厂函数创建实例。
+"""
+SynriaRobotAPI — Alicia-M 机器人 SDK 主接口
 """
 
 from __future__ import annotations
 
 import math
 import time
-import logging
-import warnings
 from typing import Dict, List, Optional, Union, Any
 
 import numpy as np
 
-from ..types.state import JointState, MitParams
+from ..types.state import MitParams
 from ..types.config import RobotConfig
-from ..types.enums import ControlMode, ControlAim
+from ..types.enums import ControlMode
 from ..types.exceptions import (
-    ConnectionError, TimeoutError, RobotStateError,
+    ConnectionError, RobotStateError,
 )
-from ..protocol.codec import MessageCodec
-from ..protocol.constants import (
-    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION, FUNC_WRITE_BIT,
+from ..hardware.codec import MessageCodec
+from ..hardware.constants import (
+    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION,
     MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
+    CMD_GRIPPER_PARAM,
     NUM_JOINTS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
-from ..control.joint_control import JointController
-from ..control.trajectory_executor import TrajectoryExecutor
-from .. import kinematics as kin_module
-from .. import planning as plan_module
-
-logger = logging.getLogger(__name__)
+from ..execution.joint_control import JointController
+from ..execution.trajectory_executor import TrajectoryExecutor
+from ..diagnostics import DiagnosticResult, run_diagnostic as _run_diagnostic
+from ..user_settings import UserSettings
+from ..user_settings import get_user_settings as _get_user_settings
+from ..user_settings import set_gripper_type as _set_gripper_type
+from ..integrations.robocore import kinematics as kin_module
+from ..integrations.robocore import planning as plan_module
+from ..utils.beauty_logger import logger
+from ..utils.version import supports_min_version
 
 
 class SynriaRobotAPI:
@@ -42,9 +43,8 @@ class SynriaRobotAPI:
 
     提供面向用户的统一控制入口，内部委托各子模块执行具体逻辑。
 
-    Args:
-        config: 机器人配置
-        robot_model: RoboCore RobotModel 实例（由 create_robot 传入）
+    :param config, 机器人配置
+    :param robot_model, RoboCore RobotModel 实例（由 create_robot 传入）
     """
 
     def __init__(self, config: RobotConfig, robot_model=None):
@@ -63,6 +63,23 @@ class SynriaRobotAPI:
         self._robot_model = robot_model
         self._connected = False
 
+    def __enter__(self) -> "SynriaRobotAPI":
+        """Enter a managed robot session, connecting if needed."""
+        if not self.is_connected():
+            self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Always disconnect when leaving a managed robot session."""
+        self.disconnect()
+        return False
+
+    def __del__(self):
+        try:
+            self.disconnect()
+        except Exception:
+            pass
+
     @property
     def robot_model(self):
         """获取 RoboCore 机器人模型实例"""
@@ -73,6 +90,11 @@ class SynriaRobotAPI:
         """获取当前控制模式"""
         return self._joint_ctrl.mode
 
+    @property
+    def connected_port(self) -> str:
+        """获取当前连接的串口名。"""
+        return self._serial_port.port_name
+
     # ========== 连接管理 ==========
 
     def connect(self, timeout: float = 5.0) -> bool:
@@ -80,57 +102,90 @@ class SynriaRobotAPI:
 
         总超时覆盖整个连接流程：串口打开 + 后台线程启动 + 自动检测 + 首次状态获取。
 
-        Args:
-            timeout: 总超时（秒）
-
-        Returns:
-            连接成功返回 True
-
-        Raises:
-            ConnectionError: 连接失败
+        :param timeout, 总超时（秒）
+        :return, 连接成功返回 True
         """
+        if self.is_connected():
+            return True
+
+        if self._config.port:
+            self._connect_once(timeout)
+            logger.info(f"Connected to serial port: {self.connected_port}")
+            return True
+
+        ports = SerialPort.find_ports()
+        if not ports:
+            raise ConnectionError("No serial ports found")
+
+        ports = list(reversed(ports))
+        logger.info(f"Found serial ports: {', '.join(ports)}")
+        errors = []
+        for port in ports:
+            logger.info(f"Trying serial port: {port}")
+            try:
+                self._serial_port.set_port(port)
+                self._connect_once(timeout)
+                logger.info(f"Auto-connected to serial port: {self.connected_port}")
+                return True
+            except Exception as exc:
+                errors.append(f"{port}: {exc}")
+                logger.debug(f"Serial port {port} auto-detection failed: {exc}")
+                self.disconnect()
+
+        detail = "; ".join(errors)
+        raise ConnectionError(f"Failed to auto-detect Alicia-M serial port. Candidates: {', '.join(ports)}. {detail}")
+
+    def _connect_once(self, timeout: float) -> bool:
+        """在当前 SerialPort.port_name 上完成一次 Alicia-M 握手。"""
         deadline = time.time() + timeout
 
-        # 1. 打开串口
+        # 1. 打开串口。
         if not self._serial_port.connect():
-            raise ConnectionError("串口连接失败，请检查设备连接和端口权限")
+            raise ConnectionError("Failed to open serial port; check device connection and permissions")
 
-        # 2. 启动后台线程
-        self._device.start()
+        try:
+            # 2. 启动后台读线程和状态轮询线程。
+            self._device.start()
 
-        # 3. 自动检测控制目标
-        if self._config.control_aim:
-            aim_str = self._config.control_aim.lower()
-            aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
-            self._device.set_aim(aim)
-        else:
-            # 通过版本查询自动检测
-            self._auto_detect_aim(max(deadline - time.time(), 0.5))
+            # 3. 设置或自动检测控制目标。
+            if self._config.control_aim:
+                aim_str = self._config.control_aim.lower()
+                aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
+                self._device.set_aim(aim)
+            else:
+                self._auto_detect_aim(max(deadline - time.time(), 0.5))
 
-        # 4. 等待首次状态缓存填充
-        poll_deadline = min(deadline, time.time() + 2.0)
-        while time.time() < poll_deadline:
-            if self._device.joint_state is not None:
-                break
-            time.sleep(0.05)
+            # 4. 先验证版本响应；没有响应就跳过当前串口。
+            remaining = max(deadline - time.time(), 0.5)
+            firmware_version = self.get_firmware_version(timeout=remaining)
+            if firmware_version is None:
+                raise ConnectionError("No Alicia-M firmware version response received")
 
-        # 5. 查询固件版本
-        remaining = max(deadline - time.time(), 0.5)
-        self.get_firmware_version(timeout=remaining)
+            # 5. 等待首次状态缓存填充。
+            poll_deadline = min(deadline, time.time() + 2.0)
+            while time.time() < poll_deadline:
+                if self._device.joint_state is not None:
+                    break
+                time.sleep(0.05)
 
-        # 6. 检测固件控制模式并同步 SDK 内部状态
-        self._sync_control_mode()
+            # 6. 检测固件控制模式并同步 SDK 内部状态。
+            self._sync_control_mode()
 
-        self._connected = True
-        logger.info("机器人连接成功")
-        return True
+            self._connected = True
+            logger.info(f"Robot connected: {self.connected_port}")
+            return True
+        except Exception:
+            self.disconnect()
+            raise
 
     def disconnect(self) -> None:
         """断开连接：停止后台线程 → 关闭串口"""
+        was_connected = self._connected or self._serial_port.is_connected()
         self._device.stop()
         self._serial_port.disconnect()
         self._connected = False
-        logger.info("机器人已断开")
+        if was_connected:
+            logger.info("Robot disconnected")
 
     def is_connected(self) -> bool:
         """检查连接状态"""
@@ -155,11 +210,8 @@ class SynriaRobotAPI:
         一次性查询（发送请求等待响应）:
             - "control_mode": 各电机控制模式 (0x11)
 
-        Args:
-            info_type: 查询类型
-
-        Returns:
-            对应类型的状态数据，不可用时返回 None
+        :param info_type, 查询类型
+        :return, 对应类型的状态数据，不可用时返回 None
         """
         state = self._device.joint_state
 
@@ -195,8 +247,7 @@ class SynriaRobotAPI:
     def get_pose(self) -> Optional[Dict]:
         """获取末端位姿（通过 FK 计算）
 
-        Returns:
-            位姿字典 {transform, position, rotation, euler_xyz, quaternion_xyzw}
+        :return, 位姿字典 {transform, position, rotation, euler_xyz, quaternion_xyzw}
         """
         if self._robot_model is None:
             logger.warning("未加载机器人模型，无法计算位姿")
@@ -211,14 +262,11 @@ class SynriaRobotAPI:
     def get_firmware_version(self, timeout: float = 5.0) -> Optional[str]:
         """获取固件版本
 
-        Args:
-            timeout: 查询超时
-
-        Returns:
-            固件版本字符串，如 "v1.1.0"
+        :param timeout, 查询超时
+        :return, 固件版本字符串，如 "v1.1.0"
         """
         frame = self._codec.encode_version_request()
-        resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
+        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
         info = self._device.version_info
         return info.firmware_version if info else None
 
@@ -248,24 +296,18 @@ class SynriaRobotAPI:
 
         MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
-        Args:
-            target_joints: 目标角度，6 个关节
-            gripper_value: 夹爪值 [0, 1000]
-            joint_format: 角度格式 'deg' / 'rad'
-            speed: 运动速度 [0, 400]
-            gripper_speed: 夹爪速度 [0, 400]
-            wait_for_completion: 是否等待到达
-            use_interpolation: MIT 模式是否使用线性轨迹插值（PV 模式忽略）
-            kp: MIT 位置增益 [0, 500]（PV 模式忽略）。
-                None=使用默认值，float=广播至所有电机，
-                List[float] 长度 6(仅关节) 或 7(含夹爪) 逐电机设置。
-            kd: MIT 速度增益 [0, 5]（PV 模式忽略）。格式同 kp。
-            torque: MIT 前馈力矩 (N·m)（PV 模式忽略）。
-                None=默认 0，float=广播，List[float] 逐电机设置。
-            vel_ref: MIT 目标速度 (rad/s)（PV 模式忽略）。格式同 torque。
-
-        Returns:
-            是否成功到达目标
+        :param target_joints, 目标角度，6 个关节
+        :param gripper_value, 夹爪值 [0, 1000]
+        :param joint_format, 角度格式 'deg' / 'rad'
+        :param speed, 运动速度 [0, 400]
+        :param gripper_speed, 夹爪速度 [0, 400]
+        :param wait_for_completion, 是否等待到达
+        :param use_interpolation, MIT 模式是否使用线性轨迹插值（PV 模式忽略）
+        :param kp, MIT 位置增益 [0, 500]（PV 模式忽略）。 None=使用默认值，float=广播至所有电机， List[float] 长度 6(仅关节) 或 7(含夹爪) 逐电机设置。
+        :param kd, MIT 速度增益 [0, 5]（PV 模式忽略）。格式同 kp。
+        :param torque, MIT 前馈力矩 (N·m)（PV 模式忽略）。 None=默认 0，float=广播，List[float] 逐电机设置。
+        :param vel_ref, MIT 目标速度 (rad/s)（PV 模式忽略）。格式同 torque。
+        :return, 是否成功到达目标
         """
         # 角度转换
         if target_joints is not None and joint_format == 'deg':
@@ -317,10 +359,9 @@ class SynriaRobotAPI:
     ) -> bool:
         """控制夹爪
 
-        Args:
-            command: "open" / "close" / None（使用 value）
-            value: 夹爪目标值 [0, 1000]
-            wait_for_completion: 是否等待
+        :param command, "open" / "close" / None（使用 value）
+        :param value, 夹爪目标值 [0, 1000]
+        :param wait_for_completion, 是否等待
         """
         if command == "open":
             value = 1000.0
@@ -329,6 +370,19 @@ class SynriaRobotAPI:
         if value is None:
             return False
         return self._joint_ctrl.move_gripper(value, wait=wait_for_completion)
+
+    def set_linear_interpolation_velocity(
+        self,
+        velocity_rad_s: Union[float, List[float]] = 2.0,
+    ) -> bool:
+        """一次性设置固件线性轨迹插值速度.
+
+        发送一帧只包含线性插值速度（0x06/addr=0x05）的数据帧。
+        速度单位为 rad/s，可传标量广播到 7 个电机，或传长度 7 的列表。
+        """
+        return self._joint_ctrl.set_linear_interpolation_velocity(
+            velocity_rad_s,
+        )
 
     # ========== MIT 专用接口 ==========
 
@@ -342,11 +396,50 @@ class SynriaRobotAPI:
         每帧发送 6 地址 MIT 帧（线性速度填清零信号），不等待、不插值。
         调用方需自行维持高频发送（≥200Hz）。
 
-        Args:
-            joint_params: 7 个电机的 MIT 参数
-            gripper: 夹爪值，None 使用 joint_params[6].pos_ref
+        :param joint_params, 7 个电机的 MIT 参数
+        :param gripper, 夹爪值，None 使用 joint_params[6].pos_ref
         """
         self._joint_ctrl.send_mit(joint_params, gripper=gripper)
+
+    def initialize_mit_gains(
+        self,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
+        duration: float = 1.0,
+        frequency_hz: float = 50.0,
+        read_timeout: float = 1.0,
+    ) -> bool:
+        """@brief 在 MIT 运动开始前线性初始化 Kp/Kd。
+
+        @details
+        SDK 会读取当前机械臂 Kp/Kd，与目标增益逐电机比较，并保持当前
+        关节/夹爪位置不变，将 Kp/Kd 线性过渡到目标值。建议在 demo、
+        遥操作或产品流程第一次进入 MIT 运动前调用一次。
+
+        @param kp 目标位置增益 [0, 500]。None 使用默认值；标量广播；
+            长度 6/7 的列表表示逐电机设置。
+        @param kd 目标速度增益 [0, 5]。格式同 kp。
+        @param torque 预热帧使用的前馈力矩。None 表示 0。
+        @param vel_ref 预热帧使用的速度参考。None 表示 0。
+        @param duration 线性过渡时长，单位秒。
+        @param frequency_hz 过渡帧发送频率，单位 Hz。
+        @param read_timeout 读取当前 Kp/Kd 的最长等待时间，单位秒。
+        @return True 表示初始化完成。
+        """
+        result = self._joint_ctrl.initialize_mit_gains(
+            kp=kp,
+            kd=kd,
+            torque=torque,
+            vel_ref=vel_ref,
+            duration=duration,
+            frequency_hz=frequency_hz,
+            read_timeout=read_timeout,
+        )
+        if result:
+            print("MIT 阻抗增益初始化结束", flush=True)
+        return result
 
     # ========== 系统控制 ==========
 
@@ -355,9 +448,8 @@ class SynriaRobotAPI:
     ) -> bool:
         """力矩开关（仅 MIT 模式）
 
-        Args:
-            command: "off"=卸力, "on"=恢复
-            joints: 关节索引列表，None=全部
+        :param command, "off"=卸力, "on"=恢复
+        :param joints, 关节索引列表，None=全部
         """
         if command == "off":
             return self._joint_ctrl.torque_off(joints)
@@ -380,8 +472,7 @@ class SynriaRobotAPI:
         切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
         夹爪电机始终保持 MIT 模式，不受模式切换影响。
 
-        Args:
-            mode: "pv" / "mit"
+        :param mode, "pv" / "mit"
         """
         ctrl_mode = ControlMode.PV if mode.lower() == "pv" else ControlMode.MIT
         return self._joint_ctrl.switch_mode(ctrl_mode)
@@ -392,16 +483,58 @@ class SynriaRobotAPI:
         基础模式（默认）: 仅查询角度、速度、力矩，兼容所有固件版本
         扩展模式: 额外查询 kp、kd、插补速度、温度，仅新固件支持
 
-        Args:
-            enabled: True=扩展查询, False=基础查询
+        :param enabled, True=扩展查询, False=基础查询
         """
         count = POLL_ADDR_EXTENDED if enabled else POLL_ADDR_BASIC
         self._device.set_poll_addr_count(count)
-        logger.info("状态轮询模式: %s", "扩展 (7地址)" if enabled else "基础 (3地址)")
+        logger.info(f"状态轮询模式: {'扩展 (7地址)' if enabled else '基础 (3地址)'}")
 
-    def set_zero_position(self) -> bool:
-        """设置当前位姿为零位（强调零）"""
-        return self._joint_ctrl.set_zero_position()
+    def set_zero_position(self, mode: str = "strong") -> bool:
+        """设置当前位姿为零位。
+
+        :param mode, "strong"=强调零（默认）, "weak"=弱调零（固件 >= 1.0.6）
+        """
+        mode_key = mode.lower()
+        if mode_key == "weak":
+            version = self.get_firmware_version(timeout=1.0)
+            if not supports_min_version(version, (1, 0, 6)):
+                raise RobotStateError(
+                    f"弱调零需要固件版本 >= v1.0.6，当前版本: {version or '未知'}"
+                )
+        return self._joint_ctrl.set_zero_position(mode=mode_key)
+
+    def run_diagnostic(self, timeout: float = 3.0) -> DiagnosticResult:
+        """运行自检并返回结构化结果。"""
+        return _run_diagnostic(self._device, timeout=timeout)
+
+    def get_user_settings(self, timeout: float = 1.0) -> Optional[UserSettings]:
+        """读取全部个性化设置。"""
+        return _get_user_settings(self._device, timeout=timeout)
+
+    def set_gripper_type(
+        self,
+        gripper_type,
+        timeout: float = 3.0,
+        readback: bool = True,
+    ) -> bool:
+        """写入夹爪类型配置。
+
+        gripper_type 支持规范配置值 0/2、示例选项 10/40、字符串 small/large/50mm/100mm，
+        以及 GripperType 枚举。
+        """
+        return _set_gripper_type(
+            self._device,
+            gripper_type,
+            timeout=timeout,
+            readback=readback,
+        )
+
+    def send_gripper_param_frame(self, frame, timeout: float = 1.0):
+        """发送 0x17 夹爪夹持参数帧并等待响应。
+
+        这是为低层夹爪参数 demo 保留的过渡 API，避免示例直接访问内部 Device。
+        """
+        return self._device.send_and_wait(frame, CMD_GRIPPER_PARAM, timeout=timeout)
 
     # ========== 运动学 ==========
 
@@ -415,14 +548,11 @@ class SynriaRobotAPI:
     ) -> Dict:
         """通过逆运动学移动到目标位姿
 
-        Args:
-            target_pose: 目标位姿（4x4矩阵 / [x,y,z,qx,qy,qz,qw]）
-            method: IK 方法
-            execute: 是否执行运动
-            speed: 运动速度
-
-        Returns:
-            IK 结果字典
+        :param target_pose, 目标位姿（4x4矩阵 / [x,y,z,qx,qy,qz,qw]）
+        :param method, IK 方法
+        :param execute, 是否执行运动
+        :param speed, 运动速度
+        :return, IK 结果字典
         """
         if self._robot_model is None:
             raise RobotStateError("未加载机器人模型")
@@ -461,10 +591,9 @@ class SynriaRobotAPI:
     ) -> bool:
         """执行平滑关节轨迹
 
-        Args:
-            q_end: 目标关节角度 (rad)
-            duration: 运动时长
-            method: 插值方法
+        :param q_end, 目标关节角度 (rad)
+        :param duration, 运动时长
+        :param method, 插值方法
         """
         state = self._device.joint_state
         if state is None:
@@ -528,10 +657,21 @@ class SynriaRobotAPI:
     def print_state(self, continuous: bool = False, output_format: str = "deg") -> None:
         """打印当前状态"""
         try:
-            from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+            from robocore.utils.beauty_logger import beauty_print as _rc_beauty_print
+            from robocore.utils.beauty_logger import beauty_print_array
+
+            def beauty_print(content: Any, type: Optional[str] = None):
+                if type is None:
+                    _rc_beauty_print(content)
+                else:
+                    _rc_beauty_print(content, type=type)
+
         except ImportError:
-            beauty_print = print
-            beauty_print_array = lambda arr, **kw: str(arr)
+            def beauty_print(content: Any, type: Optional[str] = None):
+                print(content)
+
+            def beauty_print_array(arr, **kw):
+                return str(arr)
 
         def _print_once():
             state = self._device.joint_state
@@ -567,18 +707,6 @@ class SynriaRobotAPI:
         else:
             _print_once()
 
-    # ========== 废弃方法 ==========
-
-    def set_home(self, **kwargs):
-        """已废弃，请使用 go_home()"""
-        warnings.warn("set_home() 已废弃，请使用 go_home()", DeprecationWarning, stacklevel=2)
-        return self.go_home(**kwargs)
-
-    def set_pose_target(self, **kwargs):
-        """已废弃，请使用 set_pose()"""
-        warnings.warn("set_pose_target() 已废弃，请使用 set_pose()", DeprecationWarning, stacklevel=2)
-        return self.set_pose(**kwargs)
-
     # ========== 内部方法 ==========
 
     def _query_control_modes(self) -> Optional[List[dict]]:
@@ -598,8 +726,7 @@ class SynriaRobotAPI:
         若关节电机模式不一致，返回 None 以触发后续强制切换。
         内部重试多次，容忍连接初期的短暂通信不稳定。
 
-        Returns:
-            关节电机一致时返回该模式，不一致或查询失败返回 None
+        :return, 关节电机一致时返回该模式，不一致或查询失败返回 None
         """
         _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
         for attempt in range(3):
@@ -607,14 +734,14 @@ class SynriaRobotAPI:
             values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
             if values is not None and len(values) >= NUM_JOINTS:
                 break
-            logger.debug("模式检测第 %d 次查询未获得有效响应", attempt + 1)
+            logger.debug(f"模式检测第 {attempt + 1} 次查询未获得有效响应")
             time.sleep(0.5)
         else:
             return None
         # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
         joint_values = values[:NUM_JOINTS]
         if any(v != joint_values[0] for v in joint_values):
-            logger.warning("检测到关节电机混合控制模式: %s，将强制同步", joint_values)
+            logger.warning(f"检测到关节电机混合控制模式: {joint_values}，将强制同步")
             return None
         return _MODE_MAP.get(joint_values[0])
 
@@ -639,13 +766,13 @@ class SynriaRobotAPI:
         if firmware_mode == desired:
             # 固件已是目标模式，同步 SDK 状态即可（固件侧已处理目标位置初始化）
             self._joint_ctrl.mode = desired
-            logger.info("固件控制模式: %s", desired.value.upper())
+            logger.info(f"固件控制模式: {desired.value.upper()}")
         else:
             # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
             # 设为对端模式确保 switch_mode 不会因 mode == desired 而跳过
             opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
             self._joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
-            logger.info("切换固件模式 → %s", desired.value.upper())
+            logger.info(f"切换固件模式 → {desired.value.upper()}")
             self._joint_ctrl.switch_mode(desired)
 
     def _auto_detect_aim(self, timeout: float) -> None:
@@ -657,7 +784,7 @@ class SynriaRobotAPI:
         请通过 create_robot(control_aim="leader") 显式指定。
         """
         frame = self._codec.encode_version_request()
-        resp = self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
+        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
         info = self._device.version_info
         if info and info.device_type:
             dt = info.device_type.upper()

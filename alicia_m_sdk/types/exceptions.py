@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from ..hardware.constants import ERROR_DESCRIPTIONS
+
 __all__ = [
     'AliciaSDKError',
     'ConnectionError',
@@ -94,21 +96,10 @@ class HardwareFaultError(AliciaSDKError):
         error_code: 固件返回的原始错误码
     """
 
-    # 错误码描述映射
-    _ERROR_DESCRIPTIONS = {
-        0x00: "帧头/帧尾校验错误",
-        0x01: "数据长度校验错误",
-        0x02: "CRC32 校验不通过",
-        0x03: "系统模式错误（机械臂类型检测失败）",
-        0x04: "电机角度限位中",
-        0x05: "motorData 偏移与部位数量不符",
-        0x06: "insID 偏移超过最大地址",
-    }
-
     def __init__(self, error_code: int, detail: str = ""):
         self.error_code = error_code
         # 拼接可读的错误消息
-        desc = self._ERROR_DESCRIPTIONS.get(error_code, "未知错误")
+        desc = ERROR_DESCRIPTIONS.get(error_code, "未知错误")
         msg = "硬件错误 [0x{:02X}]: {}".format(error_code, desc)
         if detail:
             msg += " - {}".format(detail)

@@ -1,4 +1,4 @@
-"""Shared helpers for example scripts."""
+"""Small helpers shared by example scripts."""
 
 
 def add_port_argument(parser):

@@ -9,14 +9,14 @@ import argparse
 import math
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk import forward_kinematics, RobotModel
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.transform import matrix_to_euler, matrix_to_quaternion
+from alicia_m_sdk.integrations.robocore import compute_forward_kinematics
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+from robocore.transform import matrix_to_euler, matrix_to_quaternion  # stable in robocore 2.x
 
 
 # 预设关节角度 (度)
-PRESET_JOINTS_DEG = [90, 0, 0, 0, 0, 0]
+PRESET_JOINTS_DEG = [0, 0, 0, 0, 0, 90]
 
 
 def _print_pose(label: str, T: np.ndarray):
@@ -58,7 +58,7 @@ def main():
             beauty_print(f"  当前关节角度 (rad): {beauty_print_array(joints_rad, precision=4)}", type="info")
 
             # 计算 FK
-            T_fk = forward_kinematics(robot_model, joints_rad, return_end=True)
+            T_fk = compute_forward_kinematics(robot_model, joints_rad)["transform"]
             _print_pose("  当前末端位姿", T_fk)
         else:
             beauty_print("  无法获取当前关节角度", type="warning")
@@ -69,7 +69,7 @@ def main():
         beauty_print(f"  预设关节角度 (deg): {PRESET_JOINTS_DEG}", type="info")
         beauty_print(f"  预设关节角度 (rad): {beauty_print_array(preset_rad, precision=4)}", type="info")
 
-        T_preset = forward_kinematics(robot_model, preset_rad, return_end=True)
+        T_preset = compute_forward_kinematics(robot_model, preset_rad)["transform"]
         _print_pose("  预设角度末端位姿", T_preset)
 
     except KeyboardInterrupt:

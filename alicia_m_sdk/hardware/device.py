@@ -8,24 +8,22 @@ Device 是硬件层的核心，统一管理通信调度和状态缓存。
 - 状态轮询线程: 专用后台线程周期性发送状态查询帧，保证空闲时缓存不过期
 """
 
-import logging
 import time
 import threading
 from typing import Optional, List, Dict, Any
 
 from .serial_port import SerialPort
-from ..protocol.frame import Frame
-from ..protocol.codec import MessageCodec
-from ..protocol.messages import JointStateRequest, MotorParamReadRequest
-from ..protocol.constants import (
+from .frame import Frame
+from .codec import MessageCodec
+from .messages import JointStateRequest, MotorParamReadRequest
+from .constants import (
     CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR, CMD_MOTOR_PARAM,
     AIM_FOLLOWER, NUM_MOTORS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
     ERROR_DESCRIPTIONS,
 )
 from ..types.state import JointState, MitParams, RobotStatus, VersionInfo
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class StateCache:
@@ -95,15 +93,21 @@ class StateCache:
     def get_pending_response(self, cmd_id: int) -> Optional[Frame]:
         """获取 send_and_wait 的响应帧"""
         with self._lock:
+            self._pending_events.pop(cmd_id, None)
             return self._pending_responses.pop(cmd_id, None)
+
+    def clear_pending(self, cmd_id: int) -> None:
+        """清理等待中的 pending（超时后清理，避免后台响应触发旧等待）"""
+        with self._lock:
+            self._pending_events.pop(cmd_id, None)
+            self._pending_responses.pop(cmd_id, None)
 
 
 class Device:
     """机器人设备抽象：非阻塞通信、异步状态更新
 
-    Args:
-        serial_port: 串口驱动实例
-        codec: 消息编解码器实例
+    :param serial_port, 串口驱动实例
+    :param codec, 消息编解码器实例
     """
 
     def __init__(self, serial_port: SerialPort, codec: MessageCodec):
@@ -131,6 +135,11 @@ class Device:
         """获取当前控制目标部位"""
         return self._aim
 
+    @property
+    def poll_addr_count(self) -> int:
+        """获取当前轮询地址数量"""
+        return self._poll_addr_count
+
     def set_aim(self, aim: int) -> None:
         """设置控制目标部位（connect 自动检测后调用）"""
         self._aim = aim
@@ -138,8 +147,7 @@ class Device:
     def set_poll_addr_count(self, count: int) -> None:
         """设置轮询查询的地址数量
 
-        Args:
-            count: POLL_ADDR_BASIC(3) 或 POLL_ADDR_EXTENDED(7)
+        :param count, POLL_ADDR_BASIC(3) 或 POLL_ADDR_EXTENDED(7)
         """
         self._poll_addr_count = count
 
@@ -201,10 +209,9 @@ class Device:
                 velocities: List[float]) -> None:
         """发送 PV 控制帧（pos+vel，fire-and-forget）
 
-        Args:
-            aim: 目标部位 (AIM_LEADER / AIM_FOLLOWER)
-            positions: 7 个电机的目标位置 (rad)
-            velocities: 7 个电机的有符号速度 (rad/s)
+        :param aim, 目标部位 (AIM_LEADER / AIM_FOLLOWER)
+        :param positions, 7 个电机的目标位置 (rad)
+        :param velocities, 7 个电机的有符号速度 (rad/s)
         """
         frame = self._codec.encode_pv_control(aim, positions, velocities)
         self.send_frame(frame)
@@ -217,11 +224,9 @@ class Device:
     ) -> None:
         """发送 MIT 全参数帧（fire-and-forget，始终 6 地址）
 
-        Args:
-            aim: 目标部位
-            params: 7 个电机的 MIT 参数
-            linear_velocities: 线性轨迹插值速度 (rad/s)，
-                None 时填充清零信号 (0xFFFF) 禁用插值
+        :param aim, 目标部位
+        :param params, 7 个电机的 MIT 参数
+        :param linear_velocities, 线性轨迹插值速度 (rad/s)， None 时填充清零信号 (0xFFFF) 禁用插值
         """
         # 解包 MitParams 为 codec 所需的独立列表
         positions = [p.pos_ref for p in params]
@@ -235,6 +240,11 @@ class Device:
         )
         self.send_frame(frame)
 
+    def send_linear_velocity(self, aim: int, velocities: List[float]) -> None:
+        """Send a linear interpolation velocity frame."""
+        frame = self._codec.encode_linear_velocity_control(aim, velocities)
+        self.send_frame(frame)
+
     def send_and_wait(self, frame: Frame, expected_cmd: int,
                       timeout: float = 1.0) -> Optional[Frame]:
         """发送请求帧并等待响应
@@ -242,18 +252,50 @@ class Device:
         仅用于低频操作：版本查询、模式切换等。
         通过 Event 机制等待读线程收到匹配响应，不阻塞串口。
 
-        Args:
-            frame: 要发送的请求帧
-            expected_cmd: 期望响应的指令 ID
-            timeout: 等待超时（秒）
-
-        Returns:
-            匹配的响应帧，超时返回 None
+        :param frame, 要发送的请求帧
+        :param expected_cmd, 期望响应的指令 ID
+        :param timeout, 等待超时（秒）
+        :return, 匹配的响应帧，超时返回 None
         """
         event = self._state_cache.register_pending(expected_cmd)
+        try:
+            self.send_frame(frame)
+            if event.wait(max(timeout, 0)):
+                return self._state_cache.get_pending_response(expected_cmd)
+            return None
+        finally:
+            self._state_cache.clear_pending(expected_cmd)
+
+    def send_and_wait_first(
+        self,
+        frame: Frame,
+        cmd_ids: List[int],
+        timeout: float = 1.0,
+    ) -> Optional[Frame]:
+        """发送请求帧并等待多个 cmd_id 中任意一个响应先到达
+
+        用于需要同时监听正常响应与错误帧 (0xEE) 的场景。
+        返回最先收到的那个帧，超时后清理所有注册的 pending。
+
+        :param frame, 要发送的请求帧
+        :param cmd_ids, 期望响应的指令 ID 列表
+        :param timeout, 等待超时（秒）
+        :return, 最先到达的响应帧，超时返回 None
+        """
+        events = {cmd_id: self._state_cache.register_pending(cmd_id)
+                  for cmd_id in cmd_ids}
         self.send_frame(frame)
-        event.wait(max(timeout, 0))
-        return self._state_cache.get_pending_response(expected_cmd)
+        deadline = time.perf_counter() + max(timeout, 0)
+        try:
+            while time.perf_counter() <= deadline:
+                for cmd_id, event in events.items():
+                    if event.is_set():
+                        return self._state_cache.get_pending_response(cmd_id)
+                time.sleep(0.01)
+            return None
+        finally:
+            for cmd_id in cmd_ids:
+                self._state_cache.clear_pending(cmd_id)
 
     # ========== 一次性查询 ==========
 
@@ -262,12 +304,9 @@ class Device:
     ) -> Optional[List[int]]:
         """读取所有电机的指定参数
 
-        Args:
-            param_addr: 参数地址 (如 MOTOR_PARAM_CTRL_MODE=0x0B)
-            timeout: 等待超时 (秒)
-
-        Returns:
-            各电机的参数值列表（uint32），超时返回 None
+        :param param_addr, 参数地址 (如 MOTOR_PARAM_CTRL_MODE=0x0B)
+        :param timeout, 等待超时 (秒)
+        :return, 各电机的参数值列表（uint32），超时返回 None
         """
         query = self._codec.encode_motor_param_read(MotorParamReadRequest(
             aim=self._aim,
@@ -353,15 +392,15 @@ class Device:
         """根据指令 ID 分发响应到对应处理器"""
         cmd_id = frame.cmd_id
 
-        # 尝试触发 send_and_wait 的 pending event
-        self._state_cache.resolve_pending(cmd_id, frame)
-
         if cmd_id == CMD_JOINT_STATE:
             self._handle_joint_state(frame)
         elif cmd_id == CMD_VERSION:
             self._handle_version(frame)
         elif cmd_id == CMD_ERROR:
             self._handle_error(frame)
+
+        # Wake send_and_wait callers after handlers update state caches.
+        self._state_cache.resolve_pending(cmd_id, frame)
         # 其他指令的响应（0x03, 0x05, 0x09, 0x11）通过 send_and_wait 处理
 
     def _handle_joint_state(self, frame: Frame) -> None:
@@ -405,7 +444,9 @@ class Device:
             # 解析运行状态字节
             run_status = phys.get('run_status', 0)
             if run_status is not None:
-                status = self._parse_run_status(run_status)
+                version = self._state_cache.get_version()
+                device_type = version.device_type if version else ""
+                status = self._parse_run_status(run_status, device_type=device_type)
                 self._state_cache.update_robot_status(status)
 
         except Exception as e:
@@ -432,19 +473,26 @@ class Device:
         if len(frame.data) >= 1:
             error_type = frame.func_code
             error_data = frame.data[0] if frame.data else 0
-            desc = ERROR_DESCRIPTIONS.get(error_type, f"未知错误(0x{error_type:02X})")
-            logger.warning("固件错误: %s (type=0x%02X, data=0x%02X)",
-                           desc, error_type, error_data)
+            desc = ERROR_DESCRIPTIONS.get(error_type, f"Unknown error(0x{error_type:02X})")
+            logger.warning(
+                f"Firmware error: {desc} (type=0x{error_type:02X}, data=0x{error_data:02X})"
+            )
 
     @staticmethod
-    def _parse_run_status(status_byte: int) -> RobotStatus:
+    def _parse_run_status(status_byte: int, device_type: str = "") -> RobotStatus:
         """解析运行状态字节"""
+        device_type = (device_type or "F").upper()
+        if device_type == "L":
+            return RobotStatus(
+                has_motor_error=bool(status_byte & 0x80),
+                gripper_torque_locked=bool(status_byte & 0x40),
+                single_click=bool(status_byte & 0x01),
+                double_click=bool(status_byte & 0x02),
+                long_press=bool(status_byte & 0x04),
+            )
         return RobotStatus(
             is_locked=bool(status_byte & 0x01),
             is_synced=bool(status_byte & 0x02),
             has_motor_error=bool(status_byte & 0x80),
             gripper_torque_locked=bool(status_byte & 0x40),
-            single_click=bool(status_byte & 0x01),
-            double_click=bool(status_byte & 0x02),
-            long_press=bool(status_byte & 0x04),
         )

@@ -1,28 +1,30 @@
-"""13_demo_teleop.py — 遥操作: Alicia-D (示教臂) → Alicia-M (操作臂)
+"""14_demo_teleop_mapped.py — 遥操作 (带 URDF 限位映射): Alicia-D → Alicia-M
 
-使用 Alicia-D 伺服示教臂实时控制 Alicia-M 电机操作臂。
-支持 PV 模式和 MIT 模式（默认 MIT），MIT 模式支持逐电机设置阻抗参数。
+使用 Alicia-D 伺服示教臂实时控制 Alicia-M 电机操作臂，并使用 SDK 内置的
+URDF 限位映射代替简单的符号翻转，具备:
+- D 零位 → M 区间中点对齐
+- 关节 3 按比例缩放（D/M 行程不同）
+- 所有关节输出裁剪到 M 的 URDF 限位
+
+MIT 模式支持逐电机设置阻抗参数（kp/kd/torque/vel_ref），修改文件顶部常量即可。
 
 MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
 用法:
-    # MIT 模式遥操作（默认，不使用插值）
-    python 13_demo_teleop.py
+    # MIT 模式（默认）
+    python 14_demo_teleop_mapped.py
 
     # MIT 模式 + 线性轨迹插值
-    python 13_demo_teleop.py --interpolation --speed 200
+    python 14_demo_teleop_mapped.py --interpolation --speed 200
 
-    # PV 模式遥操作
-    python 13_demo_teleop.py --mode pv
+    # PV 模式
+    python 14_demo_teleop_mapped.py --mode pv
 
     # 指定串口
-    python 13_demo_teleop.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
-
-    # 调整频率和速度
-    python 13_demo_teleop.py --frequency 100 --speed 300
+    python 14_demo_teleop_mapped.py --leader-port /dev/ttyACM0 --follower-port /dev/ttyACM1
 
     # 跳过回零
-    python 13_demo_teleop.py --skip-home
+    python 14_demo_teleop_mapped.py --skip-home
 """
 
 import argparse
@@ -31,22 +33,32 @@ import numpy as np
 import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from alicia_m_sdk.control.teleoperation import Teleoperation
-from robocore.utils.beauty_logger import beauty_print
+from alicia_m_sdk.execution.joint_mapping import convert_joints_rad_from_alicia_d_to_alicia_m
+from alicia_m_sdk.execution.teleoperation import Teleoperation
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
-MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
-MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+MIT_KP = [500.0, 500.0, 500.0, 20.0, 60.0, 20.0, 150.0]
+MIT_KD = [5.0, 5.0, 5.0, 1.0, 2.0, 1.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
+
+def make_joint_mapper_rad():
+    """创建弧度制的关节映射函数（rad → rad）
+
+    内部流程: leader 弧度 → 角度 → URDF 限位映射 → 弧度
+    """
+    def mapper(leader_joints_rad: list[float]) -> list[float]:
+        return convert_joints_rad_from_alicia_d_to_alicia_m(leader_joints_rad)
+    return mapper
 
 def main(args):
     mode = args.mode.lower()
     target_mode = ControlMode(mode)
 
-    beauty_print(f"遥操作: Alicia-D → Alicia-M ({mode.upper()} 模式)", type="module")
+    beauty_print(f"遥操作 (URDF映射): Alicia-D → Alicia-M ({mode.upper()} 模式)", type="module")
 
     # --- 连接 leader (Alicia-D 示教臂) ---
     beauty_print("连接 leader (Alicia-D)...", type="info")
@@ -55,8 +67,7 @@ def main(args):
         beauty_print("leader 连接失败", type="error")
         return
 
-    # --- 连接 follower (Alicia-M 操作臂, 自动检测模式) ---
-    # 显式指定 control_aim="follower"，防止端口接反时误操作示教臂
+    # --- 连接 follower (Alicia-M 操作臂) ---
     beauty_print("连接 follower (Alicia-M)...", type="info")
     follower = alicia_m_sdk.create_robot(
         port=args.follower_port,
@@ -72,14 +83,41 @@ def main(args):
     beauty_print(f"Follower 当前模式: {follower.control_mode.value.upper()}", type="info")
 
     try:
-        # --- 可选: follower 先回零（在 PV 模式下执行以确保等待到达） ---
+        mit_gains_initialized = False
+
+        # --- 可选: follower 先回零 ---
         if args.home:
-            if follower.control_mode != ControlMode.PV:
+            if target_mode == ControlMode.MIT:
+                if follower.control_mode != ControlMode.MIT:
+                    beauty_print("需要切换到 MIT 模式以使用指定阻抗参数回零", type="warning")
+                    input("按 Enter 切换到 MIT 模式...")
+                    follower.switch_mode("mit")
+                beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+                follower.initialize_mit_gains(
+                    kp=MIT_KP,
+                    kd=MIT_KD,
+                    torque=MIT_TORQUE,
+                    vel_ref=MIT_VEL_REF,
+                )
+                mit_gains_initialized = True
+            elif follower.control_mode != ControlMode.PV:
                 beauty_print("需要临时切换到 PV 模式以执行回零", type="warning")
                 input("按 Enter 切换到 PV 模式...")
                 follower.switch_mode("pv")
             beauty_print("Follower 回零位...", type="info")
-            follower.go_home(speed=20)
+            if target_mode == ControlMode.MIT:
+                follower.set_robot_state(
+                    target_joints=[0.0] * 6,
+                    joint_format="rad",
+                    speed=20,
+                    wait_for_completion=True,
+                    kp=MIT_KP,
+                    kd=MIT_KD,
+                    torque=MIT_TORQUE,
+                    vel_ref=MIT_VEL_REF,
+                )
+            else:
+                follower.go_home(speed=20)
             beauty_print("Follower 已归零", type="success")
 
         # --- 检测并切换到目标控制模式 ---
@@ -89,6 +127,15 @@ def main(args):
             follower.switch_mode(mode)
             beauty_print(f"已切换到 {mode.upper()} 模式", type="success")
 
+        if target_mode == ControlMode.MIT and not mit_gains_initialized:
+            beauty_print("初始化 Follower MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+            follower.initialize_mit_gains(
+                kp=MIT_KP,
+                kd=MIT_KD,
+                torque=MIT_TORQUE,
+                vel_ref=MIT_VEL_REF,
+            )
+
         # --- 打印初始状态 ---
         leader_joints = leader.get_robot_state("joint")
         follower_joints = follower.get_robot_state("joint")
@@ -97,13 +144,13 @@ def main(args):
         if follower_joints is not None:
             beauty_print(f"Follower 关节 (deg): {np.round(np.degrees(follower_joints), 1).tolist()}")
 
-        # --- 创建遥操作控制器（逐电机 MIT 参数） ---
+        # --- 创建遥操作控制器（使用 URDF 限位映射 + 逐电机 MIT 参数） ---
         teleop = Teleoperation(
             leader=leader,
             follower=follower,
             frequency_hz=args.frequency,
             follower_speed=args.speed,
-            joint_signs=[1.0, 1.0, -1.0, -1.0, 1.0, -1.0],
+            joint_mapper=make_joint_mapper_rad(),
             use_interpolation=args.interpolation,
             kp=MIT_KP,
             kd=MIT_KD,
@@ -112,10 +159,13 @@ def main(args):
         )
 
         if args.verbose:
+            joint_mapper = make_joint_mapper_rad()
+
             def print_state(joints, gripper, count):
                 if count % int(args.frequency) == 0:  # 每秒打印一次
-                    deg = np.round(np.degrees(joints), 1).tolist()
-                    print(f"  [{count:6d}] joints={deg}  gripper={gripper:.0f}")
+                    leader_deg = np.round(np.degrees(joints), 1).tolist()
+                    follower_deg = np.round(np.degrees(joint_mapper(joints)), 1).tolist()
+                    print(f"  [{count:6d}] leader={leader_deg}  follower(mapped)={follower_deg}  gripper={gripper:.0f}")
             teleop.set_state_callback(print_state)
 
         # --- 等待用户确认后启动 ---
@@ -124,6 +174,7 @@ def main(args):
             f"遥操作配置: {args.frequency} Hz, {mode.upper()} 模式 ({interp_str}), speed={args.speed}",
             type="module",
         )
+        beauty_print("使用 URDF 限位映射 (零点对齐 + 比例缩放 + 限位保护)", type="info")
         beauty_print("拖动 leader (Alicia-D) 控制 follower (Alicia-M)")
         input("\n按 Enter 开始遥操作...")
 
@@ -140,29 +191,30 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="遥操作: Alicia-D (示教臂) → Alicia-M (操作臂)",
+        description="遥操作 (URDF映射): Alicia-D (示教臂) → Alicia-M (操作臂)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument('--mode', type=str, default="mit",
                         choices=["pv", "mit"],
                         help="控制模式: pv / mit (默认: mit)")
-    parser.add_argument('--leader-port', type=str, default="/dev/ttyACM0",
+    parser.add_argument('--leader-port', type=str, default="COM63",
                         help="Leader 串口 (Alicia-D)")
-    parser.add_argument('--port', '--follower-port', dest='follower_port',
-                        type=str, default="",
+    parser.add_argument('--port', '--follower-port', default="COM51", dest='follower_port',
+                        type=str,
                         help="Follower 串口 (Alicia-M)，不指定则自动发现")
     parser.add_argument('--follower-version', type=str, default="v1_1",
                         help="Alicia-M 硬件版本，可选 v1_0/v1_1 (默认: v1_1)")
     parser.add_argument('--frequency', type=float, default=100.0,
                         help="控制循环频率 [10-200] Hz (默认: 100)")
-    parser.add_argument('--speed', type=float, default=400.0,
-                        help="Follower 运动速度 [0-400]，映射到 [0-10] rad/s (默认: 400, PV/MIT 均生效)")
+    parser.add_argument('--speed', type=float, default=200.0,
+                        help="Follower 运动速度 [0-400]，映射到 [0-10] rad/s (默认: 400)")
     parser.add_argument('--interpolation', action='store_true',
-                        help="MIT 模式启用线性轨迹插值（运动更平滑，建议配合 --speed 200 使用）")
+                        help="MIT 模式启用线性轨迹插值")
     parser.add_argument('--home', action='store_true',
-                        help="启动前 follower 先回零（默认跳过）")
+                        help="启动前 follower 先回零")
     parser.add_argument('--verbose', '-v', action='store_true',
-                        help="打印遥操作过程中的关节状态")
+                        help="打印遥操作过程中的关节状态（含映射前后对比）")
+    args = parser.parse_args()
 
-    main(parser.parse_args())
+    main(args)

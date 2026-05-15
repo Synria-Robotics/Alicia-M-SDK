@@ -16,11 +16,16 @@
     robot.disconnect()
 """
 
-__version__ = "1.0.1"
+from typing import Literal, Optional
+
+__version__ = "1.1.1rc1"
 
 # === 核心类型 ===
-from .api.robot_api import SynriaRobotAPI
+from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams, RobotStatus, VersionInfo
+from .diagnostics import DiagnosticResult, DiagnosticArmSnapshot
+from .user_settings import UserSettings
+from .execution import JointController, Teleoperation, TrajectoryExecutor
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
 from .types.exceptions import (
@@ -33,26 +38,15 @@ from .types.exceptions import (
     HardwareFaultError,
     MotionError,
 )
-
-# === RoboCore 转发（供用户直接使用）===
-try:
-    from robocore.modeling import RobotModel
-    from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-except ImportError:
-    RobotModel = None
-    forward_kinematics = None
-    inverse_kinematics = None
-    jacobian = None
-
-
+from .utils.beauty_logger import logger, LogLevel
 def create_robot(
     port: str = "",
     version: str = "v1_1",
-    variant: str = None,
-    control_aim: str = None,
-    control_mode: str = None,
+    variant: Optional[str] = None,
+    control_aim: Optional[str] = None,
+    control_mode: Optional[str] = None,
     baudrate: int = 1_000_000,
-    backend: str = "numpy",
+    backend: Literal["numpy", "torch", "cpp"] = "cpp",
     debug_mode: bool = False,
     auto_connect: bool = True,
     extended_polling: bool = False,
@@ -66,33 +60,31 @@ def create_robot(
     3. 创建 SynriaRobotAPI 实例
     4. 自动连接（可选）
 
-    Args:
-        port: 串口端口路径，空字符串表示自动发现
-        version: 机器人硬件版本 ("v1_0", "v1_1")
-        variant: 变体标识（None=自动检测）
-        control_aim: 控制目标 ("leader"/"follower"/None=自动检测)
-        control_mode: 控制模式 ("pv"/"mit"/None=检测固件当前模式)
-        baudrate: 串口波特率
-        backend: RoboCore 计算后端 ("numpy"/"torch")
-        debug_mode: 调试模式（启用 DEBUG 级别日志）
-        auto_connect: 是否自动连接
-        extended_polling: 扩展轮询（查询插补速度、温度等，需新固件支持）
-
-    Returns:
-        SynriaRobotAPI 实例
+    :param port, 串口端口路径，空字符串表示自动发现
+    :param version, 机器人硬件版本 ("v1_0", "v1_1")
+    :param variant, 变体标识（None=自动检测）
+    :param control_aim, 控制目标 ("leader"/"follower"/None=自动检测)
+    :param control_mode, 控制模式 ("pv"/"mit"/None=检测固件当前模式)
+    :param baudrate, 串口波特率
+    :param backend, RoboCore 计算后端 ("numpy"/"torch"/"cpp")；"cpp" 需要 synria-robocore 2.5.0+ 且已编译 C++ 扩展
+    :param debug_mode, 调试模式（启用 DEBUG 级别日志）
+    :param auto_connect, 是否自动连接
+    :param extended_polling, 扩展轮询（查询插补速度、温度等，需新固件支持）
+    :return, SynriaRobotAPI 实例
     """
-    import logging
-
     if debug_mode:
-        logging.basicConfig(level=logging.DEBUG)
+        logger.set_min_level(LogLevel.DEBUG)
+    else:
+        logger.set_min_level(LogLevel.INFO)
 
-    # 1. 设置 RoboCore 后端
+    # 1. 设置 RoboCore 后端（2.5.0rc2：'cpp' 是合法值，不会抛 ValueError）
     robot_model = None
     try:
         import robocore as rc
         rc.set_backend(backend)
 
         # 2. 加载机器人模型
+        from robocore.modeling import RobotModel as RobotModelClass
         from synriard import get_model_path
         # synriard 的 Alicia_M 模型必须指定 variant
         model_variant = variant if variant else "follower"
@@ -100,18 +92,16 @@ def create_robot(
             "Alicia_M", version=version,
             variant=model_variant, model_format="urdf",
         )
-        robot_model = RobotModel(
+        robot_model = RobotModelClass(
             str(model_path),
             base_link="base_link",
             end_link="tool0",
         )
     except ImportError:
         # RoboCore 或 synriard 不可用时，运动学功能不可用
-        logging.getLogger(__name__).warning(
-            "RoboCore / synriard 未安装，运动学和规划功能不可用"
-        )
+        logger.warning("RoboCore / synriard is not installed; kinematics and planning are unavailable")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"机器人模型加载失败: {e}")
+        logger.warning(f"Failed to load robot model: {e}")
 
     # 3. 创建实例
     config = RobotConfig(
@@ -147,10 +137,11 @@ __all__ = [
     'JointState', 'MitParams', 'RobotStatus', 'VersionInfo',
     'RobotConfig',
     'ControlAim', 'ControlMode', 'GripperType',
+    'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
+    # 高级控制入口
+    'JointController', 'Teleoperation', 'TrajectoryExecutor',
     # 异常
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',
     'HardwareFaultError', 'MotionError',
-    # RoboCore 转发
-    'RobotModel', 'forward_kinematics', 'inverse_kinematics', 'jacobian',
 ]

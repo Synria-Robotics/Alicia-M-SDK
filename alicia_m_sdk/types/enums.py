@@ -50,6 +50,65 @@ class GripperType(Enum):
     MM_50 = "50mm"
     MM_100 = "100mm"
 
+    @property
+    def firmware_value(self) -> int:
+        """Firmware user-setting value used by command 0x02."""
+        return 2 if self is GripperType.MM_100 else 0
+
+    @property
+    def option_value(self) -> int:
+        """Demo/UI option value used by examples."""
+        return 40 if self is GripperType.MM_100 else 10
+
+    @property
+    def label(self) -> str:
+        """Chinese display label for CLI examples."""
+        return "大夹爪" if self is GripperType.MM_100 else "小夹爪"
+
+    @classmethod
+    def from_firmware_value(cls, value: int) -> "GripperType":
+        """Convert a firmware setting value to a gripper type."""
+        return cls.MM_100 if int(value) & 0x02 else cls.MM_50
+
+    @classmethod
+    def from_option_value(cls, value: int) -> "GripperType":
+        """Convert a demo/UI option value to a gripper type."""
+        option = int(value)
+        if option == cls.MM_50.option_value:
+            return cls.MM_50
+        if option == cls.MM_100.option_value:
+            return cls.MM_100
+        raise ValueError("gripper option must be 10 or 40")
+
+    @classmethod
+    def parse(cls, value) -> "GripperType":
+        """Parse public gripper inputs without changing existing enum values."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            text = value.strip().lower()
+            aliases = {
+                "small": cls.MM_50,
+                "mini": cls.MM_50,
+                "50": cls.MM_50,
+                "50mm": cls.MM_50,
+                "large": cls.MM_100,
+                "big": cls.MM_100,
+                "100": cls.MM_100,
+                "100mm": cls.MM_100,
+            }
+            if text in aliases:
+                return aliases[text]
+            value = int(text, 0)
+        else:
+            value = int(value)
+
+        if value in {cls.MM_50.option_value, cls.MM_100.option_value}:
+            return cls.from_option_value(value)
+        if value in {cls.MM_50.firmware_value, cls.MM_100.firmware_value}:
+            return cls.from_firmware_value(value)
+        raise ValueError("gripper type must be 0/2, option 10/40, or small/large/50mm/100mm")
+
 
 class ErrorCode(IntEnum):
     """协议错误码

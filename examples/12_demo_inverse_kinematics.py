@@ -6,22 +6,24 @@
 """
 
 import argparse
-import math
 import time
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk import forward_kinematics, inverse_kinematics, RobotModel
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.transform import matrix_to_euler, matrix_to_quaternion
-from robocore.transform.conversions import quaternion_to_matrix
+from alicia_m_sdk.integrations.robocore import compute_forward_kinematics, compute_inverse_kinematics
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+# robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
+try:
+    from robocore.transform.conversions import quaternion_to_matrix
+except ImportError:
+    from robocore.transform import quaternion_to_matrix
 from robocore.utils.backend import to_numpy
 
 
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
-DEFAULT_TARGET_POSE = [+0.20, -0.0, +0.22, 0.0, 0.707, 0.0, 0.707]
-# DEFAULT_TARGET_POSE = [0, 0.20, +0.22, 0.0, 0.707, 0.0, 0.707]
-
+# DEFAULT_TARGET_POSE = [0.32,  -0.07, 0.37, 0.0,0.74, 0.0, 0.68]
+# DEFAULT_TARGET_POSE = [0.33, - 0.21, 0.33, 0.0, 0.85, 0.0, 0.53]
+DEFAULT_TARGET_POSE = [0.4279, -0.0946, 0.1384, -0.6645, 0.7321, 0.1010, 0.1106]
 
 def main():
     beauty_print("Demo: 逆运动学 (IK)", type="module")
@@ -62,12 +64,12 @@ def main():
             # 以当前关节角度为初始猜测求解 IK
             q_current = robot.get_robot_state("joint")
             start_time = time.time()
-            ik_result = inverse_kinematics(
+            ik_result = compute_inverse_kinematics(
                 robot_model,
                 T_current,
                 q_current,
                 method='dls',
-                max_iters=1000,
+                max_iters=5000,
                 pos_tol=1e-2,
                 ori_tol=1e-2,
                 num_initial_guesses=5,
@@ -80,8 +82,7 @@ def main():
             beauty_print(f"  IK 求解结果 (deg): {beauty_print_array(q_ik_deg, precision=2)}", type="info")
             beauty_print(f"  IK 求解结果 (rad): {beauty_print_array(q_ik, precision=4)}", type="info")
             beauty_print(f"  求解成功: {ik_result.get('success', False)}", type="info")
-            beauty_print(f"  位置误差: {ik_result.get('pos_err', 'N/A')}", type="info")
-            beauty_print(f"  姿态误差: {ik_result.get('ori_err', 'N/A')}", type="info")
+            beauty_print(f"  残差: {ik_result.get('residual', 'N/A')}", type="info")
             beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
         else:
             beauty_print("  无法获取当前位姿", type="warning")
@@ -99,17 +100,25 @@ def main():
         T_target[:3, :3] = quaternion_to_matrix(target[3:])
 
         # 求解 IK
+        q_current = robot.get_robot_state("joint")
+        if q_current is not None:
+            beauty_print(f"  使用当前关节角作为 IK 初始猜测 (rad): {beauty_print_array(q_current, precision=4)}", type="info")
+            beauty_print(f"  使用当前关节角作为 IK 初始猜测 (deg): {beauty_print_array(np.rad2deg(q_current), precision=2)}", type="info")
+        else:
+            beauty_print("  无法获取当前关节角，使用零位作为初始猜测", type="warning")
+
         start_time = time.time()
-        ik_result = inverse_kinematics(
+        ik_result = compute_inverse_kinematics(
             robot_model,
             T_target,
-            None,  # 无初始猜测，使用多起点
+            q_current,
             method='dls',
-            max_iters=500,
+            max_iters=5000,
             pos_tol=1e-2,
             ori_tol=1e-2,
             num_initial_guesses=10,
-            initial_guess_strategy='random',
+            initial_guess_scale=1.0,
+            initial_guess_strategy='current',
             use_analytic_jacobian=True,
         )
         elapsed = (time.time() - start_time) * 1000.0
@@ -123,9 +132,32 @@ def main():
         beauty_print(f"  IK 求解结果 (deg): {beauty_print_array(q_ik_deg, precision=2)}", type="info")
         beauty_print(f"  IK 求解结果 (rad): {beauty_print_array(q_ik, precision=4)}", type="info")
         beauty_print(f"  求解成功: {ik_success}", type="info")
-        beauty_print(f"  位置误差: {ik_result.get('pos_err', 'N/A')}", type="info")
-        beauty_print(f"  姿态误差: {ik_result.get('ori_err', 'N/A')}", type="info")
+        beauty_print(f"  残差: {ik_result.get('residual', 'N/A')}", type="info")
         beauty_print(f"  计算耗时: {elapsed:.2f} ms", type="info")
+
+        # === 3. 目标位姿 vs 最终 FK 偏差 ===
+        beauty_print("3. 目标位姿 vs 最终 FK 偏差", type="module")
+        fk_final = compute_forward_kinematics(robot_model, q_ik.tolist())
+        final_position = fk_final["position"]
+        final_rotation = fk_final["rotation"]
+        target_position = np.asarray(target[:3], dtype=float)
+        target_rotation = quaternion_to_matrix(target[3:])
+        position_delta = final_position - target_position
+        position_error = float(np.linalg.norm(position_delta))
+        rotation_delta = target_rotation.T @ final_rotation
+        orientation_error_vector = np.array([
+            rotation_delta[2, 1] - rotation_delta[1, 2],
+            rotation_delta[0, 2] - rotation_delta[2, 0],
+            rotation_delta[1, 0] - rotation_delta[0, 1],
+        ]) * 0.5
+        orientation_error_norm = float(np.linalg.norm(orientation_error_vector))
+        beauty_print(f"  目标位置 (m):       {np.array2string(np.asarray(target_position, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  最终位置 (m):       {np.array2string(np.asarray(final_position, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  位置偏差 (m):       {np.array2string(np.asarray(position_delta, dtype=float), precision=5, separator=', ')}", type="info")
+        beauty_print(f"  位置误差范数 (m):   {position_error:.6f}", type="info")
+        beauty_print(f"  目标四元数 (xyzw):  {np.array2string(np.asarray(target[3:7], dtype=float), precision=6, separator=', ')}", type="info")
+        beauty_print(f"  姿态误差向量 (rad): {np.array2string(np.asarray(orientation_error_vector, dtype=float), precision=6, separator=', ')}", type="info")
+        beauty_print(f"  姿态误差范数 (rad): {orientation_error_norm:.6f}", type="info")
 
         # 可选：执行运动到 IK 解
         if ik_success:

@@ -5,15 +5,13 @@
 这是读线程可安全退出的关键前提。
 """
 
-import logging
 from typing import Optional, List
 
 import serial
 import serial.tools.list_ports
 
-from ..protocol.constants import FRAME_HEADER, FRAME_FOOTER
-
-logger = logging.getLogger(__name__)
+from .constants import FRAME_HEADER, FRAME_FOOTER
+from ..utils.beauty_logger import logger
 
 
 class SerialPort:
@@ -22,9 +20,8 @@ class SerialPort:
     提供串口连接、读写、端口发现等基础能力。
     帧解析采用基于长度的策略（非 0xFF 边界检测），因为数据区可能包含 0xFF。
 
-    Args:
-        port: 串口端口路径，空字符串表示自动发现
-        baudrate: 波特率，默认 1Mbaud
+    :param port, 串口端口路径，空字符串表示自动发现
+    :param baudrate, 波特率，默认 1Mbaud
     """
 
     # 串口读超时（秒）— 决定读线程最大响应延迟
@@ -36,13 +33,23 @@ class SerialPort:
         self._serial: Optional[serial.Serial] = None
         self._rx_buffer = bytearray()
 
+    @property
+    def port_name(self) -> str:
+        """当前配置或已连接的串口名。"""
+        return self._port_name
+
+    def set_port(self, port: str) -> None:
+        """设置待连接串口名；仅允许在未连接时调用。"""
+        if self.is_connected():
+            raise serial.SerialException("串口已连接，不能切换端口")
+        self._port_name = port
+
     def connect(self) -> bool:
         """连接串口
 
         如果 port 为空，自动发现可用端口。
 
-        Returns:
-            连接成功返回 True
+        :return, 连接成功返回 True
         """
         port = self._port_name
         if not port:
@@ -104,11 +111,7 @@ class SerialPort:
     def write(self, data: bytes) -> None:
         """写入数据（由 Device.send_frame 的 write_lock 保护）
 
-        Args:
-            data: 完整的帧字节数据
-
-        Raises:
-            serial.SerialException: 写入失败
+        :param data, 完整的帧字节数据
         """
         if not self.is_connected():
             raise serial.SerialException("串口未连接")
@@ -126,8 +129,7 @@ class SerialPort:
 
         不依赖 0xFF 做帧边界（数据区可能包含 0xFF）。
 
-        Returns:
-            完整帧的原始字节（从帧头到帧尾），无数据或超时返回 None。
+        :return, 完整帧的原始字节（从帧头到帧尾），无数据或超时返回 None。
         """
         if not self.is_connected():
             return None
@@ -195,8 +197,7 @@ class SerialPort:
     def find_ports() -> List[str]:
         """发现可用的串口设备（跨平台）
 
-        Returns:
-            可用串口路径列表
+        :return, 可用串口路径列表
         """
         ports = []
         for port_info in serial.tools.list_ports.comports():

@@ -15,13 +15,11 @@ Alicia-M 电机操作臂（follower）跟随运动。
 
 import time
 import threading
-import logging
 from typing import Optional, Union, List, Callable
 
-from ..control.joint_control import _normalize_mit_param
+from ..execution.joint_control import _normalize_mit_param
 from ..utils.timing import precise_sleep
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 
 class Teleoperation:
@@ -30,30 +28,19 @@ class Teleoperation:
     从 leader 臂读取关节状态，经符号/偏移映射后发送到 follower 臂。
     自动适配 follower 当前控制模式（PV / MIT）。
 
-    Args:
-        leader: 示教臂实例（Alicia-D SynriaRobotAPI），需提供
-            ``get_robot_state("joint_gripper")``（返回含 ``.angles``、``.gripper`` 属性的对象）
-            和 ``torque_control("off"/"on")``
-        follower: 操作臂实例（Alicia-M SynriaRobotAPI），PV 或 MIT 模式均可
-        frequency_hz: 控制循环频率 (Hz)
-        follower_speed: follower 运动速度 [0, 400]，映射到 [0, 10] rad/s。
-            默认 400（最大速度，实时跟随）。PV 模式作为关节速度，
-            MIT 插值模式作为线性轨迹插值速度
-        gripper_scale: leader → follower 夹爪缩放系数。
-            两臂均为 0-1000 量程时使用默认 1.0
-        joint_signs: 6 个关节的符号乘数 (+1/-1)，补偿 leader/follower 关节方向差异
-        joint_offsets_rad: 6 个关节的弧度偏移量，加到映射后的 follower 关节值上
-        joint_mapper: 自定义关节映射函数，签名 ``(List[float]) -> List[float]``。
-            输入为 leader 关节角度（弧度），输出为 follower 关节角度（弧度）。
-            设置后将替代 joint_signs / joint_offsets_rad 的默认映射逻辑
-        use_interpolation: MIT 模式是否使用线性轨迹插值（默认 False）。
-            启用时发送 6 地址帧，运动更平滑但可能降低重力负载关节的刚度
-        kp: MIT 位置增益 [0, 500]。None=使用默认值，
-            float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
-        kd: MIT 速度增益 [0, 5]。格式同 kp。
-        torque: MIT 前馈力矩 (N·m)。None=默认 0，
-            float=广播，List[float] 逐电机设置。
-        vel_ref: MIT 目标速度 (rad/s)。格式同 torque。
+    :param leader, 示教臂实例（Alicia-D SynriaRobotAPI），需提供 ``get_robot_state("joint_gripper")``（返回含 ``.angles``、``.gripper`` 属性的对象） 和 ``torque_control("off"/"on")``
+    :param follower, 操作臂实例（Alicia-M SynriaRobotAPI），PV 或 MIT 模式均可
+    :param frequency_hz, 控制循环频率 (Hz)
+    :param follower_speed, follower 运动速度 [0, 400]，映射到 [0, 10] rad/s。 默认 400（最大速度，实时跟随）。PV 模式作为关节速度， MIT 插值模式作为线性轨迹插值速度
+    :param gripper_scale, leader → follower 夹爪缩放系数。 两臂均为 0-1000 量程时使用默认 1.0
+    :param joint_signs, 6 个关节的符号乘数 (+1/-1)，补偿 leader/follower 关节方向差异
+    :param joint_offsets_rad, 6 个关节的弧度偏移量，加到映射后的 follower 关节值上
+    :param joint_mapper, 自定义关节映射函数，签名 ``(List[float]) -> List[float]``。 输入为 leader 关节角度（弧度），输出为 follower 关节角度（弧度）。 设置后将替代 joint_signs / joint_offsets_rad 的默认映射逻辑
+    :param use_interpolation, MIT 模式是否使用线性轨迹插值（默认 False）。 启用时发送 6 地址帧，运动更平滑但可能降低重力负载关节的刚度
+    :param kp, MIT 位置增益 [0, 500]。None=使用默认值， float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+    :param kd, MIT 速度增益 [0, 5]。格式同 kp。
+    :param torque, MIT 前馈力矩 (N·m)。None=默认 0， float=广播，List[float] 逐电机设置。
+    :param vel_ref, MIT 目标速度 (rad/s)。格式同 torque。
     """
 
     def __init__(
@@ -96,8 +83,7 @@ class Teleoperation:
     def set_state_callback(self, callback: Callable) -> None:
         """注册每帧状态回调
 
-        Args:
-            callback: 回调函数，签名 ``(leader_joints, leader_gripper, loop_count)``
+        :param callback, 回调函数，签名 ``(leader_joints, leader_gripper, loop_count)``
         """
         self._on_state_callback = callback
 
@@ -133,8 +119,8 @@ class Teleoperation:
         mode_str = self.follower.control_mode.value.upper()
 
         logger.info(
-            "遥操作控制循环启动: %.0f Hz, %s 模式, 插值=%s",
-            self.frequency_hz, mode_str, self.use_interpolation,
+            f"遥操作控制循环启动: {self.frequency_hz:.0f} Hz, "
+            f"{mode_str} 模式, 插值={self.use_interpolation}"
         )
 
         while self._running.is_set():
@@ -174,7 +160,7 @@ class Teleoperation:
             except Exception as e:
                 self._error_count += 1
                 if self._error_count <= 5:
-                    logger.warning("遥操作循环异常: %s", e)
+                    logger.warning(f"遥操作循环异常: {e}")
                 elif self._error_count == 6:
                     logger.warning("后续遥操作异常已静默")
 
@@ -182,8 +168,7 @@ class Teleoperation:
             precise_sleep(interval - elapsed)
 
         logger.info(
-            "遥操作控制循环停止 (已发送 %d 帧, %d 次异常)",
-            self._loop_count, self._error_count,
+            f"遥操作控制循环停止 (已发送 {self._loop_count} 帧, {self._error_count} 次异常)"
         )
 
     # ========== 公开接口 ==========
@@ -199,7 +184,6 @@ class Teleoperation:
             return
 
         logger.info("禁用 leader 力矩以自由拖动...")
-        self.leader.torque_control('off')
 
         self._loop_count = 0
         self._error_count = 0
@@ -218,7 +202,6 @@ class Teleoperation:
             self._thread = None
 
         logger.info("恢复 leader 力矩...")
-        self.leader.torque_control('on')
 
     def run_interactive(self) -> None:
         """交互式运行: 启动遥操作，等待用户按 Enter 或 Ctrl+C 停止"""

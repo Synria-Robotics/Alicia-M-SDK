@@ -9,8 +9,8 @@ MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分�
 import argparse
 import time
 import alicia_m_sdk
-from demo_common import add_port_argument
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from _common import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
@@ -32,6 +32,14 @@ def main():
     beauty_print(f"机器人连接成功（当前 {robot.control_mode.value.upper()} 模式）", type="success")
 
     try:
+        beauty_print("初始化 MIT 阻抗增益（读取当前 Kp/Kd 并线性过渡）...", type="info")
+        robot.initialize_mit_gains(
+            kp=MIT_KP,
+            kd=MIT_KD,
+            torque=MIT_TORQUE,
+            vel_ref=MIT_VEL_REF,
+        )
+
         # --- 半开夹爪 (500) ---
         beauty_print("移动夹爪到半开 (500)...", type="info")
         robot.set_robot_state(

@@ -9,32 +9,33 @@
 - 输入超限时优先裁剪+警告（而非直接拒绝）
 """
 
-import logging
+import math
 import time
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 from ..hardware.device import Device
-from ..protocol.constants import (
+from ..hardware.constants import (
     CMD_TORQUE, CMD_ENABLE, CMD_MOTOR_PARAM, CMD_ZERO_RESET,
     CTRL_MODE_MIT, CTRL_MODE_PV,
     MOTOR_PARAM_CTRL_MODE,
     NUM_JOINTS, NUM_MOTORS,
     DEFAULT_KP_LARGE, DEFAULT_KD_LARGE,
     DEFAULT_KP_SMALL, DEFAULT_KD_SMALL,
-    ZERO_RESET_STRONG,
+    POLL_ADDR_EXTENDED,
+    ZERO_RESET_STRONG, ZERO_RESET_WEAK,
 )
-from ..protocol.messages import (
+from ..hardware.messages import (
     TorqueRequest, EnableRequest, MotorParamRequest, ZeroResetRequest,
 )
 from ..types.enums import ControlMode
 from ..types.state import MitParams
 from ..types.exceptions import RobotStateError, ValidationError
 from ..utils.conversion import speed_user_to_firmware
+from ..utils.timing import precise_sleep
 from ..utils.validation import (
     validate_joint_angles, validate_speed, validate_gripper_value,
 )
-
-logger = logging.getLogger(__name__)
+from ..utils.beauty_logger import logger
 
 # MIT 默认增益查表（按电机索引）
 # M0~M2 大关节, M3~M6 小关节（含夹爪）
@@ -55,13 +56,10 @@ def _fill_mit_defaults(motor_index: int, kp: Optional[float],
     - 0 → 保持为 0（零力矩 / 卸力），不做填充
     - 具体数值 → 直接使用
 
-    Args:
-        motor_index: 电机编号 (0~6)
-        kp: 用户传入的 Kp，None 表示使用默认
-        kd: 用户传入的 Kd，None 表示使用默认
-
-    Returns:
-        (filled_kp, filled_kd) 填充后的增益值
+    :param motor_index, 电机编号 (0~6)
+    :param kp, 用户传入的 Kp，None 表示使用默认
+    :param kd, 用户传入的 Kd，None 表示使用默认
+    :return, (filled_kp, filled_kd) 填充后的增益值
     """
     filled_kp = _DEFAULT_KP[motor_index] if kp is None else kp
     filled_kd = _DEFAULT_KD[motor_index] if kd is None else kd
@@ -69,7 +67,7 @@ def _fill_mit_defaults(motor_index: int, kp: Optional[float],
 
 
 def _normalize_mit_param(
-    value: Optional[Union[float, List[Optional[float]]]],
+    value: Optional[Union[float, Sequence[Optional[float]]]],
     name: str,
     default: Optional[float] = None,
 ) -> List[Optional[float]]:
@@ -81,16 +79,10 @@ def _normalize_mit_param(
     - 列表: 长度 6（仅关节，夹爪使用默认值）或 7（含夹爪），
             列表中的 None 元素表示该电机使用默认值
 
-    Args:
-        value: MIT 参数值 — None / 标量 / 列表
-        name: 参数名称（用于异常消息）
-        default: 列表中 None 元素的替换值，None 表示保留 None（由下游填充）
-
-    Returns:
-        长度 NUM_MOTORS 的列表，None 元素表示使用默认值
-
-    Raises:
-        ValidationError: 列表长度不合法
+    :param value, MIT 参数值 — None / 标量 / 列表
+    :param name, 参数名称（用于异常消息）
+    :param default, 列表中 None 元素的替换值，None 表示保留 None（由下游填充）
+    :return, 长度 NUM_MOTORS 的列表，None 元素表示使用默认值
     """
     if value is None:
         return [default] * NUM_MOTORS
@@ -108,17 +100,40 @@ def _normalize_mit_param(
     return result
 
 
+def _normalize_mit_param_with_default(
+    value: Optional[Union[float, Sequence[Optional[float]]]],
+    name: str,
+    default: float,
+) -> List[float]:
+    """Normalize a MIT parameter list and replace all None values."""
+    normalized = _normalize_mit_param(value, name, default=default)
+    return [float(v if v is not None else default) for v in normalized]
+
+
+def _filled_mit_gain_list(
+    value: Optional[Union[float, Sequence[Optional[float]]]],
+    name: str,
+    defaults: List[float],
+) -> List[float]:
+    """按电机编号填充 MIT 增益默认值"""
+    normalized = _normalize_mit_param(value, name)
+    result: List[float] = []
+    for i in range(NUM_MOTORS):
+        v = normalized[i]
+        result.append(v if v is not None else defaults[i])
+    return result
+
+
 class JointController:
     """关节级运动控制
 
     提供 PV 模式和 MIT 模式的独立控制方法，以及两种模式共用的通用方法。
     模式切换采用失能→切换→使能流程，固件侧处理目标位置初始化。
 
-    Args:
-        device: 设备抽象层实例（通过 Device 发送指令，读取状态缓存）
-        control_mode: 初始控制模式 ('pv' / 'mit')
-        joint_limits_lower: 各关节角度下限 (rad)，None 使用默认值
-        joint_limits_upper: 各关节角度上限 (rad)，None 使用默认值
+    :param device, 设备抽象层实例（通过 Device 发送指令，读取状态缓存）
+    :param control_mode, 初始控制模式 ('pv' / 'mit')
+    :param joint_limits_lower, 各关节角度下限 (rad)，None 使用默认值
+    :param joint_limits_upper, 各关节角度上限 (rad)，None 使用默认值
     """
 
     def __init__(
@@ -134,8 +149,8 @@ class JointController:
             self._mode = ControlMode(control_mode.lower())
         else:
             self._mode = control_mode
-        self._joint_limits_lower = joint_limits_lower or _DEFAULT_JOINT_LIMITS_LOWER
-        self._joint_limits_upper = joint_limits_upper or _DEFAULT_JOINT_LIMITS_UPPER
+        self._joint_limits_lower = list(joint_limits_lower or _DEFAULT_JOINT_LIMITS_LOWER)
+        self._joint_limits_upper = list(joint_limits_upper or _DEFAULT_JOINT_LIMITS_UPPER)
 
     # ========== 属性 ==========
 
@@ -169,16 +184,13 @@ class JointController:
         发送目标位置+速度，固件内部做加减速插值。
         速度为无量纲值，SDK 根据运动方向自动计算有符号速度。
 
-        Args:
-            target_joints: 目标角度 (rad), 6 个关节
-            speed: 运动速度，无量纲 [0, 400]，映射到 [0, 10] rad/s
-            gripper: 夹爪目标值 [0, 1000]，None 表示不控制
-            gripper_speed: 夹爪速度 [0, 400]
-            wait: 是否阻塞等待到达
-            timeout: 等待超时 (秒)
-
-        Returns:
-            True=到达目标 / False=超时
+        :param target_joints, 目标角度 (rad), 6 个关节
+        :param speed, 运动速度，无量纲 [0, 400]，映射到 [0, 10] rad/s
+        :param gripper, 夹爪目标值 [0, 1000]，None 表示不控制
+        :param gripper_speed, 夹爪速度 [0, 400]
+        :param wait, 是否阻塞等待到达
+        :param timeout, 等待超时 (秒)
+        :return, True=到达目标 / False=超时
         """
         # 参数校验与裁剪
         target_joints = list(target_joints)
@@ -221,7 +233,7 @@ class JointController:
 
         # 发送 PV 帧
         self._device.send_pv(self._device.aim, positions, velocities)
-        logger.debug("PV 帧已发送: pos=%s, vel=%s", positions, velocities)
+        logger.debug(f"PV 帧已发送: pos={positions}, vel={velocities}")
 
         if wait:
             t0 = time.perf_counter()
@@ -232,6 +244,30 @@ class JointController:
                 gripper_ok = self._wait_for_gripper(gripper, timeout=remaining)
                 return joint_ok and gripper_ok
             return joint_ok
+        return True
+
+    def set_linear_interpolation_velocity(
+        self,
+        velocity_rad_s: Union[float, List[float]] = 2.0,
+    ) -> bool:
+        """一次性配置固件线性轨迹插值速度.
+
+        发送 0x06 写帧，start_addr=ADDR_LINEAR_VEL，addr_count=1。
+        速度单位为 rad/s，范围按协议裁剪到 [0, 10]。
+        """
+        if isinstance(velocity_rad_s, (int, float)):
+            velocities = [float(velocity_rad_s)] * NUM_MOTORS
+        else:
+            velocities = [float(v) for v in velocity_rad_s]
+
+        if len(velocities) != NUM_MOTORS:
+            raise ValidationError(
+                f"线性插值速度数量错误: 期望 {NUM_MOTORS}, 实际 {len(velocities)}"
+            )
+
+        velocities = [max(0.0, min(10.0, v)) for v in velocities]
+        self._device.send_linear_velocity(self._device.aim, velocities)
+        logger.debug(f"Linear interpolation velocity frame sent: {velocities}")
         return True
 
     # ========== MIT 模式 ==========
@@ -246,9 +282,8 @@ class JointController:
         发送一帧 6 地址 MIT 帧（线性速度填清零信号）。不做等待，不做插值。
         用于遥操作、力控、轨迹回放等需要持续高频发帧的场景。
 
-        Args:
-            joint_params: 7 个电机的 MIT 参数 (pos, vel, torque, kp, kd)
-            gripper: 夹爪目标值 [0, 1000]，为 None 时使用 joint_params[6].pos_ref
+        :param joint_params, 7 个电机的 MIT 参数 (pos, vel, torque, kp, kd)
+        :param gripper, 夹爪目标值 [0, 1000]，为 None 时使用 joint_params[6].pos_ref
         """
         if len(joint_params) != NUM_MOTORS:
             raise ValidationError(
@@ -280,7 +315,94 @@ class JointController:
             )
 
         self._device.send_mit(self._device.aim, filled_params)
-        logger.debug("MIT 帧已发送: %s", filled_params)
+        logger.debug(f"MIT 帧已发送: {filled_params}")
+
+    def initialize_mit_gains(
+        self,
+        kp: Optional[Union[float, List[float]]] = None,
+        kd: Optional[Union[float, List[float]]] = None,
+        torque: Optional[Union[float, List[float]]] = None,
+        vel_ref: Optional[Union[float, List[float]]] = None,
+        duration: float = 1.0,
+        frequency_hz: float = 50.0,
+        read_timeout: float = 1.0,
+    ) -> bool:
+        """@brief 在 MIT 运动前线性初始化 Kp/Kd。
+
+        @details
+        读取机械臂当前 Kp/Kd，与目标增益逐电机比较，并在保持当前位置的
+        情况下按固定频率线性过渡到目标值。该流程适合 demo 或产品启动
+        阶段使用，避免第一帧 MIT 命令直接写入较大增益造成电机跳动。
+        如果固件不支持扩展状态读回，SDK 会记录警告并从 0 开始平滑过渡。
+
+        @param kp 目标位置增益 [0, 500]。None 使用 SDK 默认值；标量广播；
+            长度 6/7 的列表表示逐电机设置。
+        @param kd 目标速度增益 [0, 5]。格式同 kp。
+        @param torque 预热帧使用的前馈力矩。None 表示 0。
+        @param vel_ref 预热帧使用的速度参考。None 表示 0。
+        @param duration 线性过渡时长，单位秒；0 表示只发送最终目标增益。
+        @param frequency_hz 过渡帧发送频率，单位 Hz。
+        @param read_timeout 读取当前 Kp/Kd 的最长等待时间，单位秒。
+        @return True 表示预热帧已发送完成。
+        @throws RobotStateError 当前状态缓存不可用时抛出。
+        @throws ValidationError 参数长度或时间参数不合法时抛出。
+        """
+        if duration < 0.0:
+            raise ValidationError("MIT 增益初始化 duration 不能为负数")
+        if frequency_hz <= 0.0:
+            raise ValidationError("MIT 增益初始化 frequency_hz 必须大于 0")
+        if read_timeout < 0.0:
+            raise ValidationError("MIT 增益初始化 read_timeout 不能为负数")
+
+        state = self._device.joint_state
+        if state is None or len(state.angles) < NUM_JOINTS:
+            raise RobotStateError(
+                "无法初始化 MIT 增益: 当前关节状态不可用"
+            )
+
+        target_kps = _filled_mit_gain_list(kp, "kp", _DEFAULT_KP)
+        target_kds = _filled_mit_gain_list(kd, "kd", _DEFAULT_KD)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
+
+        current_kps, current_kds = self._read_current_mit_gains(read_timeout)
+
+        state = self._device.joint_state or state
+        positions = list(state.angles[:NUM_JOINTS]) + [state.gripper]
+        max_kp_delta = max(
+            abs(target_kps[i] - current_kps[i]) for i in range(NUM_MOTORS)
+        )
+        max_kd_delta = max(
+            abs(target_kds[i] - current_kds[i]) for i in range(NUM_MOTORS)
+        )
+        already_ready = max_kp_delta < 1e-3 and max_kd_delta < 1e-4
+        steps = 1 if already_ready or duration == 0.0 else max(
+            1, int(math.ceil(duration * frequency_hz))
+        )
+        interval = duration / steps if steps > 0 else 0.0
+
+        logger.info(
+            f"初始化 MIT 增益: max ΔKp={max_kp_delta:.3f}, max ΔKd={max_kd_delta:.4f}, steps={steps}"
+        )
+
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            mit_params = []
+            for i in range(NUM_MOTORS):
+                mit_params.append(MitParams(
+                    pos_ref=positions[i],
+                    vel_ref=float(vel_refs[i] or 0.0),
+                    t_ref=float(torques[i] or 0.0),
+                    kp=current_kps[i] + (target_kps[i] - current_kps[i]) * ratio,
+                    kd=current_kds[i] + (target_kds[i] - current_kds[i]) * ratio,
+                ))
+
+            self._device.send_mit(self._device.aim, mit_params)
+            if step < steps and interval > 0.0:
+                precise_sleep(interval)
+
+        logger.info("MIT 增益初始化完成")
+        return True
 
     def move_mit(
         self,
@@ -307,23 +429,18 @@ class JointController:
 
         MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 
-        Args:
-            target_joints: 目标角度 (rad), 6 个关节
-            speed: 运动速度 [0, 400]，仅 use_interpolation=True 时生效
-            gripper: 夹爪目标值 [0, 1000]，None 表示不控制
-            gripper_speed: 夹爪速度 [0, 400]，仅 use_interpolation=True 时生效
-            wait: 是否阻塞等待到达，仅 use_interpolation=True 时生效
-            timeout: 等待超时 (秒)
-            use_interpolation: 是否使用线性轨迹插值
-            kp: 位置增益 [0, 500]。None=使用默认值，
-                float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
-            kd: 速度增益 [0, 5]。格式同 kp。
-            torque: 前馈力矩 (N·m)。None=默认 0，
-                float=广播，List[float] 逐电机设置。
-            vel_ref: 目标速度 (rad/s)。格式同 torque。
-
-        Returns:
-            True=到达目标 / False=超时
+        :param target_joints, 目标角度 (rad), 6 个关节
+        :param speed, 运动速度 [0, 400]，仅 use_interpolation=True 时生效
+        :param gripper, 夹爪目标值 [0, 1000]，None 表示不控制
+        :param gripper_speed, 夹爪速度 [0, 400]，仅 use_interpolation=True 时生效
+        :param wait, 是否阻塞等待到达，仅 use_interpolation=True 时生效
+        :param timeout, 等待超时 (秒)
+        :param use_interpolation, 是否使用线性轨迹插值
+        :param kp, 位置增益 [0, 500]。None=使用默认值， float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+        :param kd, 速度增益 [0, 5]。格式同 kp。
+        :param torque, 前馈力矩 (N·m)。None=默认 0， float=广播，List[float] 逐电机设置。
+        :param vel_ref, 目标速度 (rad/s)。格式同 torque。
+        :return, True=到达目标 / False=超时
         """
         # 参数校验
         target_joints = list(target_joints)
@@ -355,8 +472,8 @@ class JointController:
         # torque/vel_ref: None → 0.0，无需按电机区分
         kps = _normalize_mit_param(kp, "kp")
         kds = _normalize_mit_param(kd, "kd")
-        torques = _normalize_mit_param(torque, "torque", default=0.0)
-        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
 
         # 步骤3: 构建 MIT 帧（始终 6 地址）
         #   插值模式: 线性速度为用户指定值
@@ -389,8 +506,9 @@ class JointController:
         self._device.send_mit(
             self._device.aim, mit_params, linear_velocities=linear_vels,
         )
-        logger.debug("MIT 帧已发送: target=%s, interpolation=%s",
-                     target_joints, use_interpolation)
+        logger.debug(
+            f"MIT 帧已发送: target={target_joints}, interpolation={use_interpolation}"
+        )
 
         # 步骤4: 等待到达（仅插值模式；直接 PD 控制不精确收敛，不等待）
         # MIT PD 控制器存在稳态误差，容差需大于 PV 模式
@@ -412,11 +530,8 @@ class JointController:
     def go_home(self, speed: float = 40.0) -> bool:
         """回零位（自动适配当前模式）
 
-        Args:
-            speed: 运动速度 [0, 400]
-
-        Returns:
-            True=到达零位 / False=超时
+        :param speed, 运动速度 [0, 400]
+        :return, True=到达零位 / False=超时
         """
         zero_joints = [0.0] * NUM_JOINTS
         if self._mode == ControlMode.PV:
@@ -442,28 +557,23 @@ class JointController:
 
         注意: 始终发送 6 地址帧，不使用插值时线性速度填充清零信号 (0xFFFF)。
 
-        Args:
-            value: 夹爪目标值 [0=关闭, 1000=打开]
-            speed: 夹爪速度 [0, 400]
-            wait: 是否阻塞等待到达
-            timeout: 等待超时 (秒)
-            kp: 位置增益 [0, 500]。None=使用默认值，
-                float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
-            kd: 速度增益 [0, 5]。格式同 kp。
-            torque: 前馈力矩 (N·m)。None=默认 0，
-                float=广播，List[float] 逐电机设置。
-            vel_ref: 目标速度 (rad/s)。格式同 torque。
-
-        Returns:
-            True=到达目标 / False=超时
+        :param value, 夹爪目标值 [0=关闭, 1000=打开]
+        :param speed, 夹爪速度 [0, 400]
+        :param wait, 是否阻塞等待到达
+        :param timeout, 等待超时 (秒)
+        :param kp, 位置增益 [0, 500]。None=使用默认值， float=广播至所有电机，List[float] 长度 6 或 7 逐电机设置。
+        :param kd, 速度增益 [0, 5]。格式同 kp。
+        :param torque, 前馈力矩 (N·m)。None=默认 0， float=广播，List[float] 逐电机设置。
+        :param vel_ref, 目标速度 (rad/s)。格式同 torque。
+        :return, True=到达目标 / False=超时
         """
         value = validate_gripper_value(value)
 
         # 标准化 MIT 参数为逐电机列表
         kps = _normalize_mit_param(kp, "kp")
         kds = _normalize_mit_param(kd, "kd")
-        torques = _normalize_mit_param(torque, "torque", default=0.0)
-        vel_refs = _normalize_mit_param(vel_ref, "vel_ref", default=0.0)
+        torques = _normalize_mit_param_with_default(torque, "torque", default=0.0)
+        vel_refs = _normalize_mit_param_with_default(vel_ref, "vel_ref", default=0.0)
 
         # 读取当前关节位置，保持不变
         current = self._get_current_angles()
@@ -513,13 +623,10 @@ class JointController:
     ) -> bool:
         """轮询状态缓存等待夹爪到达目标
 
-        Args:
-            target: 夹爪目标值 [0, 1000]
-            tolerance: 到达判定阈值
-            timeout: 超时时间 (秒)
-
-        Returns:
-            True=到达目标 / False=超时
+        :param target, 夹爪目标值 [0, 1000]
+        :param tolerance, 到达判定阈值
+        :param timeout, 超时时间 (秒)
+        :return, True=到达目标 / False=超时
         """
         POLL_INTERVAL = 0.02
         deadline = time.perf_counter() + timeout
@@ -531,81 +638,166 @@ class JointController:
                     return True
             time.sleep(POLL_INTERVAL)
 
-        logger.warning("等待夹爪到达目标超时 (%.1fs)", timeout)
+        logger.warning(f"等待夹爪到达目标超时 ({timeout:.1f}s)")
         return False
+
+    def _read_current_mit_gains(
+        self,
+        timeout: float,
+    ) -> Tuple[List[float], List[float]]:
+        """读取当前 MIT Kp/Kd，失败时返回保守起点"""
+        previous_count = self._device.poll_addr_count
+        request_time = time.time()
+        cached_gains: Optional[Tuple[List[float], List[float]]] = None
+
+        if previous_count != POLL_ADDR_EXTENDED:
+            self._device.set_poll_addr_count(POLL_ADDR_EXTENDED)
+
+        try:
+            deadline = time.perf_counter() + timeout
+            while True:
+                state = self._device.joint_state
+                if (
+                    state is not None
+                    and state.kps is not None
+                    and state.kds is not None
+                    and len(state.kps) >= NUM_MOTORS
+                    and len(state.kds) >= NUM_MOTORS
+                ):
+                    gains = (
+                        list(state.kps[:NUM_MOTORS]),
+                        list(state.kds[:NUM_MOTORS]),
+                    )
+                    if state.timestamp >= request_time:
+                        return gains
+                    cached_gains = gains
+                if timeout == 0.0 or time.perf_counter() >= deadline:
+                    break
+                time.sleep(0.01)
+        finally:
+            if previous_count != POLL_ADDR_EXTENDED:
+                self._device.set_poll_addr_count(previous_count)
+
+        if cached_gains is not None:
+            logger.warning(
+                "未获取到新的 MIT Kp/Kd 状态，使用缓存值进行增益初始化"
+            )
+            return cached_gains
+
+        logger.warning(
+            "无法读取当前 MIT Kp/Kd，使用 0 作为线性初始化起点"
+        )
+        return [0.0] * NUM_MOTORS, [0.0] * NUM_MOTORS
 
     # ========== 力矩与使能 ==========
 
     def torque_off(self, joints: Optional[List[int]] = None) -> bool:
-        """卸载力矩（仅 MIT 模式，发送 0x05 指令）
+        """卸载力矩（MIT 零阻抗实现）
 
-        原理: 将指定关节的 kp=kd 置零，使其自由运动。
-        未指定的关节保持原有 kp/kd，继续锁定。
-        如果当前为 PV 模式，先自动切换到 MIT。
+        通过发送 MIT 全参数帧，将目标关节 kp/kd/t_ref/vel_ref 置零，
+        并保持当前位置为 pos_ref，达到可拖动的零阻抗效果。
+        若当前模式不是 MIT，会自动切换至 MIT 模式。
 
-        Args:
-            joints: 需要卸力的关节索引列表 (0~5)，None 表示全部关节
-
-        Returns:
-            True=指令发送成功
+        :param joints, 需要卸力的关节索引列表 (0~5)，None 表示全部关节（含夹爪）
+        :return, True=指令发送成功
         """
-        # 如果不在 MIT 模式，自动切换
         if self._mode != ControlMode.MIT:
             self.switch_mode(ControlMode.MIT)
 
-        # 确定卸力关节范围（固件使用 1-indexed: 1~7）
-        if joints is None:
-            start_joint = 1
-            joint_count = NUM_MOTORS
-        else:
-            start_joint = min(joints) + 1  # 0-indexed → 1-indexed
-            joint_count = max(joints) - min(joints) + 1
+        state = self._device.joint_state
+        if state is None:
+            raise RobotStateError("无状态缓存，无法执行 torque_off")
 
-        # 发送 0x05 卸力指令
-        frame = self._device.codec.encode_torque_request(TorqueRequest(
-            aim=self._device.aim,
-            start_joint=start_joint,
-            joint_count=joint_count,
-        ))
-        self._device.send_frame(frame)
-        time.sleep(0.05)
+        q_cur = list(state.angles)
+        g_cur = state.gripper
+        selected = set(range(NUM_MOTORS)) if joints is None else set(int(j) for j in joints)
+        # If caller requests all joints (0~5), include gripper as well for full zero-impedance.
+        if joints is not None and all(j in selected for j in range(NUM_JOINTS)):
+            selected.add(NUM_JOINTS)
 
-        logger.info("卸力完成: joints=%s", joints or "全部")
+        kps = []
+        kds = []
+        torques = []
+        vel_refs = []
+        for i in range(NUM_MOTORS):
+            if i in selected:
+                kps.append(0.0)
+                kds.append(0.0)
+            else:
+                kps.append(None)
+                kds.append(None)
+            torques.append(0.0)
+            vel_refs.append(0.0)
+
+        self.move_mit(
+            target_joints=q_cur,
+            speed=5.0,
+            gripper=g_cur,
+            wait=False,
+            use_interpolation=False,
+            kp=kps,
+            kd=kds,
+            torque=torques,
+            vel_ref=vel_refs,
+        )
+        logger.info(f"卸力完成(MIT零阻抗): joints={joints or '全部'}")
         return True
 
     def torque_on(self, joints: Optional[List[int]] = None) -> bool:
-        """恢复力矩（仅 MIT 模式，发送 0x05 指令）
+        """恢复力矩（MIT 默认阻抗实现）
 
-        Args:
-            joints: 需要恢复力矩的关节索引列表，None 表示全部
+        通过发送 MIT 全参数帧，将目标关节 kp/kd 恢复为默认值，
+        并保持当前位置为 pos_ref，避免恢复时产生突跳。
+        若当前模式不是 MIT，会自动切换至 MIT 模式。
 
-        Returns:
-            True=成功恢复
+        :param joints, 需要恢复力矩的关节索引列表，None 表示全部（含夹爪）
+        :return, True=成功恢复
         """
-        # 发送 0x05 恢复力矩指令（固件 1-indexed: 1~7）
-        if joints is None:
-            start_joint = 1
-            joint_count = NUM_MOTORS
-        else:
-            start_joint = min(joints) + 1
-            joint_count = max(joints) - min(joints) + 1
+        if self._mode != ControlMode.MIT:
+            self.switch_mode(ControlMode.MIT)
 
-        frame = self._device.codec.encode_torque_request(TorqueRequest(
-            aim=self._device.aim,
-            start_joint=start_joint,
-            joint_count=joint_count,
-        ))
-        self._device.send_frame(frame)
-        time.sleep(0.05)
+        state = self._device.joint_state
+        if state is None:
+            raise RobotStateError("无状态缓存，无法执行 torque_on")
 
-        logger.info("力矩恢复完成: joints=%s", joints or "全部")
+        q_cur = list(state.angles)
+        g_cur = state.gripper
+        selected = set(range(NUM_MOTORS)) if joints is None else set(int(j) for j in joints)
+        if joints is not None and all(j in selected for j in range(NUM_JOINTS)):
+            selected.add(NUM_JOINTS)
+
+        kps = []
+        kds = []
+        torques = []
+        vel_refs = []
+        for i in range(NUM_MOTORS):
+            if i in selected:
+                kps.append(None)
+                kds.append(None)
+            else:
+                kps.append(0.0)
+                kds.append(0.0)
+            torques.append(0.0)
+            vel_refs.append(0.0)
+
+        self.move_mit(
+            target_joints=q_cur,
+            speed=5.0,
+            gripper=g_cur,
+            wait=False,
+            use_interpolation=False,
+            kp=kps,
+            kd=kds,
+            torque=torques,
+            vel_ref=vel_refs,
+        )
+        logger.info(f"力矩恢复完成(MIT默认阻抗): joints={joints or '全部'}")
         return True
 
     def enable(self) -> bool:
         """使能机器人（发送 0x09 指令，任何模式可用）
 
-        Returns:
-            True=使能成功
+        :return, True=使能成功
         """
         frame = self._device.codec.encode_enable_request(EnableRequest(
             aim=self._device.aim,
@@ -620,8 +812,7 @@ class JointController:
     def disable(self) -> bool:
         """失能机器人（发送 0x09 指令，任何模式可用）
 
-        Returns:
-            True=失能成功
+        :return, True=失能成功
         """
         frame = self._device.codec.encode_enable_request(EnableRequest(
             aim=self._device.aim,
@@ -644,23 +835,17 @@ class JointController:
         3. 读回验证（失败重试一次）
         4. 使能所有电机
 
-        Args:
-            mode: 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
-
-        Returns:
-            True=切换成功
+        :param mode, 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
+        :return, True=切换成功
         """
         if isinstance(mode, str):
             mode = ControlMode(mode.lower())
 
         if mode == self._mode:
-            logger.debug("已处于 %s 模式，无需切换", mode.value)
+            logger.debug(f"已处于 {mode.value} 模式，无需切换")
             return True
 
-        logger.warning(
-            "即将切换控制模式: %s → %s",
-            self._mode.value, mode.value,
-        )
+        logger.warning(f"即将切换控制模式: {self._mode.value} → {mode.value}")
 
         # 步骤1: 失能所有电机
         self.disable()
@@ -694,7 +879,7 @@ class JointController:
         self.enable()
         time.sleep(0.2)
 
-        logger.info("控制模式已切换: %s → %s", old_mode.value, mode.value)
+        logger.info(f"控制模式已切换: {old_mode.value} → {mode.value}")
         return True
 
     def _send_mode_switch_command(self, ctrl_mode_value: int) -> None:
@@ -718,7 +903,7 @@ class JointController:
             self._device.flush()
             values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
             if values is None or len(values) < NUM_JOINTS:
-                logger.debug("模式验证第 %d 次查询未获得有效响应", attempt + 1)
+                logger.debug(f"模式验证第 {attempt + 1} 次查询未获得有效响应")
                 time.sleep(0.5)
                 continue
             # 检查所有关节电机是否已切换
@@ -726,29 +911,40 @@ class JointController:
             if not mismatched:
                 return True
             for i in mismatched:
-                logger.debug("电机 M%d 模式未切换: 期望 0x%02X, 实际 0x%02X",
-                             i, expected_value, values[i])
+                logger.debug(
+                    f"电机 M{i} 模式未切换: 期望 0x{expected_value:02X}, 实际 0x{values[i]:02X}"
+                )
             time.sleep(0.5)
 
         logger.warning("模式验证失败: 多次查询均未确认切换成功")
         return False
 
-    def set_zero_position(self) -> bool:
+    def set_zero_position(self, mode: str = "strong") -> bool:
         """设置当前位姿为零位（发送 0x03 指令）
 
-        Returns:
-            True=设置成功
+        :param mode, "strong"=强调零, "weak"=弱调零
+        :return, True=设置成功
         """
+        mode_key = mode.lower()
+        if mode_key == "strong":
+            reset_mode = ZERO_RESET_STRONG
+            mode_name = "强调零"
+        elif mode_key == "weak":
+            reset_mode = ZERO_RESET_WEAK
+            mode_name = "弱调零"
+        else:
+            raise ValidationError("调零模式只支持 'strong' 或 'weak'")
+
         frame = self._device.codec.encode_zero_reset(ZeroResetRequest(
             aim=self._device.aim,
             start_joint=0,
             joint_count=NUM_MOTORS,
-            reset_mode=ZERO_RESET_STRONG,
+            reset_mode=reset_mode,
         ))
         self._device.send_frame(frame)
         time.sleep(0.1)  # 等待固件处理零位标定
 
-        logger.info("强调零完成")
+        logger.info(f"{mode_name}完成")
         return True
 
     # ========== 等待到达 ==========
@@ -764,13 +960,10 @@ class JointController:
         实现策略: 固定间隔轮询（非 busy-wait），读状态缓存比较误差。
         不阻塞串口通信 — 只读内存中的 StateCache，不发 I/O。
 
-        Args:
-            target: 目标关节角度 (rad), 6 个关节
-            tolerance: 到达判定阈值 (rad)
-            timeout: 超时时间 (秒)
-
-        Returns:
-            True=到达目标 / False=超时
+        :param target, 目标关节角度 (rad), 6 个关节
+        :param tolerance, 到达判定阈值 (rad)
+        :param timeout, 超时时间 (秒)
+        :return, True=到达目标 / False=超时
         """
         POLL_INTERVAL = 0.01  # 10ms 轮询间隔
         deadline = time.perf_counter() + timeout
@@ -785,7 +978,7 @@ class JointController:
                     return True
             time.sleep(POLL_INTERVAL)
 
-        logger.warning("等待到达目标超时 (%.1fs)", timeout)
+        logger.warning(f"等待到达目标超时 ({timeout:.1f}s)")
         return False
 
     # ========== 内部辅助方法 ==========
@@ -793,11 +986,7 @@ class JointController:
     def _get_current_angles(self) -> List[float]:
         """读取当前关节角度（从状态缓存）
 
-        Returns:
-            6 个关节的当前角度 (rad)
-
-        Raises:
-            RobotStateError: 状态缓存不可用（串口未连接或状态尚未获取）
+        :return, 6 个关节的当前角度 (rad)
         """
         state = self._device.joint_state
         if state is None:
@@ -817,13 +1006,10 @@ class JointController:
         根据目标与当前位置的差值确定运动方向，
         用户速度 [0, 400] → 固件速度 [0, 10] rad/s → 加方向符号。
 
-        Args:
-            target: 目标角度 (rad), 6 个关节
-            current: 当前角度 (rad), 6 个关节
-            speeds: 用户速度列表 [0, 400], 6 个关节
-
-        Returns:
-            有符号速度列表 (rad/s), 6 个元素
+        :param target, 目标角度 (rad), 6 个关节
+        :param current, 当前角度 (rad), 6 个关节
+        :param speeds, 用户速度列表 [0, 400], 6 个关节
+        :return, 有符号速度列表 (rad/s), 6 个元素
         """
         velocities = []
         for i in range(NUM_JOINTS):
@@ -835,4 +1021,3 @@ class JointController:
                 sign = 1.0 if diff > 0 else -1.0
             velocities.append(sign * magnitude)
         return velocities
-
