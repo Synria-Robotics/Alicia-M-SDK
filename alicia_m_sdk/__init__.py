@@ -40,9 +40,10 @@ from .types.exceptions import (
     MotionError,
 )
 from .utils.beauty_logger import logger, LogLevel
+from .utils.model_resolver import load_robot_model as _load_robot_model
 def create_robot(
     port: str = "",
-    version: str = "v1_1",
+    version: str = "auto",
     variant: Optional[str] = None,
     control_aim: Optional[str] = None,
     control_mode: Optional[str] = None,
@@ -57,21 +58,24 @@ def create_robot(
 
     初始化顺序（与 Alicia-D-SDK 保持一致）:
     1. 设置 RoboCore 计算后端
-    2. 加载机器人 URDF 模型（立即初始化，避免首次调用延迟）
+    2. 加载机器人 URDF 模型（仅在 version 显式指定时立即加载；
+       ``version="auto"`` 时延迟到连接成功后由 SDK 根据固件硬件版本自动选取）
     3. 创建 SynriaRobotAPI 实例
     4. 自动连接（可选）
 
-    :param port, 串口端口路径，空字符串表示自动发现
-    :param version, 机器人硬件版本 ("v1_0", "v1_1")
-    :param variant, 变体标识（None=自动检测）
-    :param control_aim, 控制目标 ("leader"/"follower"/None=自动检测)
-    :param control_mode, 控制模式 ("pv"/"mit"/None=检测固件当前模式)
-    :param baudrate, 串口波特率
-    :param backend, RoboCore 计算后端 ("numpy"/"torch"/"cpp")；"cpp" 需要 synria-robocore 2.5.0+ 且已编译 C++ 扩展
-    :param debug_mode, 调试模式（启用 DEBUG 级别日志）
-    :param auto_connect, 是否自动连接
-    :param extended_polling, 扩展轮询（查询插补速度、温度等，需新固件支持）
-    :return, SynriaRobotAPI 实例
+    :param port: 串口端口路径，空字符串表示自动发现
+    :param version: 硬件版本。``"auto"``（默认）表示连接后从固件自动识别，
+        也可显式指定 ``"v1_0"``、``"v1_1"``、``"v1_2"`` 等跳过自动检测。
+    :param variant: URDF 变体（None=自动默认 "follower"）
+    :param control_aim: 控制目标 (``"leader"``/``"follower"``/None=自动检测)
+    :param control_mode: 控制模式 (``"pv"``/``"mit"``/None=检测固件当前模式)
+    :param baudrate: 串口波特率
+    :param backend: RoboCore 计算后端 (``"numpy"``/``"torch"``/``"cpp"``);
+        ``"cpp"`` 需要 synria-robocore 2.5.0+ 且已编译 C++ 扩展
+    :param debug_mode: 调试模式（启用 DEBUG 级别日志）
+    :param auto_connect: 是否自动连接
+    :param extended_polling: 扩展轮询（查询插补速度、温度等，需新固件支持）
+    :return: SynriaRobotAPI 实例
     """
     if debug_mode:
         logger.set_min_level(LogLevel.DEBUG)
@@ -85,19 +89,17 @@ def create_robot(
         rc.set_backend(backend)
 
         # 2. 加载机器人模型
-        from robocore.modeling import RobotModel as RobotModelClass
-        from synriard import get_model_path
-        # synriard 的 Alicia_M 模型必须指定 variant
-        model_variant = variant if variant else "follower"
-        model_path = get_model_path(
-            "Alicia_M", version=version,
-            variant=model_variant, model_format="urdf",
-        )
-        robot_model = RobotModelClass(
-            str(model_path),
-            base_link="base_link",
-            end_link="tool0",
-        )
+        # version="auto" 时跳过，connect() 握手后根据固件硬件版本自动选取。
+        # 显式指定版本时立即加载，与旧版行为一致（向后兼容）。
+        if version != "auto":
+            model_variant = variant if variant else "follower"
+            robot_model = _load_robot_model(
+                version=version,
+                variant=model_variant,
+                backend=backend,
+                base_link="base_link",
+                end_link="tool0",
+            )
     except ImportError:
         # RoboCore 或 synriard 不可用时，运动学功能不可用
         logger.warning("RoboCore / synriard is not installed; kinematics and planning are unavailable")

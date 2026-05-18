@@ -244,34 +244,50 @@ def manual_record_waypoints_with_torque_off(robot):
             beauty_print("已切回 PV 模式。", type="info")
 
 
-def auto_generate_waypoints(robot, robot_model, args):
-    """@brief 自动生成随机关节路点。"""
+def auto_generate_waypoints(
+    robot,
+    robot_model,
+    num_waypoints: int = 5,
+    joint_scale: float = 0.6,
+    use_current_joints: bool = False,
+    seed=666,
+):
+    """@brief 自动生成随机关节路点。
+
+    @param robot 机器人实例（用于读取当前关节角）。
+    @param robot_model RoboCore RobotModel（用于生成随机关节角）。
+    @param num_waypoints 路点数量，至少为 2。
+    @param joint_scale random_q 缩放系数。
+    @param use_current_joints 是否将当前关节角作为首个路点。
+    @param seed 随机种子。
+    @return 路点数组 [N, 6]。
+    """
     beauty_print("自动生成模式", type="module")
-    num_waypoints = max(2, args.num_waypoints)
+    num_waypoints = max(2, num_waypoints)
     beauty_print(f"生成路点数: {num_waypoints}", type="info")
 
     waypoints = []
-    if args.use_current_joints:
+    if use_current_joints:
         current = robot.get_robot_state("joint")
         if current is not None:
             waypoints.append(np.asarray(current, dtype=np.float64))
             beauty_print("首个路点使用当前关节角。", type="info")
 
-    seed = args.seed
+    _seed = seed
     while len(waypoints) < num_waypoints:
         if hasattr(robot_model, "random_q"):
-            q = robot_model.random_q(seed=seed, scale=args.joint_scale)
+            q = robot_model.random_q(seed=_seed, scale=joint_scale)
             q = np.asarray(q, dtype=np.float64)
         else:
-            rng = np.random.default_rng(seed)
+            rng = np.random.default_rng(_seed)
             q = rng.uniform(
                 low=np.deg2rad([-120, -120, -120, -170, -120, -170]),
                 high=np.deg2rad([120, 120, 120, 170, 120, 170]),
                 size=(6,),
             ).astype(np.float64)
         waypoints.append(q)
-        if seed is not None:
-            seed += 1
+        if _seed is not None:
+            _seed += 1
 
     return np.asarray(waypoints, dtype=np.float64)
 
@@ -300,3 +316,64 @@ def make_mapped_teleop_state_printer(frequency_hz: float):
             print(f"  [{count:6d}] 示教臂={leader_deg}  操作臂(映射)={follower_deg}  夹爪={gripper:.0f}")
 
     return _print_state
+
+
+def print_joint_state(device, continuous: bool = False, output_format: str = "deg") -> None:
+    """@brief 打印关节角度、速度和力矩。
+
+    @param device 硬件 Device 实例。
+    @param continuous 为 True 时持续打印，直到 Ctrl-C 中断。
+    @param output_format ``"deg"`` 或 ``"rad"``。
+    """
+    import math as _math
+    import time as _time
+
+    try:
+        from robocore.utils.beauty_logger import beauty_print as _rc_beauty_print
+        from robocore.utils.beauty_logger import beauty_print_array as _bpa
+
+        def _bp(content, type=None):
+            if type is None:
+                _rc_beauty_print(content)
+            else:
+                _rc_beauty_print(content, type=type)
+
+    except ImportError:
+        def _bp(content, type=None):
+            print(content)
+
+        def _bpa(arr, **kw):
+            return str(arr)
+
+    def _print_once():
+        state = device.joint_state
+        if state is None:
+            _bp("未获取到状态数据", type="warning")
+            return
+        angles = list(state.angles)
+        if output_format == "deg":
+            angles_display = [_math.degrees(a) for a in angles]
+            unit = "deg"
+        else:
+            angles_display = list(angles)
+            unit = "rad"
+        _bp(f"关节角度 ({unit}):")
+        print(f"  {_bpa(angles_display, precision=2)}")
+        _bp(f"夹爪: {state.gripper:.0f}")
+        if state.velocities:
+            _bp("速度 (rad/s):")
+            print(f"  {_bpa(state.velocities, precision=3)}")
+        if state.torques:
+            _bp("力矩 (N·m):")
+            print(f"  {_bpa(state.torques, precision=3)}")
+
+    if continuous:
+        try:
+            while True:
+                _print_once()
+                print("---")
+                _time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+    else:
+        _print_once()

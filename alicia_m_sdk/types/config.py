@@ -45,7 +45,8 @@ class RobotConfig:
         port: 串口端口路径，空字符串表示自动发现
         baudrate: 波特率
         auto_connect: 是否在创建实例后自动连接
-        version: 硬件版本标识
+        version: 硬件版本标识。``"auto"`` 表示连接后从固件自动检测；
+            也可显式指定 ``"v1_0"``、``"v1_1"``、``"v1_2"`` 等跳过自动检测。
         variant: 变体标识，None 表示自动检测
         control_aim: 控制目标 ("leader"/"follower"/None=自动检测)
         control_mode: 控制模式 ("pv"/"mit")
@@ -66,7 +67,7 @@ class RobotConfig:
     auto_connect: bool = True                   # 自动连接
 
     # --- 机器人参数 ---
-    version: str = "v1_1"                       # 硬件版本
+    version: str = "auto"                       # 硬件版本 ("auto" | "v1_0" | "v1_1" | "v1_2")
     variant: Optional[str] = None               # 变体（自动检测）
     control_aim: Optional[str] = None           # "leader" / "follower"（自动检测）
 

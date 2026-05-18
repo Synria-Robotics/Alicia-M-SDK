@@ -18,10 +18,9 @@ from ..types.exceptions import (
 )
 from ..hardware.codec import MessageCodec
 from ..hardware.constants import (
-    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION,
-    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
+    CMD_VERSION,
+    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES,
     CMD_GRIPPER_PARAM,
-    NUM_JOINTS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
 )
 from ..hardware.serial_port import SerialPort
@@ -57,8 +56,10 @@ from ..utils.demo_runtime import (
     manual_record_waypoints as _manual_record_waypoints,
     manual_record_waypoints_with_torque_off as _manual_record_waypoints_with_torque_off,
     print_diagnostic_response as _print_diagnostic_response,
+    print_joint_state as _print_joint_state,
     print_robot_state as _print_robot_state,
 )
+from . import connection as _connection
 
 
 class SynriaRobotAPI:
@@ -85,6 +86,16 @@ class SynriaRobotAPI:
         self._traj_executor = TrajectoryExecutor(self._device)
         self._robot_model = robot_model
         self._connected = False
+        # Tracks whether the caller requested automatic version detection.
+        # "auto" means we must resolve the URDF version after the handshake;
+        # any other value means the model was already loaded (or deliberately
+        # skipped) before connect() was called.
+        self._model_version_mode: str = config.version
+        # Resolved synriard version string, e.g. "v1_1".  Set after a
+        # successful auto-detection or when an explicit version is used.
+        self._resolved_model_version: Optional[str] = (
+            None if config.version == "auto" else config.version
+        )
 
     def __enter__(self) -> "SynriaRobotAPI":
         """Enter a managed robot session, connecting if needed."""
@@ -107,6 +118,16 @@ class SynriaRobotAPI:
     def robot_model(self):
         """获取 RoboCore 机器人模型实例"""
         return self._robot_model
+
+    @property
+    def resolved_model_version(self) -> Optional[str]:
+        """实际加载的 URDF 版本字符串，例如 ``'v1_1'``。
+
+        * 当 ``version="auto"`` 时，连接成功后由固件硬件版本自动填充。
+        * 当 ``version`` 为显式值时，等同于 ``config.version``。
+        * 连接前或自动检测失败时返回 ``None``。
+        """
+        return self._resolved_model_version
 
     @property
     def control_mode(self) -> ControlMode:
@@ -160,46 +181,22 @@ class SynriaRobotAPI:
 
     def _connect_once(self, timeout: float) -> bool:
         """在当前 SerialPort.port_name 上完成一次 Alicia-M 握手。"""
-        deadline = time.time() + timeout
-
-        # 1. 打开串口。
-        if not self._serial_port.connect():
-            raise ConnectionError("Failed to open serial port; check device connection and permissions")
-
         try:
-            # 2. 启动后台读线程和状态轮询线程。
-            self._device.start()
-
-            # 3. 设置或自动检测控制目标。
-            if self._config.control_aim:
-                aim_str = self._config.control_aim.lower()
-                aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
-                self._device.set_aim(aim)
-            else:
-                self._auto_detect_aim(max(deadline - time.time(), 0.5))
-
-            # 4. 先验证版本响应；没有响应就跳过当前串口。
-            remaining = max(deadline - time.time(), 0.5)
-            firmware_version = self.get_firmware_version(timeout=remaining)
-            if firmware_version is None:
-                raise ConnectionError("No Alicia-M firmware version response received")
-
-            # 5. 等待首次状态缓存填充。
-            poll_deadline = min(deadline, time.time() + 2.0)
-            while time.time() < poll_deadline:
-                if self._device.joint_state is not None:
-                    break
-                time.sleep(0.05)
-
-            # 6. 检测固件控制模式并同步 SDK 内部状态。
-            self._sync_control_mode()
-
-            self._connected = True
-            logger.info(f"Robot connected: {self.connected_port}")
-            return True
+            robot_model, resolved_version = _connection.connect_once(
+                self._serial_port, self._device, self._codec,
+                self._joint_ctrl, self._config,
+                model_version_mode=self._model_version_mode,
+                timeout=timeout,
+            )
         except Exception:
             self.disconnect()
             raise
+        if robot_model is not None:
+            self._robot_model = robot_model
+            self._resolved_model_version = resolved_version
+        self._connected = True
+        logger.info(f"Robot connected: {self.connected_port}")
+        return True
 
     def disconnect(self) -> None:
         """断开连接：停止后台线程 → 关闭串口"""
@@ -859,15 +856,13 @@ class SynriaRobotAPI:
         @param seed 随机种子。
         @return 路点数组 [N, 6]。
         """
-        class _Args:
-            pass
-
-        args = _Args()
-        args.num_waypoints = num_waypoints
-        args.joint_scale = joint_scale
-        args.use_current_joints = use_current_joints
-        args.seed = seed
-        return _auto_generate_waypoints(self, self._robot_model, args)
+        return _auto_generate_waypoints(
+            self, self._robot_model,
+            num_waypoints=num_waypoints,
+            joint_scale=joint_scale,
+            use_current_joints=use_current_joints,
+            seed=seed,
+        )
 
     def load_waypoints(self, path: str):
         """@brief 从文件加载关节路点。
@@ -893,56 +888,7 @@ class SynriaRobotAPI:
 
     def print_state(self, continuous: bool = False, output_format: str = "deg") -> None:
         """打印当前状态"""
-        try:
-            from robocore.utils.beauty_logger import beauty_print as _rc_beauty_print
-            from robocore.utils.beauty_logger import beauty_print_array
-
-            def beauty_print(content: Any, type: Optional[str] = None):
-                if type is None:
-                    _rc_beauty_print(content)
-                else:
-                    _rc_beauty_print(content, type=type)
-
-        except ImportError:
-            def beauty_print(content: Any, type: Optional[str] = None):
-                print(content)
-
-            def beauty_print_array(arr, **kw):
-                return str(arr)
-
-        def _print_once():
-            state = self._device.joint_state
-            if state is None:
-                beauty_print("未获取到状态数据", type="warning")
-                return
-            angles = list(state.angles)
-            if output_format == "deg":
-                angles_display = [math.degrees(a) for a in angles]
-                unit = "deg"
-            else:
-                angles_display = list(angles)
-                unit = "rad"
-
-            beauty_print(f"关节角度 ({unit}):")
-            print(f"  {beauty_print_array(angles_display, precision=2)}")
-            beauty_print(f"夹爪: {state.gripper:.0f}")
-            if state.velocities:
-                beauty_print("速度 (rad/s):")
-                print(f"  {beauty_print_array(state.velocities, precision=3)}")
-            if state.torques:
-                beauty_print("力矩 (N·m):")
-                print(f"  {beauty_print_array(state.torques, precision=3)}")
-
-        if continuous:
-            try:
-                while True:
-                    _print_once()
-                    print("---")
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                pass
-        else:
-            _print_once()
+        _print_joint_state(self._device, continuous=continuous, output_format=output_format)
 
     # ========== 内部方法 ==========
 
@@ -956,117 +902,8 @@ class SynriaRobotAPI:
             for v in values
         ]
 
-    def _detect_firmware_mode(self) -> Optional[ControlMode]:
-        """通过 0x11 查询固件实际控制模式
-
-        仅检查关节电机 M0-M5 的模式一致性（夹爪 M6 固件锁定 MIT，不参与判断）。
-        若关节电机模式不一致，返回 None 以触发后续强制切换。
-        内部重试多次，容忍连接初期的短暂通信不稳定。
-
-        :return, 关节电机一致时返回该模式，不一致或查询失败返回 None
-        """
-        _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
-        for attempt in range(3):
-            self._device.flush()
-            values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
-            if values is not None and len(values) >= NUM_JOINTS:
-                break
-            logger.debug(f"模式检测第 {attempt + 1} 次查询未获得有效响应")
-            time.sleep(0.5)
-        else:
-            return None
-        # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
-        joint_values = values[:NUM_JOINTS]
-        if any(v != joint_values[0] for v in joint_values):
-            logger.warning(f"检测到关节电机混合控制模式: {joint_values}，将强制同步")
-            return None
-        return _MODE_MAP.get(joint_values[0])
-
-    def _sync_control_mode(self) -> None:
-        """检测固件控制模式并同步 SDK 内部状态
-
-        仅检测和同步关节电机 M0-M5 的模式（夹爪 M6 固件锁定 MIT）。
-
-        根据 config.control_mode:
-        - None: 跟随固件当前模式（不发送切换指令）
-        - "pv"/"mit": 若与固件不一致则自动切换关节电机
-        """
-        firmware_mode = self._detect_firmware_mode()
-        requested = self._config.control_mode
-        desired = ControlMode(requested.lower()) if requested else firmware_mode
-
-        if desired is None:
-            raise ConnectionError(
-                "无法检测固件控制模式，请检查串口连接和固件状态"
-            )
-
-        if firmware_mode == desired:
-            # 固件已是目标模式，同步 SDK 状态即可（固件侧已处理目标位置初始化）
-            self._joint_ctrl.mode = desired
-            logger.info(f"固件控制模式: {desired.value.upper()}")
-        else:
-            # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
-            # 设为对端模式确保 switch_mode 不会因 mode == desired 而跳过
-            opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
-            self._joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
-            logger.info(f"切换固件模式 → {desired.value.upper()}")
-            self._joint_ctrl.switch_mode(desired)
-
-    def _auto_detect_aim(self, timeout: float) -> None:
-        """自动检测控制目标（示教臂/操作臂）
-
-        安全策略: 自动检测到 Leader 时强制回退为 Follower 并发出警告。
-        Alicia-M SDK 的控制指令（模式切换、使能等）不应发往示教臂，
-        否则可能导致示教臂固件异常。如确需连接 Leader，
-        请通过 create_robot(control_aim="leader") 显式指定。
-        """
-        frame = self._codec.encode_version_request()
-        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
-        info = self._device.version_info
-        if info and info.device_type:
-            dt = info.device_type.upper()
-            if dt in ('L', 'LEADER'):
-                logger.warning(
-                    "检测到示教臂 (Leader)，但未显式指定 control_aim='leader'。"
-                    "为防止误操作示教臂固件，已强制设为 Follower 模式。"
-                    "如确需连接 Leader，请通过 create_robot(control_aim='leader') 显式指定"
-                )
-                self._device.set_aim(AIM_FOLLOWER)
-            else:
-                self._device.set_aim(AIM_FOLLOWER)
-                logger.info("检测到操作臂 (Follower)")
-        else:
-            self._device.set_aim(AIM_FOLLOWER)
-            logger.info("未检测到设备类型，默认操作臂")
-
     def _execute_cartesian_traj(self, traj: Dict) -> bool:
         """执行笛卡尔轨迹（逐点 IK → PV 轨迹执行）"""
-        if self._robot_model is None:
-            return False
-        poses = traj.get('poses', [])
-        if len(poses) == 0:
-            return False
-
-        state = self._device.joint_state
-        q_current = list(state.angles) if state else None
-        joint_positions = []
-
-        for pose in poses:
-            r = kin_module.compute_inverse_kinematics(
-                self._robot_model, pose, q_init=q_current
-            )
-            if not r.get('success'):
-                logger.warning("笛卡尔轨迹 IK 求解失败")
-                return False
-            q = r['q'].tolist()
-            joint_positions.append(q + [state.gripper if state else 0.0])
-            q_current = q
-
-        positions = np.array(joint_positions)
-        timestamps = traj['timestamps']
-        # 数值微分计算速度
-        dt = np.diff(timestamps)
-        velocities = np.zeros_like(positions)
-        velocities[1:] = np.diff(positions, axis=0) / dt[:, np.newaxis]
-
-        return self._traj_executor.execute_pv(timestamps, positions, velocities)
+        return plan_module.execute_cartesian_trajectory(
+            self._robot_model, traj, self._device.joint_state, self._traj_executor
+        )

@@ -58,6 +58,7 @@ from .beauty_logger import (
 )
 from .protocol import format_bytes
 from .version import parse_firmware_version, supports_min_version
+from .model_resolver import HW_VERSION_MAP, resolve_model_version, load_robot_model
 from .cli import NonBlockingKeyReader, add_port_argument, select_waypoint_mode
 from .trajectory_plot import (
     plot_trajectory,
@@ -107,6 +108,10 @@ __all__ = [
     "format_bytes",
     "parse_firmware_version",
     "supports_min_version",
+    # model_resolver
+    "HW_VERSION_MAP",
+    "resolve_model_version",
+    "load_robot_model",
     "add_port_argument",
     "select_waypoint_mode",
     "NonBlockingKeyReader",
