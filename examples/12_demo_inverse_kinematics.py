@@ -23,7 +23,7 @@ from robocore.utils.backend import to_numpy
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
 # DEFAULT_TARGET_POSE = [0.32,  -0.07, 0.37, 0.0,0.74, 0.0, 0.68]
 # DEFAULT_TARGET_POSE = [0.33, - 0.21, 0.33, 0.0, 0.85, 0.0, 0.53]
-DEFAULT_TARGET_POSE = [0.4279, -0.0946, 0.1384, -0.6645, 0.7321, 0.1010, 0.1106]
+DEFAULT_TARGET_POSE = [0.3279, -0.0946, 0.1384, -0.6645, 0.7321, 0.1010, 0.1106]
 
 def main():
     beauty_print("Demo: 逆运动学 (IK)", type="module")
@@ -72,7 +72,7 @@ def main():
                 max_iters=5000,
                 pos_tol=1e-2,
                 ori_tol=1e-2,
-                num_initial_guesses=5,
+                num_initial_guesses=12,
                 use_analytic_jacobian=True,
             )
             elapsed = (time.time() - start_time) * 1000.0
