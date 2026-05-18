@@ -33,8 +33,6 @@ import numpy as np
 import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from alicia_m_sdk.execution.joint_mapping import convert_joints_rad_from_alicia_d_to_alicia_m
-from alicia_m_sdk.execution.teleoperation import Teleoperation
 from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
@@ -44,15 +42,6 @@ MIT_KD = [5.0, 5.0, 5.0, 1.0, 2.0, 1.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-
-def make_joint_mapper_rad():
-    """创建弧度制的关节映射函数（rad → rad）
-
-    内部流程: leader 弧度 → 角度 → URDF 限位映射 → 弧度
-    """
-    def mapper(leader_joints_rad: list[float]) -> list[float]:
-        return convert_joints_rad_from_alicia_d_to_alicia_m(leader_joints_rad)
-    return mapper
 
 def main(args):
     mode = args.mode.lower()
@@ -145,12 +134,10 @@ def main(args):
             beauty_print(f"Follower 关节 (deg): {np.round(np.degrees(follower_joints), 1).tolist()}")
 
         # --- 创建遥操作控制器（使用 URDF 限位映射 + 逐电机 MIT 参数） ---
-        teleop = Teleoperation(
+        teleop = follower.create_mapped_teleoperation(
             leader=leader,
-            follower=follower,
             frequency_hz=args.frequency,
             follower_speed=args.speed,
-            joint_mapper=make_joint_mapper_rad(),
             use_interpolation=args.interpolation,
             kp=MIT_KP,
             kd=MIT_KD,
@@ -159,14 +146,7 @@ def main(args):
         )
 
         if args.verbose:
-            joint_mapper = make_joint_mapper_rad()
-
-            def print_state(joints, gripper, count):
-                if count % int(args.frequency) == 0:  # 每秒打印一次
-                    leader_deg = np.round(np.degrees(joints), 1).tolist()
-                    follower_deg = np.round(np.degrees(joint_mapper(joints)), 1).tolist()
-                    print(f"  [{count:6d}] leader={leader_deg}  follower(mapped)={follower_deg}  gripper={gripper:.0f}")
-            teleop.set_state_callback(print_state)
+            teleop.set_state_callback(follower.make_mapped_teleop_state_printer(args.frequency))
 
         # --- 等待用户确认后启动 ---
         interp_str = "插值" if args.interpolation else "无插值"
@@ -191,30 +171,30 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="遥操作 (URDF映射): Alicia-D (示教臂) → Alicia-M (操作臂)",
+        description="Teleoperate Alicia-M from Alicia-D with URDF-limit joint mapping.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     parser.add_argument('--mode', type=str, default="mit",
                         choices=["pv", "mit"],
-                        help="控制模式: pv / mit (默认: mit)")
+                        help="Control mode: pv or mit; default mit.")
     parser.add_argument('--leader-port', type=str, default="COM63",
-                        help="Leader 串口 (Alicia-D)")
+                        help="Leader serial port for Alicia-D.")
     parser.add_argument('--port', '--follower-port', default="COM51", dest='follower_port',
                         type=str,
-                        help="Follower 串口 (Alicia-M)，不指定则自动发现")
+                        help="Follower serial port for Alicia-M; omit to auto-detect.")
     parser.add_argument('--follower-version', type=str, default="v1_1",
-                        help="Alicia-M 硬件版本，可选 v1_0/v1_1 (默认: v1_1)")
+                        help="Alicia-M hardware version: v1_0 or v1_1; default v1_1.")
     parser.add_argument('--frequency', type=float, default=100.0,
-                        help="控制循环频率 [10-200] Hz (默认: 100)")
+                        help="Control loop frequency in Hz, recommended 10-200; default 100.")
     parser.add_argument('--speed', type=float, default=200.0,
-                        help="Follower 运动速度 [0-400]，映射到 [0-10] rad/s (默认: 400)")
+                        help="Follower motion speed, range 0-400; maps to 0-10 rad/s.")
     parser.add_argument('--interpolation', action='store_true',
-                        help="MIT 模式启用线性轨迹插值")
+                        help="Enable linear trajectory interpolation in MIT mode.")
     parser.add_argument('--home', action='store_true',
-                        help="启动前 follower 先回零")
+                        help="Move the follower to zero before teleoperation.")
     parser.add_argument('--verbose', '-v', action='store_true',
-                        help="打印遥操作过程中的关节状态（含映射前后对比）")
+                        help="Print joint states during teleoperation, including mapped values.")
     args = parser.parse_args()
 
     main(args)

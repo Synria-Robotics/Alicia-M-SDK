@@ -25,6 +25,7 @@ from .api.synria_robot_api import SynriaRobotAPI
 from .types.state import JointState, MitParams, RobotStatus, VersionInfo
 from .diagnostics import DiagnosticResult, DiagnosticArmSnapshot
 from .user_settings import UserSettings
+from .gripper_params import GripperParamResult, GripperParamSpec
 from .execution import JointController, Teleoperation, TrajectoryExecutor
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
@@ -138,6 +139,7 @@ __all__ = [
     'RobotConfig',
     'ControlAim', 'ControlMode', 'GripperType',
     'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
+    'GripperParamResult', 'GripperParamSpec',
     # 高级控制入口
     'JointController', 'Teleoperation', 'TrajectoryExecutor',
     # 异常

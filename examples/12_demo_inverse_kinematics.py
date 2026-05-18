@@ -10,7 +10,7 @@ import time
 import numpy as np
 import alicia_m_sdk
 from alicia_m_sdk.integrations.robocore import compute_forward_kinematics, compute_inverse_kinematics
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 # robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
 try:

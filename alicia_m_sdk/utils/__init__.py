@@ -58,6 +58,7 @@ from .beauty_logger import (
 )
 from .protocol import format_bytes
 from .version import parse_firmware_version, supports_min_version
+from .cli import NonBlockingKeyReader, add_port_argument, select_waypoint_mode
 from .trajectory_plot import (
     plot_trajectory,
     plot_joint_tracking,
@@ -106,6 +107,9 @@ __all__ = [
     "format_bytes",
     "parse_firmware_version",
     "supports_min_version",
+    "add_port_argument",
+    "select_waypoint_mode",
+    "NonBlockingKeyReader",
     # trajectory_plot
     "plot_trajectory",
     "plot_joint_tracking",

@@ -9,17 +9,17 @@ import argparse
 import math
 import time
 import alicia_m_sdk
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def main():
     beauty_print("Demo: 读取关节状态（循环打印）", type="module")
 
-    parser = argparse.ArgumentParser(description="读取关节状态示例")
+    parser = argparse.ArgumentParser(description="Read Alicia-M joint state.")
     parser.add_argument(
         "--extend", action="store_true",
-        help="启用扩展查询（插补速度、线圈温度，需新固件支持）"
+        help="Enable extended polling for interpolation velocity and coil temperature; requires newer firmware."
     )
     add_port_argument(parser)
     args = parser.parse_args()

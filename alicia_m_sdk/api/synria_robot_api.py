@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Mapping
 
 import numpy as np
 
@@ -27,15 +27,38 @@ from ..hardware.constants import (
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
 from ..execution.joint_control import JointController
-from ..execution.trajectory_executor import TrajectoryExecutor
+from ..execution.trajectory_executor import (
+    TrajectoryExecutor,
+    execute_joint_trajectory as _execute_joint_trajectory,
+    resolve_default_traj_save_dir as _resolve_default_traj_save_dir,
+    save_trajectory_csv as _save_trajectory_csv,
+)
+from ..execution.joint_mapping import convert_joints_rad_from_alicia_d_to_alicia_m
+from ..execution.teleoperation import Teleoperation
 from ..diagnostics import DiagnosticResult, run_diagnostic as _run_diagnostic
 from ..user_settings import UserSettings
 from ..user_settings import get_user_settings as _get_user_settings
 from ..user_settings import set_gripper_type as _set_gripper_type
+from ..user_settings import gripper_type_config_value
+from ..gripper_params import (
+    GripperParamResult,
+    make_read_gripper_params_frame,
+    make_write_gripper_params_frame,
+    parse_gripper_params_response,
+)
 from ..integrations.robocore import kinematics as kin_module
 from ..integrations.robocore import planning as plan_module
 from ..utils.beauty_logger import logger
 from ..utils.version import supports_min_version
+from ..utils.demo_runtime import (
+    auto_generate_waypoints as _auto_generate_waypoints,
+    load_waypoints_interactive as _load_waypoints_interactive,
+    make_mapped_teleop_state_printer as _make_mapped_teleop_state_printer,
+    manual_record_waypoints as _manual_record_waypoints,
+    manual_record_waypoints_with_torque_off as _manual_record_waypoints_with_torque_off,
+    print_diagnostic_response as _print_diagnostic_response,
+    print_robot_state as _print_robot_state,
+)
 
 
 class SynriaRobotAPI:
@@ -258,6 +281,22 @@ class SynriaRobotAPI:
         return kin_module.compute_forward_kinematics(
             self._robot_model, list(state.angles)
         )
+
+    def compute_forward_kinematics(
+        self,
+        joints: List[float],
+        joint_format: str = "rad",
+    ) -> Dict:
+        """@brief 对指定关节角计算正运动学。
+
+        @param joints 关节角列表。
+        @param joint_format 关节角单位，支持 "rad" 或 "deg"。
+        @return 位姿字典。
+        """
+        if self._robot_model is None:
+            raise RobotStateError("未加载机器人模型")
+        q = [math.radians(a) for a in joints] if joint_format == "deg" else list(joints)
+        return kin_module.compute_forward_kinematics(self._robot_model, q)
 
     def get_firmware_version(self, timeout: float = 5.0) -> Optional[str]:
         """获取固件版本
@@ -507,6 +546,14 @@ class SynriaRobotAPI:
         """运行自检并返回结构化结果。"""
         return _run_diagnostic(self._device, timeout=timeout)
 
+    def print_diagnostic_response(self, result: DiagnosticResult) -> bool:
+        """@brief 打印自检响应快照。
+
+        @param result run_diagnostic 返回的结构化结果。
+        @return True 表示响应正常，False 表示超时或错误响应。
+        """
+        return _print_diagnostic_response(result)
+
     def get_user_settings(self, timeout: float = 1.0) -> Optional[UserSettings]:
         """读取全部个性化设置。"""
         return _get_user_settings(self._device, timeout=timeout)
@@ -529,12 +576,75 @@ class SynriaRobotAPI:
             readback=readback,
         )
 
+    def confirm_gripper_type(self, settings: UserSettings, expected_value: int) -> bool:
+        """@brief 判断读回的个性化设置是否确认夹爪类型。
+
+        @param settings 读回的个性化设置。
+        @param expected_value 期望夹爪类型配置值。
+        @return True 表示读回值与期望值一致。
+        """
+        if len(settings.values) < 2:
+            return False
+        actual_value = settings.values[1]
+        return gripper_type_config_value(actual_value) == gripper_type_config_value(expected_value)
+
     def send_gripper_param_frame(self, frame, timeout: float = 1.0):
         """发送 0x17 夹爪夹持参数帧并等待响应。
 
         这是为低层夹爪参数 demo 保留的过渡 API，避免示例直接访问内部 Device。
         """
         return self._device.send_and_wait(frame, CMD_GRIPPER_PARAM, timeout=timeout)
+
+    def get_gripper_params(
+        self,
+        mask: int = 0,
+        aim: Union[str, int] = "follower",
+        timeout: float = 1.0,
+    ) -> Optional[GripperParamResult]:
+        """@brief 通过 0x17 读取夹爪夹持参数。
+
+        @param mask 参数掩码，0 表示读取全部参数。
+        @param aim "follower"、"leader"、AIM_FOLLOWER 或 AIM_LEADER。
+        @param timeout 响应超时时间，单位秒。
+        @return 解析后的响应；超时时返回 None。
+        """
+        frame = make_read_gripper_params_frame(aim=aim, mask=mask)
+        response = self.send_gripper_param_frame(frame, timeout=timeout)
+        if response is None:
+            return None
+        return parse_gripper_params_response(response)
+
+    def set_gripper_params(
+        self,
+        values: Mapping[Union[str, int], float],
+        aim: Union[str, int] = "follower",
+        timeout: float = 1.0,
+        readback: bool = False,
+        readback_delay: float = 0.2,
+    ) -> Optional[Union[GripperParamResult, Dict[str, GripperParamResult]]]:
+        """@brief 通过 0x17 写入夹爪夹持参数。
+
+        @param values 参数值，键可以是公开名称或协议掩码位。
+        @param aim "follower"、"leader"、AIM_FOLLOWER 或 AIM_LEADER。
+        @param timeout 响应超时时间，单位秒。
+        @param readback 写入后是否读回全部夹爪参数。
+        @param readback_delay 写入响应与读回之间的等待时间，单位秒。
+        @return 写入响应；启用读回时返回包含 write/readback 的字典；超时时返回 None。
+        """
+        frame = make_write_gripper_params_frame(values, aim=aim)
+        response = self.send_gripper_param_frame(frame, timeout=timeout)
+        if response is None:
+            return None
+        write_result = parse_gripper_params_response(response)
+        if not readback:
+            return write_result
+
+        if readback_delay > 0:
+            time.sleep(readback_delay)
+        readback_result = self.get_gripper_params(mask=0, aim=aim, timeout=timeout)
+        if readback_result is None:
+            return {"write": write_result}
+        return {"write": write_result, "readback": readback_result}
 
     # ========== 运动学 ==========
 
@@ -614,6 +724,74 @@ class SynriaRobotAPI:
             traj['timestamps'], traj['positions'], traj['velocities']
         )
 
+    def execute_planned_joint_trajectory(
+        self,
+        traj,
+        speed: float = 100.0,
+        track_hz: Optional[float] = None,
+    ):
+        """@brief 执行已经规划好的关节轨迹。
+
+        @param traj plan_joint_trajectory 返回的轨迹字典。
+        @param speed 执行显示和控制使用的速度参数。
+        @param track_hz 关节反馈记录频率；None 表示不记录。
+        @return (ok, tracking)，ok 表示执行是否完成，tracking 为可选反馈记录。
+        """
+        return _execute_joint_trajectory(self, traj, speed, track_hz=track_hz)
+
+    def save_joint_trajectory_csv(self, traj, output_dir=None):
+        """@brief 保存轨迹 CSV 文件。
+
+        @param traj 轨迹字典。
+        @param output_dir 输出目录；None 时使用工具默认目录。
+        @return 保存后的 CSV 路径。
+        """
+        return _save_trajectory_csv(traj, output_dir=output_dir)
+
+    def default_trajectory_save_dir(self, anchor_file):
+        """@brief 获取默认轨迹保存目录。
+
+        @param anchor_file 用于定位项目根目录的文件路径。
+        @return 默认保存目录。
+        """
+        return _resolve_default_traj_save_dir(anchor_file)
+
+    def create_mapped_teleoperation(
+        self,
+        leader,
+        frequency_hz: float = 100.0,
+        follower_speed: float = 200.0,
+        use_interpolation: bool = False,
+        kp=None,
+        kd=None,
+        torque=None,
+        vel_ref=None,
+    ) -> Teleoperation:
+        """@brief 创建 Alicia-D 到 Alicia-M 的 URDF 限位映射遥操作控制器。
+
+        @param leader Alicia-D 示教臂实例。
+        @param frequency_hz 控制循环频率。
+        @param follower_speed 操作臂运动速度参数。
+        @param use_interpolation MIT 模式是否启用线性轨迹插值。
+        @param kp MIT 位置增益。
+        @param kd MIT 速度增益。
+        @param torque MIT 前馈力矩。
+        @param vel_ref MIT 速度参考。
+        @return Teleoperation 控制器实例。
+        """
+        return Teleoperation(
+            leader=leader,
+            follower=self,
+            frequency_hz=frequency_hz,
+            follower_speed=follower_speed,
+            joint_mapper=convert_joints_rad_from_alicia_d_to_alicia_m,
+            use_interpolation=use_interpolation,
+            kp=kp,
+            kd=kd,
+            torque=torque,
+            vel_ref=vel_ref,
+        )
+
     def move_cartesian_linear(
         self, target_pose, duration: float = 2.0, **kwargs
     ) -> bool:
@@ -651,6 +829,65 @@ class SynriaRobotAPI:
             if r.get('success'):
                 q_current = r['q'].tolist()
         return {'results': results, 'num_solved': sum(1 for r in results if r.get('success'))}
+
+    def manual_record_waypoints(self):
+        """@brief 交互式记录当前机械臂关节路点。
+
+        @return 路点数组 [N, 6]，取消或路点不足时返回 None。
+        """
+        return _manual_record_waypoints(self)
+
+    def manual_record_waypoints_with_torque_off(self):
+        """@brief 切换到 MIT 并卸力后，交互式拖动示教记录路点。
+
+        @return 路点数组 [N, 6]，取消或路点不足时返回 None。
+        """
+        return _manual_record_waypoints_with_torque_off(self)
+
+    def auto_generate_waypoints(
+        self,
+        num_waypoints: int = 5,
+        joint_scale: float = 0.6,
+        use_current_joints: bool = False,
+        seed: Optional[int] = 666,
+    ):
+        """@brief 自动生成关节空间路点。
+
+        @param num_waypoints 路点数量，至少为 2。
+        @param joint_scale robot_model.random_q 的缩放系数。
+        @param use_current_joints 是否使用当前关节角作为首个路点。
+        @param seed 随机种子。
+        @return 路点数组 [N, 6]。
+        """
+        class _Args:
+            pass
+
+        args = _Args()
+        args.num_waypoints = num_waypoints
+        args.joint_scale = joint_scale
+        args.use_current_joints = use_current_joints
+        args.seed = seed
+        return _auto_generate_waypoints(self, self._robot_model, args)
+
+    def load_waypoints(self, path: str):
+        """@brief 从文件加载关节路点。
+
+        @param path 路点文件路径；为空时会交互式询问。
+        @return (waypoints, meta) 或 None。
+        """
+        return _load_waypoints_interactive(path)
+
+    def make_mapped_teleop_state_printer(self, frequency_hz: float):
+        """@brief 创建遥操作映射状态打印回调。
+
+        @param frequency_hz 遥操作循环频率。
+        @return 可传入 Teleoperation.set_state_callback 的回调。
+        """
+        return _make_mapped_teleop_state_printer(frequency_hz)
+
+    def print_compact_state(self) -> None:
+        """@brief 按 pos/vel/tor 紧凑格式打印当前状态。"""
+        _print_robot_state(self)
 
     # ========== 状态打印 ==========
 

@@ -6,7 +6,7 @@
 import argparse
 
 import alicia_m_sdk
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 

@@ -9,7 +9,7 @@ MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 import argparse
 import time
 import alicia_m_sdk
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -26,10 +26,10 @@ MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 def main():
     beauty_print("Demo: 关节控制 (MIT)", type="module")
 
-    parser = argparse.ArgumentParser(description="关节控制示例 (MIT)")
+    parser = argparse.ArgumentParser(description="Move one Alicia-M joint in MIT mode.")
     parser.add_argument(
         "--speed", type=float, default=30,
-        help="运动速度 (默认: 30, 范围: 0-400)"
+        help="Motion speed; default 30, range 0-400."
     )
     add_port_argument(parser)
     args = parser.parse_args()

@@ -5,21 +5,9 @@
 """
 
 import argparse
-import math
 import alicia_m_sdk
-from _common import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
-
-
-def _print_joints(robot, label: str):
-    """读取并打印当前关节角度"""
-    joints = robot.get_robot_state("joint")
-    if joints is not None:
-        angles_deg = [a * 180.0 / math.pi for a in joints]
-        beauty_print(f"{label} (deg): {beauty_print_array(angles_deg, precision=2)}", type="info")
-        beauty_print(f"{label} (rad): {beauty_print_array(joints, precision=4)}", type="info")
-    else:
-        beauty_print("无法读取关节角度", type="warning")
+from alicia_m_sdk.utils.cli import add_port_argument
+from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 def main():
     beauty_print("Demo: 失能/使能交互", type="module")
@@ -34,7 +22,8 @@ def main():
 
     try:
         # --- 打印当前关节角度 ---
-        _print_joints(robot, "当前关节角度")
+        beauty_print("当前关节角度", type="module")
+        robot.print_state(output_format="deg")
 
         # --- 失能：卸载力矩 ---
         beauty_print("失能后机械臂将失去力矩，可能因重力下坠", type="warning")
@@ -55,7 +44,8 @@ def main():
             beauty_print("使能操作失败", type="warning")
 
         # --- 打印新的关节角度 ---
-        _print_joints(robot, "新的关节角度")
+        beauty_print("新的关节角度", type="module")
+        robot.print_state(output_format="deg")
 
     except KeyboardInterrupt:
         beauty_print("\n用户中断", type="warning")
