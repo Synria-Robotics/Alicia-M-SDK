@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Union
+from typing import Dict, Mapping, Optional, Tuple, Union
 
 from .hardware.constants import (
     AIM_FOLLOWER,
@@ -13,6 +13,7 @@ from .hardware.constants import (
     FUNC_WRITE_BIT,
 )
 from .hardware.frame import Frame
+from .types.enums import GripperType
 
 
 @dataclass(frozen=True)
@@ -23,20 +24,87 @@ class GripperParamSpec:
     mask: int
     label: str
     unit: str = ""
+    range_text: str = ""
+    small_range: Optional[Tuple[float, float]] = None
+    large_range: Optional[Tuple[float, float]] = None
+    aliases: Tuple[str, ...] = ()
+
+    def allowed_range(self, gripper_type: Optional[Union[str, int, GripperType]] = None) -> Optional[Tuple[float, float]]:
+        """Return the allowed value range for a gripper type.
+
+        When gripper_type is None, return the union range accepted by the
+        public protocol so low-level helpers still reject clearly invalid
+        values without requiring hardware readback.
+        """
+        if self.small_range is None or self.large_range is None:
+            return None
+        if gripper_type is None:
+            return (
+                min(self.small_range[0], self.large_range[0]),
+                max(self.small_range[1], self.large_range[1]),
+            )
+        parsed = GripperType.parse(gripper_type)
+        return self.large_range if parsed is GripperType.MM_100 else self.small_range
 
 
 GRIPPER_PARAM_SPECS = (
-    GripperParamSpec("target_force", 0x01, "目标夹持力", "N"),
-    GripperParamSpec("open_feedforward", 0x02, "张开前馈力矩", "N*m"),
-    GripperParamSpec("close_feedforward", 0x04, "闭合前馈力矩", "N*m"),
-    GripperParamSpec("hold_torque", 0x08, "最大保持力矩", "N*m"),
-    GripperParamSpec("force_kp", 0x10, "力控比例"),
-    GripperParamSpec("force_ki", 0x20, "力控积分"),
-    GripperParamSpec("integral_limit", 0x40, "积分限幅"),
-    GripperParamSpec("close_torque_scale", 0x80, "接近闭合时的力矩缩放"),
+    GripperParamSpec(
+        "target_force",
+        0x01,
+        "目标夹持力",
+        "N",
+        "小夹爪[1,80]；大夹爪[1,120]",
+        small_range=(1.0, 80.0),
+        large_range=(1.0, 120.0),
+    ),
+    GripperParamSpec(
+        "open_feedforward",
+        0x02,
+        "张开前馈力矩",
+        "N*m",
+        "小夹爪[0.2,3.0]；大夹爪[0.2,5.0]",
+        small_range=(0.2, 3.0),
+        large_range=(0.2, 5.0),
+        aliases=("open_feedforward_torque",),
+    ),
+    GripperParamSpec(
+        "close_feedforward",
+        0x04,
+        "闭合前馈力矩",
+        "N*m",
+        "小夹爪[-5.0,-0.2]；大夹爪[-8.0,-0.2]",
+        small_range=(-5.0, -0.2),
+        large_range=(-8.0, -0.2),
+        aliases=("close_feedforward_torque",),
+    ),
+    GripperParamSpec(
+        "hold_torque",
+        0x08,
+        "最大保持力矩",
+        "N*m",
+        "小夹爪[0.5,5.0]；大夹爪[0.5,10.0]",
+        small_range=(0.5, 5.0),
+        large_range=(0.5, 10.0),
+        aliases=("max_hold_torque",),
+    ),
+    GripperParamSpec("force_kp", 0x10, "力控比例", "", "[0,2.0]", small_range=(0.0, 2.0), large_range=(0.0, 2.0)),
+    GripperParamSpec("force_ki", 0x20, "力控积分", "1/s", "[0,2.0]", small_range=(0.0, 2.0), large_range=(0.0, 2.0)),
+    GripperParamSpec("integral_limit", 0x40, "积分限幅", "N*s", "[0,100]", small_range=(0.0, 100.0), large_range=(0.0, 100.0)),
+    GripperParamSpec(
+        "close_torque_scale",
+        0x80,
+        "接近闭合时的力矩缩放",
+        "比例",
+        "[0,1]",
+        small_range=(0.0, 1.0),
+        large_range=(0.0, 1.0),
+    ),
 )
 
 GRIPPER_PARAM_BY_NAME = {spec.name: spec for spec in GRIPPER_PARAM_SPECS}
+for _spec in GRIPPER_PARAM_SPECS:
+    for _alias in _spec.aliases:
+        GRIPPER_PARAM_BY_NAME[_alias] = _spec
 GRIPPER_PARAM_BY_MASK = {spec.mask: spec for spec in GRIPPER_PARAM_SPECS}
 
 
@@ -86,6 +154,34 @@ def gripper_param_mask(values: Mapping[Union[str, int], float]) -> int:
     return mask
 
 
+def validate_gripper_param_values(
+    values: Mapping[Union[str, int], float],
+    gripper_type: Optional[Union[str, int, GripperType]] = None,
+) -> Dict[int, float]:
+    """Normalize and validate 0x17 gripper parameter values.
+
+    @param values 参数值，键可以是公开名称、别名或协议掩码位。
+    @param gripper_type 夹爪类型。None 表示按大小夹爪合并后的协议范围校验。
+    @return 按协议掩码位索引的参数值。
+    """
+    normalized = normalize_gripper_param_values(values)
+    parsed_type = None if gripper_type is None else GripperType.parse(gripper_type)
+    for mask, value in normalized.items():
+        spec = GRIPPER_PARAM_BY_MASK[mask]
+        allowed = spec.allowed_range(parsed_type)
+        if allowed is None:
+            continue
+        lower, upper = allowed
+        if value < lower or value > upper:
+            type_text = "协议允许范围" if parsed_type is None else parsed_type.label
+            unit = f" {spec.unit}" if spec.unit else ""
+            raise ValueError(
+                f"{spec.label}={value:g}{unit}，{type_text}为 "
+                f"[{lower:g}, {upper:g}]{unit}"
+            )
+    return normalized
+
+
 def aim_code(aim: Union[str, int]) -> int:
     """@brief 将部位目标归一化为协议 aim 编码。
 
@@ -118,14 +214,16 @@ def make_read_gripper_params_frame(aim: Union[str, int] = "follower", mask: int 
 def make_write_gripper_params_frame(
     values: Mapping[Union[str, int], float],
     aim: Union[str, int] = "follower",
+    gripper_type: Optional[Union[str, int, GripperType]] = None,
 ) -> Frame:
     """@brief 构造 0x17 写入帧。
 
     @param values 待写入参数值。
     @param aim 目标部位。
+    @param gripper_type 夹爪类型；None 表示按大小夹爪合并后的协议范围校验。
     @return 协议帧。
     """
-    normalized = normalize_gripper_param_values(values)
+    normalized = validate_gripper_param_values(values, gripper_type=gripper_type)
     mask = 0
     for bit in normalized:
         mask |= bit

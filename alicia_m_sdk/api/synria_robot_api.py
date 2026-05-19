@@ -618,6 +618,7 @@ class SynriaRobotAPI:
         timeout: float = 1.0,
         readback: bool = False,
         readback_delay: float = 0.2,
+        gripper_type=None,
     ) -> Optional[Union[GripperParamResult, Dict[str, GripperParamResult]]]:
         """@brief 通过 0x17 写入夹爪夹持参数。
 
@@ -626,9 +627,19 @@ class SynriaRobotAPI:
         @param timeout 响应超时时间，单位秒。
         @param readback 写入后是否读回全部夹爪参数。
         @param readback_delay 写入响应与读回之间的等待时间，单位秒。
+        @param gripper_type 夹爪类型；None 表示按大小夹爪合并范围校验，
+            "auto" 表示先读取用户设置中的夹爪类型再按精确范围校验。
         @return 写入响应；启用读回时返回包含 write/readback 的字典；超时时返回 None。
         """
-        frame = make_write_gripper_params_frame(values, aim=aim)
+        resolved_gripper_type = gripper_type
+        if isinstance(gripper_type, str) and gripper_type.lower() == "auto":
+            settings = self.get_user_settings(timeout=timeout)
+            resolved_gripper_type = settings.gripper_type if settings and settings.gripper_type is not None else None
+        frame = make_write_gripper_params_frame(
+            values,
+            aim=aim,
+            gripper_type=resolved_gripper_type,
+        )
         response = self.send_gripper_param_frame(frame, timeout=timeout)
         if response is None:
             return None

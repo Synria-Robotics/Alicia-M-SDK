@@ -25,13 +25,24 @@ def main():
                         help="Skip interactive confirmation before writing.")
     parser.add_argument("--skip-readback", action="store_true",
                         help="Do not read all parameters after writing.")
+    parser.add_argument("--gripper-type", choices=["auto", "small", "large", "50mm", "100mm"],
+                        default="auto",
+                        help="Validate write values with a gripper-specific range; default auto reads user settings.")
     for spec in GRIPPER_PARAM_SPECS:
+        flags = ["--" + spec.name.replace("_", "-")]
+        flags.extend("--" + alias.replace("_", "-") for alias in spec.aliases)
+        help_parts = [f"{spec.label}"]
+        if spec.unit:
+            help_parts.append(f"单位 {spec.unit}")
+        if spec.range_text:
+            help_parts.append(f"建议范围 {spec.range_text}")
+        help_parts.append(f"mask 0x{spec.mask:02X}")
         parser.add_argument(
-            "--" + spec.name.replace("_", "-"),
+            *flags,
             dest=spec.name,
             type=float,
             default=None,
-            help=f"{spec.name.replace('_', '-')} value{f' ({spec.unit})' if spec.unit else ''}; mask 0x{spec.mask:02X}.",
+            help="；".join(help_parts),
         )
     args = parser.parse_args()
 
@@ -55,22 +66,30 @@ def main():
 
     try:
         if write_values:
-            mask = gripper_param_mask(write_values)
-            beauty_print(f"即将写入 0x17 参数，掩码 0x{mask:02X}", type="warning")
-            beauty_print("写入不会主动闭合夹爪，但会影响后续夹爪动作。", type="warning")
-            for spec in GRIPPER_PARAM_SPECS:
-                if spec.name in write_values:
-                    unit = f" {spec.unit}" if spec.unit else ""
-                    beauty_print(f"  {spec.label}: {write_values[spec.name]:.4g}{unit}", type="info")
-            if not args.yes:
-                input("确认机械臂安全后按 Enter 发送写入帧，Ctrl+C 取消...")
+            try:
+                mask = gripper_param_mask(write_values)
+                beauty_print(f"即将写入 0x17 参数，掩码 0x{mask:02X}", type="warning")
+                beauty_print("写入不会主动闭合夹爪，但会影响后续夹爪动作。SDK 会按夹爪类型校验参数范围。", type="warning")
+                beauty_print(f"夹爪类型校验: {args.gripper_type}", type="info")
+                for spec in GRIPPER_PARAM_SPECS:
+                    if spec.name in write_values:
+                        unit = f" {spec.unit}" if spec.unit else ""
+                        beauty_print(f"  {spec.label}: {write_values[spec.name]:.4g}{unit}", type="info")
+                        if spec.range_text:
+                            beauty_print(f"    建议范围: {spec.range_text}", type="info")
+                if not args.yes:
+                    input("确认机械臂安全后按 Enter 发送写入帧，Ctrl+C 取消...")
 
-            result = robot.set_gripper_params(
-                write_values,
-                aim=args.aim,
-                timeout=args.timeout,
-                readback=not args.skip_readback,
-            )
+                result = robot.set_gripper_params(
+                    write_values,
+                    aim=args.aim,
+                    timeout=args.timeout,
+                    readback=not args.skip_readback,
+                    gripper_type=args.gripper_type,
+                )
+            except ValueError as exc:
+                beauty_print(f"设置失败，值不属于指定范围：{exc}", type="warning")
+                return
             if result is None:
                 beauty_print("未收到 0x17 响应", type="warning")
                 return

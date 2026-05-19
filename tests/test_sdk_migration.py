@@ -37,6 +37,12 @@ from alicia_m_sdk.hardware.constants import (
 )
 from alicia_m_sdk.hardware.frame import Frame
 from alicia_m_sdk.hardware.messages import ZeroResetRequest
+from alicia_m_sdk.gripper_params import (
+    GRIPPER_PARAM_BY_NAME,
+    make_read_gripper_params_frame,
+    make_write_gripper_params_frame,
+    parse_gripper_params_response,
+)
 from alicia_m_sdk.types.config import RobotConfig
 from alicia_m_sdk.types.state import JointState
 from alicia_m_sdk.user_settings import (
@@ -174,6 +180,66 @@ class UserSettingsTest(unittest.TestCase):
         )
         self.assertTrue(is_write_accepted(accepted))
         self.assertFalse(is_write_accepted(rejected))
+
+
+class GripperParamsProtocolTest(unittest.TestCase):
+    def test_read_all_frame_matches_protocol_example(self):
+        frame = make_read_gripper_params_frame(aim="follower", mask=0)
+        self.assertEqual(frame.encode().hex(" ").upper(), "AA 17 02 00 65 FF")
+
+    def test_write_selected_torque_frame_matches_protocol_example(self):
+        frame = make_write_gripper_params_frame(
+            {"target_force": 35.0, "hold_torque": 2.5},
+            aim="follower",
+        )
+        self.assertEqual(
+            frame.encode().hex(" ").upper(),
+            "AA 17 82 09 09 00 00 0C 42 00 00 20 40 B3 FF",
+        )
+
+    def test_parse_write_ack_matches_protocol_example(self):
+        frame = Frame.decode(bytes.fromhex("AA 17 82 03 01 09 01 74 FF"))
+        result = parse_gripper_params_response(frame)
+        self.assertEqual(result.target_byte, 0x01)
+        self.assertEqual(result.mask, 0x09)
+        self.assertTrue(result.write_ok)
+        self.assertEqual(result.values, {})
+
+    def test_parse_read_all_response_matches_protocol_example(self):
+        frame = Frame.decode(bytes.fromhex(
+            "AA 17 82 22 01 FF 00 00 0C 42 00 00 A0 3F "
+            "00 00 20 C0 00 00 20 40 9A 99 19 3F CD CC "
+            "CC 3E 00 00 A0 41 33 33 B3 3E 8C FF"
+        ))
+        result = parse_gripper_params_response(frame)
+        self.assertEqual(result.target_byte, 0x01)
+        self.assertEqual(result.mask, 0xFF)
+        self.assertAlmostEqual(result.values["target_force"], 35.0)
+        self.assertAlmostEqual(result.values["open_feedforward"], 1.25)
+        self.assertAlmostEqual(result.values["close_feedforward"], -2.5)
+        self.assertAlmostEqual(result.values["hold_torque"], 2.5)
+        self.assertAlmostEqual(result.values["force_kp"], 0.6, places=6)
+        self.assertAlmostEqual(result.values["force_ki"], 0.4, places=6)
+        self.assertAlmostEqual(result.values["integral_limit"], 20.0)
+        self.assertAlmostEqual(result.values["close_torque_scale"], 0.35, places=6)
+
+    def test_new_torque_aliases_are_accepted(self):
+        self.assertIs(GRIPPER_PARAM_BY_NAME["open_feedforward_torque"], GRIPPER_PARAM_BY_NAME["open_feedforward"])
+        self.assertIs(GRIPPER_PARAM_BY_NAME["close_feedforward_torque"], GRIPPER_PARAM_BY_NAME["close_feedforward"])
+        self.assertIs(GRIPPER_PARAM_BY_NAME["max_hold_torque"], GRIPPER_PARAM_BY_NAME["hold_torque"])
+        canonical = make_write_gripper_params_frame({"hold_torque": 2.5}, aim="follower")
+        alias = make_write_gripper_params_frame({"max_hold_torque": 2.5}, aim="follower")
+        self.assertEqual(alias.encode(), canonical.encode())
+
+    def test_gripper_type_specific_ranges_are_enforced(self):
+        make_write_gripper_params_frame({"hold_torque": 8.0}, aim="follower", gripper_type="large")
+        with self.assertRaises(ValueError):
+            make_write_gripper_params_frame({"hold_torque": 8.0}, aim="follower", gripper_type="small")
+
+    def test_broad_protocol_ranges_are_enforced_without_gripper_type(self):
+        make_write_gripper_params_frame({"target_force": 120.0}, aim="follower")
+        with self.assertRaises(ValueError):
+            make_write_gripper_params_frame({"target_force": 121.0}, aim="follower")
 
 
 class DeviceStatusTest(unittest.TestCase):
