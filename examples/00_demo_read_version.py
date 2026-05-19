@@ -18,7 +18,7 @@ def main():
     args = parser.parse_args()
 
     # 创建并连接机器人（自动检测控制模式，仅查询信息无需指定模式）
-    robot = alicia_m_sdk.create_robot(port=args.port)
+    robot = alicia_m_sdk.create_robot(port=args.port, sync_control_mode=False)
     beauty_print("机器人连接成功", type="success")
 
     try:

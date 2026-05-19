@@ -73,6 +73,7 @@ class RobotConfig:
 
     # --- 控制参数 ---
     control_mode: Optional[str] = None          # "pv" / "mit" / None=检测固件当前模式
+    sync_control_mode: bool = True              # 连接时是否检测/同步固件控制模式
     num_joints: int = 6                         # 关节数量（不含夹爪）
     num_motors: int = 7                         # 电机数量（含夹爪）
 

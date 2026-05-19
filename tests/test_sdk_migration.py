@@ -48,6 +48,7 @@ from alicia_m_sdk.user_settings import (
     parse_settings_response,
 )
 from alicia_m_sdk.utils.version import parse_firmware_version, supports_min_version
+from alicia_m_sdk.utils.model_resolver import resolve_model_version
 
 
 class VersionHelpersTest(unittest.TestCase):
@@ -67,6 +68,14 @@ class VersionHelpersTest(unittest.TestCase):
         self.assertTrue(supports_diagnostic("1.0.6"))
         self.assertTrue(supports_diagnostic("1.1.0"))
         self.assertFalse(supports_diagnostic("1.0.5"))
+
+    def test_hardware_version_model_mapping(self):
+        self.assertEqual(resolve_model_version("100"), "v1_1")
+        self.assertEqual(resolve_model_version("101"), "v1_1")
+        self.assertEqual(resolve_model_version("102"), "v1_2")
+        self.assertEqual(resolve_model_version("103"), "v1_2")
+        with self.assertRaises(ValueError):
+            resolve_model_version("99")
 
 
 class DiagnosticParsingTest(unittest.TestCase):

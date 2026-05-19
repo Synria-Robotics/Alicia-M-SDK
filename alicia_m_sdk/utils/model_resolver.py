@@ -4,8 +4,8 @@
 并封装机器人模型的加载流程，供 create_robot() 和 SynriaRobotAPI 调用。
 
 版本号规则（4 字节小端序 uint32）：
-  100  → Alicia-M v1.1  → synriard "v1_1"
-  101  → Alicia-M v1.2  → synriard "v1_2"
+  100, 101  → Alicia-M v1.1  → synriard "v1_1"
+  >=102     → Alicia-M v1.2  → synriard "v1_2"
 """
 
 from __future__ import annotations
@@ -26,27 +26,38 @@ __all__ = [
 # Value: synriard version argument accepted by get_model_path()
 # ---------------------------------------------------------------------------
 HW_VERSION_MAP: dict[str, str] = {
-    "100": "v1_1",   # Alicia-M v1.1 — first production run
-    "101": "v1_2",   # Alicia-M v1.2 — second production run
+    "100": "v1_1",   # Alicia-M v1.1
+    "101": "v1_1",   # Alicia-M v1.1
+    "102+": "v1_2",  # Alicia-M v1.2 and later compatible hardware
 }
+
+_HW_VERSION_V1_1_MIN = 100
+_HW_VERSION_V1_2_MIN = 102
 
 
 def resolve_model_version(hw_version: str) -> str:
     """将固件硬件版本号解析为 synriard 版本字符串。
 
-    :param hw_version: ``VersionInfo.hardware_version``，如 ``"100"`` 或 ``"101"``
+    :param hw_version: ``VersionInfo.hardware_version``，如 ``"100"``、``"101"`` 或 ``"102"``
     :returns: synriard 版本字符串，如 ``"v1_1"``
     :raises ValueError: 版本号不在已知映射表中
     """
-    model_version = HW_VERSION_MAP.get(hw_version)
-    if model_version is None:
-        known = ", ".join(f"{k} → {v}" for k, v in sorted(HW_VERSION_MAP.items()))
-        raise ValueError(
-            f"Unknown hardware version: '{hw_version}'. "
-            f"Known mappings: [{known}]. "
-            f"Please upgrade alicia-m-sdk or synriard to support this hardware."
-        )
-    return model_version
+    try:
+        version_num = int(str(hw_version).strip())
+    except (TypeError, ValueError):
+        version_num = -1
+
+    if _HW_VERSION_V1_1_MIN <= version_num < _HW_VERSION_V1_2_MIN:
+        return "v1_1"
+    if version_num >= _HW_VERSION_V1_2_MIN:
+        return "v1_2"
+
+    known = ", ".join(f"{k} → {v}" for k, v in HW_VERSION_MAP.items())
+    raise ValueError(
+        f"Unknown hardware version: '{hw_version}'. "
+        f"Known mappings: [{known}]. "
+        f"Please upgrade alicia-m-sdk or synriard to support this hardware."
+    )
 
 
 def load_robot_model(

@@ -22,7 +22,7 @@ def main():
     )
     args = parser.parse_args()
 
-    robot = alicia_m_sdk.create_robot(port=args.port)
+    robot = alicia_m_sdk.create_robot(port=args.port, sync_control_mode=False)
     beauty_print("机器人连接成功", type="success")
 
     try:

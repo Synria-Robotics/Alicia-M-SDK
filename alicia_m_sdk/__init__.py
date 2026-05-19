@@ -47,6 +47,7 @@ def create_robot(
     variant: Optional[str] = None,
     control_aim: Optional[str] = None,
     control_mode: Optional[str] = None,
+    sync_control_mode: bool = True,
     baudrate: int = 1_000_000,
     backend: Literal["numpy", "torch", "cpp"] = "cpp",
     debug_mode: bool = False,
@@ -69,6 +70,7 @@ def create_robot(
     :param variant: URDF 变体（None=自动默认 "follower"）
     :param control_aim: 控制目标 (``"leader"``/``"follower"``/None=自动检测)
     :param control_mode: 控制模式 (``"pv"``/``"mit"``/None=检测固件当前模式)
+    :param sync_control_mode: 连接时是否读取/同步固件控制模式；只读取版本号时可关闭
     :param baudrate: 串口波特率
     :param backend: RoboCore 计算后端 (``"numpy"``/``"torch"``/``"cpp"``);
         ``"cpp"`` 需要 synria-robocore 2.5.0+ 且已编译 C++ 扩展
@@ -113,6 +115,7 @@ def create_robot(
         variant=variant,
         control_aim=control_aim,
         control_mode=control_mode,
+        sync_control_mode=sync_control_mode,
         baudrate=baudrate,
         auto_connect=auto_connect,
         backend=backend,

@@ -20,6 +20,7 @@ from ..types.enums import ControlMode
 from ..types.exceptions import ConnectionError
 from ..utils.beauty_logger import logger
 from ..utils.model_resolver import resolve_model_version, load_robot_model as _load_robot_model
+from ..diagnostics import run_diagnostic, supports_diagnostic
 
 
 # ─── Aim detection ────────────────────────────────────────────────────────────
@@ -98,6 +99,38 @@ def sync_control_mode(device, joint_ctrl, config: RobotConfig) -> None:
         joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
         logger.info(f"切换固件模式 → {desired.value.upper()}")
         joint_ctrl.switch_mode(desired)
+
+
+def print_connection_diagnostic(device, reason: str = "") -> None:
+    """Run a compact diagnostic snapshot during connection and continue."""
+    version_info = device.version_info
+    firmware_version = version_info.firmware_version if version_info else None
+    if not supports_diagnostic(firmware_version):
+        logger.info(
+            f"跳过连接阶段简略自检: 固件版本 {firmware_version or '未知'} 不支持自检"
+        )
+        return
+
+    if reason:
+        logger.warning(reason)
+    logger.info("连接阶段控制模式未同步，读取一次简略自检状态...")
+    result = run_diagnostic(device, timeout=2.0)
+    if result.frame is None:
+        logger.warning("简略自检超时，未收到响应")
+        return
+    if result.error_code is not None:
+        logger.warning(
+            f"简略自检返回错误: 0x{result.error_code:02X}, data={result.error_data.hex(' ')}"
+        )
+        return
+
+    for snapshot in result.snapshots:
+        motor_states = " ".join(f"{value:02X}" for value in snapshot.motor_states)
+        control_modes = " ".join(f"{value:02X}" for value in snapshot.control_modes)
+        logger.info(
+            f"{snapshot.arm_name}简略自检: comm=0x{snapshot.comm_bitmap:02X}, "
+            f"motor=[{motor_states}], mode=[{control_modes}]"
+        )
 
 
 # ─── URDF model loading ───────────────────────────────────────────────────────
@@ -199,6 +232,17 @@ def connect_once(
         time.sleep(0.05)
 
     # 6. 检测固件控制模式并同步 SDK 内部状态。
-    sync_control_mode(device, joint_ctrl, config)
+    if config.sync_control_mode:
+        try:
+            sync_control_mode(device, joint_ctrl, config)
+        except ConnectionError as exc:
+            print_connection_diagnostic(
+                device,
+                reason=f"固件控制模式同步失败: {exc}",
+            )
+            raise
+    else:
+        logger.info("跳过固件控制模式检测/同步")
+        print_connection_diagnostic(device)
 
     return robot_model, resolved_version
