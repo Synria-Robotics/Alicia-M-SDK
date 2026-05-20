@@ -2,15 +2,19 @@
 
 文档状态日期：2026-05-20
 
-本文是 Alicia-M SDK 公开 API、示例代码和目录边界的维护基准。调整公开导出、示例写法、目录结构说明或用户可见方法名时，应先检查本文档。
+本文是 Alicia-M SDK 公开 API、示例代码和目录边界的维护基准。调整公开导出、示例写法、目录结构说明或用户可见方法名时，先检查本文档。
 
-维护优先级：
+## 1. 维护目标
+
+本项目的 SDK 面向用户使用，公开入口要简洁、稳定、容易形成记忆。
 
 1. 以 `README.md` 和 `docs/API_REFERENCE.md` 的用户入口说明为准。
 2. 以 `docs/Python_SDK_SOP.md` 的通用 SDK 规范为约束。
 3. `docs/ARCHITECTURE.md` 作为历史设计和架构参考，不强制覆盖当前实现。
 
-## 用户入口
+维护时优先保证 API 稳定性。内部目录可以继续优化，但用户已经熟悉的重要函数名不主动改变。
+
+## 2. 用户入口
 
 普通用户只推荐一种学习路径：
 
@@ -21,19 +25,25 @@ robot = alicia_m_sdk.create_robot(...)
 robot.xxx(...)
 ```
 
-标准流程：
+标准使用流程：
 
 1. `import alicia_m_sdk`。
 2. 使用 `alicia_m_sdk.create_robot(...)` 创建机器人对象。
 3. 通过返回对象的 `robot.xxx(...)` 方法完成连接、状态读取、运动控制和维护设置。
 4. 使用 `robot.disconnect()` 或上下文管理器释放连接。
 
-## API 目录边界
+普通文档和 demo 不新增其他用户必学入口。
+
+## 3. API 边界
+
+### 3.1 `api/` 目录
 
 当前 `alicia_m_sdk/api/` 只保留：
 
 - `__init__.py`：兼容性 re-export，不放业务逻辑。
 - `synria_robot_api.py`：唯一用户 API 门面文件，定义 `SynriaRobotAPI`。
+
+### 3.2 内部实现层
 
 其他实现按职责放在包内实现层：
 
@@ -44,9 +54,11 @@ robot.xxx(...)
 - `utils/`：内部工具和 demo 辅助。
 - `types/`：可公开的数据类、枚举、异常和配置类型。
 
-注意：`JointController` 不合并进 `synria_robot_api.py`。它继续作为执行层内部实现；旧脚本的兼容导入可以保留，但新用户文档不推荐直接导入。
+### 3.3 `JointController`
 
-## 稳定名称
+`JointController` 不合并进 `synria_robot_api.py`。它继续作为执行层内部实现；旧脚本的兼容导入可以保留，但新用户文档不推荐直接导入。
+
+## 4. 稳定名称
 
 以下名称已经形成用户认知，不得在没有兼容别名和迁移说明的情况下改名：
 
@@ -67,29 +79,7 @@ robot.xxx(...)
 
 需要扩展行为时，优先保持方法名不变，并增加带保守默认值的可选参数。
 
-## 当前结构
-
-```text
-alicia_m_sdk/
-|-- __init__.py                 # 包顶层用户入口和稳定导出
-|-- api/
-|   |-- __init__.py             # 兼容性 re-export
-|   `-- synria_robot_api.py     # 唯一用户 API 门面文件
-|-- _internal/                  # 内部辅助实现，如连接握手
-|-- execution/                  # 内部运动控制、轨迹、遥操作
-|-- hardware/                   # 内部串口、协议、轮询、编解码
-|-- integrations/               # 内部/高级 RoboCore 适配
-|-- types/                      # 可公开的数据类、枚举、异常
-|-- utils/                      # 内部工具和 demo 辅助
-|-- diagnostics.py              # 自检实现，由 API 方法封装给用户
-|-- user_settings.py            # 用户设置实现，由 API 方法封装给用户
-`-- gripper_params.py           # 夹爪参数实现，由 API 方法封装给用户
-
-docs/
-`-- API_MAINTENANCE.md          # 本维护准则
-```
-
-## 示例规则
+## 5. 示例规则
 
 普通 demo 应展示公开 API 风格：
 
@@ -102,14 +92,14 @@ robot.set_robot_state(...)
 
 普通 demo 不直接导入：
 
-- `alicia_m_sdk.hardware`
 - `alicia_m_sdk.execution`
-- `alicia_m_sdk.utils`
+- `alicia_m_sdk.hardware`
 - `alicia_m_sdk.integrations`
+- `alicia_m_sdk.utils`
 
 `examples/_demo_helpers.py` 是唯一文档化的 demo 适配层。它可以集中转发 CLI、打印、绘图和展示元数据，避免每个普通 demo 直接依赖 SDK 内部模块。
 
-## 源码 Doxygen 注释规则
+## 6. 源码 Doxygen 注释规则
 
 维护文档本身使用普通 Markdown；修改或新增源码时，注释和 docstring 需要兼容 Doxygen 风格。
 
@@ -130,4 +120,26 @@ def get_gripper_params(mask=0, aim="follower", timeout=1.0):
     @param timeout 响应超时时间，单位秒。
     @return 解析后的响应；超时时返回 None。
     """
+```
+
+## 7. 当前结构
+
+```text
+alicia_m_sdk/
+|-- __init__.py                 # 包顶层用户入口和稳定导出
+|-- api/
+|   |-- __init__.py             # 兼容性 re-export
+|   `-- synria_robot_api.py     # 唯一用户 API 门面文件
+|-- _internal/                  # 内部辅助实现，如连接握手
+|-- execution/                  # 内部运动控制、轨迹、遥操作
+|-- hardware/                   # 内部串口、协议、轮询、编解码
+|-- integrations/               # 内部/高级 RoboCore 适配
+|-- types/                      # 可公开的数据类、枚举、异常
+|-- utils/                      # 内部工具和 demo 辅助
+|-- diagnostics.py              # 自检实现，由 API 方法封装给用户
+|-- user_settings.py            # 用户设置实现，由 API 方法封装给用户
+`-- gripper_params.py           # 夹爪参数实现，由 API 方法封装给用户
+
+docs/
+`-- API_MAINTENANCE.md          # 本维护准则
 ```
