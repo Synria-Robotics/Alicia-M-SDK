@@ -2,12 +2,12 @@
 @brief Alicia-M 示例脚本专用辅助入口。
 
 @details
-本模块用于把示例脚本中的命令行参数、打印、绘图和展示元数据集中到一处，
+本模块用于把示例脚本中的命令行参数、打印、绘图和展示元数据声明到一处，
 让普通 demo 文件保持清晰的公开 API 调用风格：
 ``import alicia_m_sdk`` + ``robot.xxx(...)``。
 
 @note
-本文件位于 `examples/`。它可以转发 SDK 内部辅助函数，
+本文件位于 `examples/`，只做 demo 专用声明和 re-export，不放具体 demo 的流程逻辑。
 """
 
 from alicia_m_sdk.diagnostics import supports_diagnostic

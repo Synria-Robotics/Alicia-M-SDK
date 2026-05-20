@@ -1,4 +1,11 @@
-"""15_demo_gripper_params.py - 夹爪夹持参数读写示例（0x17）。"""
+"""@file 15_demo_gripper_params.py
+@brief 夹爪夹持参数读写示例（0x17）。
+
+@details
+本示例通过公开 API `robot.get_gripper_params()` 和
+`robot.set_gripper_params()` 读写夹爪夹持参数。运行
+`python examples/15_demo_gripper_params.py --help` 可查看全部可修改参数。
+"""
 
 import argparse
 import math
@@ -14,9 +21,34 @@ from _demo_helpers import (
 
 
 def main():
-    beauty_print("Demo: 0x17 夹爪夹持参数读写", type="module")
+    epilog_lines = [
+        "可修改参数:",
+    ]
+    for spec in GRIPPER_PARAM_SPECS:
+        flags = ["--" + spec.name.replace("_", "-")]
+        flags.extend("--" + alias.replace("_", "-") for alias in spec.aliases)
+        unit = spec.unit if spec.unit else "-"
+        range_text = spec.range_text if spec.range_text else "-"
+        epilog_lines.append(f"  {', '.join(flags)}")
+        epilog_lines.append(f"      {spec.label}; 单位 {unit}; 建议范围 {range_text}; mask 0x{spec.mask:02X}")
+    epilog_lines.extend(
+        [
+            "",
+            "示例:",
+            "  读取全部参数:",
+            "    python examples/15_demo_gripper_params.py --port COM37",
+            "  修改目标夹持力为 30 N:",
+            "    python examples/15_demo_gripper_params.py --port COM37 --target-force 30 --gripper-type small",
+            "  同时修改夹持力和最大保持力矩，并跳过确认:",
+            "    python examples/15_demo_gripper_params.py --port COM37 --target-force 30 --hold-torque 2.5 --gripper-type small --yes",
+        ]
+    )
 
-    parser = argparse.ArgumentParser(description="Read/write Alicia-M gripper parameters with command 0x17.")
+    parser = argparse.ArgumentParser(
+        description="Read/write Alicia-M gripper parameters with command 0x17.",
+        epilog="\n".join(epilog_lines),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     add_port_argument(parser)
     parser.add_argument("--aim", choices=["follower", "leader"], default="follower",
                         help="Target arm: follower or leader; default follower.")
@@ -48,6 +80,7 @@ def main():
             help="；".join(help_parts),
         )
     args = parser.parse_args()
+    beauty_print("Demo: 0x17 夹爪夹持参数读写", type="module")
 
     if not math.isfinite(args.timeout):
         parser.error("--timeout 必须是有限数字")

@@ -97,7 +97,11 @@ robot.set_robot_state(...)
 - `alicia_m_sdk.integrations`
 - `alicia_m_sdk.utils`
 
-`examples/_demo_helpers.py` 是唯一文档化的 demo 适配层。它可以集中转发 CLI、打印、绘图和展示元数据，避免每个普通 demo 直接依赖 SDK 内部模块。
+`examples/_demo_helpers.py` 是唯一文档化的 demo 声明适配层，只维护 demo 可使用对象的集中导入和 re-export 清单，例如 CLI 参数入口、打印函数、绘图函数、参数规格和展示元数据。
+
+`examples/_demo_helpers.py` 不放具体 demo 的流程逻辑、参数解析流程、帮助文本构建函数、硬件访问代码或业务拼装函数。它的作用是让普通 demo 避免直接导入 SDK 内部模块，而不是成为新的工具函数目录。
+
+普通 demo 文件只保留 `main()` 作为本文件内函数；脚本专属解析、格式化和说明文本在 `main()` 内组织。若某段逻辑被多个 demo 反复使用，应先判断它属于公开 API、SDK 内部工具还是 demo 声明清单，再按对应目录维护，不直接塞进 `_demo_helpers.py`。
 
 ## 6. 源码 Doxygen 注释规则
 
