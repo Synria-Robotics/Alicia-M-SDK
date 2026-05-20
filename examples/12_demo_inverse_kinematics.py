@@ -10,7 +10,7 @@ import time
 import numpy as np
 import alicia_m_sdk
 from alicia_m_sdk.integrations.robocore import compute_forward_kinematics, compute_inverse_kinematics
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 # robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
 try:
@@ -72,7 +72,7 @@ def main():
                 max_iters=5000,
                 pos_tol=1e-2,
                 ori_tol=1e-2,
-                num_initial_guesses=5,
+                num_initial_guesses=12,
                 use_analytic_jacobian=True,
             )
             elapsed = (time.time() - start_time) * 1000.0
@@ -116,7 +116,7 @@ def main():
             max_iters=5000,
             pos_tol=1e-2,
             ori_tol=1e-2,
-            num_initial_guesses=10,
+            num_initial_guesses=24,
             initial_guess_scale=1.0,
             initial_guess_strategy='current',
             use_analytic_jacobian=True,

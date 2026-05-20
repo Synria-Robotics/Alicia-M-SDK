@@ -6,7 +6,7 @@
 import argparse
 import time
 import alicia_m_sdk
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -18,10 +18,10 @@ POSITION = [21, -67, -19, 8, 56, -7]
 def main():
     beauty_print("Demo: 关节控制 (PV)", type="module")
 
-    parser = argparse.ArgumentParser(description="关节控制示例 (PV)")
+    parser = argparse.ArgumentParser(description="Move one Alicia-M joint in PV mode.")
     parser.add_argument(
         "--speed", type=float, default=15,
-        help="运动速度 (默认: 15, 范围: 0-400)"
+        help="Motion speed; default 15, range 0-400."
     )
     add_port_argument(parser)
     args = parser.parse_args()

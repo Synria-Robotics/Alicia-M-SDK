@@ -9,16 +9,14 @@ MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分�
 import argparse
 import time
 import alicia_m_sdk
-from _common import add_port_argument
+from alicia_m_sdk.utils.cli import add_port_argument
 from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
-
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
 MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]
 MIT_KD = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
 MIT_TORQUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 MIT_VEL_REF = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
 
 def main():
     beauty_print("Demo: 夹爪控制", type="module")
