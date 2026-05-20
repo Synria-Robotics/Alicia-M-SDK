@@ -33,7 +33,7 @@ import numpy as np
 import alicia_d_sdk
 import alicia_m_sdk
 from alicia_m_sdk import ControlMode
-from alicia_m_sdk.utils.beauty_logger import beauty_print
+from _demo_helpers import beauty_print
 
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）

@@ -4,10 +4,13 @@ import argparse
 import math
 
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.gripper_params import GRIPPER_PARAM_SPECS, gripper_param_mask
-from alicia_m_sdk.utils.beauty_logger import beauty_print
-from alicia_m_sdk.utils.protocol import format_bytes
+from _demo_helpers import (
+    GRIPPER_PARAM_SPECS,
+    add_port_argument,
+    beauty_print,
+    format_bytes,
+    gripper_param_mask,
+)
 
 
 def main():

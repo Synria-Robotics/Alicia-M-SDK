@@ -31,12 +31,13 @@ robot = alicia_m_sdk.create_robot()
 
 ```text
 alicia_m_sdk/
-|-- api/            # 面向客户的统一 API，主要是 SynriaRobotAPI
-|-- execution/      # 关节控制、轨迹执行、遥操作
-|-- hardware/       # 串口连接、协议帧、设备状态轮询
-|-- integrations/   # RoboCore 运动学和轨迹规划适配
-|-- types/          # 配置、状态、枚举、异常
-`-- utils/          # 单位转换、参数校验、日志、计时和命令行工具
+|-- api/            # 面向客户的统一 API 门面，业务文件只有 synria_robot_api.py
+|-- _internal/      # 内部辅助实现，例如连接握手
+|-- execution/      # 内部关节控制、轨迹执行、遥操作
+|-- hardware/       # 内部串口连接、协议帧、设备状态轮询
+|-- integrations/   # 内部/高级 RoboCore 运动学和轨迹规划适配
+|-- types/          # 可公开的配置、状态、枚举、异常
+`-- utils/          # 内部工具和 demo 辅助
 ```
 
 分层关系可以理解为：
@@ -47,6 +48,7 @@ demo代码
   v
 SynriaRobotAPI 统一入口
   |
+  +-- _internal: 连接握手和内部协调
   +-- execution: 运动控制、夹爪控制、轨迹执行、遥操作
   +-- integrations: RoboCore 运动学和轨迹规划
   +-- hardware: 串口通信、协议编解码、状态轮询
@@ -352,8 +354,18 @@ python -m build
 python -m twine check dist/*
 ```
 
+Windows 清理缓存和构建产物：
+
+```bat
+clean_sdk.bat /dry-run
+clean_sdk.bat
+```
+
+默认不会清理 `logs/` 或虚拟环境；如确需清理，可使用 `clean_sdk.bat /logs` 或 `clean_sdk.bat /venv`。
+
 更多文档：
 
+- `docs/API_MAINTENANCE.md`
 - `docs/API_REFERENCE.md`
 - `docs/ARCHITECTURE.md`
 - `docs/PROTOCOL.md`

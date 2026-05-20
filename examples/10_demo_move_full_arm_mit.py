@@ -11,8 +11,7 @@ MIT 控制律: tau = kp * (pos_ref - pos_cur) + kd * (vel_ref - vel_cur) + t_ref
 import argparse
 import time
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+from _demo_helpers import add_port_argument, beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)

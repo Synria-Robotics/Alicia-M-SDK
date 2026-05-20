@@ -8,9 +8,7 @@ import argparse
 import time
 
 import alicia_m_sdk
-from alicia_m_sdk.utils.beauty_logger import beauty_print
-from alicia_m_sdk.utils.version import supports_min_version
-from alicia_m_sdk.utils.cli import NonBlockingKeyReader, add_port_argument
+from _demo_helpers import NonBlockingKeyReader, add_port_argument, beauty_print, supports_min_version
 
 
 PRINT_INTERVAL = 0.2

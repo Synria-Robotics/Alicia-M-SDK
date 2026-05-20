@@ -59,7 +59,7 @@ from ..utils.demo_runtime import (
     print_joint_state as _print_joint_state,
     print_robot_state as _print_robot_state,
 )
-from . import connection as _connection
+from .._internal import connection as _connection
 
 
 class SynriaRobotAPI:
