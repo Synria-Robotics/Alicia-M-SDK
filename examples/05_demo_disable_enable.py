@@ -6,8 +6,7 @@
 
 import argparse
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print
+from _demo_helpers import add_port_argument, beauty_print
 
 def main():
     beauty_print("Demo: 失能/使能交互", type="module")

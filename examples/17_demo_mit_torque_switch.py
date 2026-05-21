@@ -12,8 +12,7 @@ import argparse
 import time
 
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print
+from _demo_helpers import add_port_argument, beauty_print
 
 
 def main(args):

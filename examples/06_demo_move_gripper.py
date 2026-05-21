@@ -9,8 +9,7 @@ MIT 阻抗参数仅影响夹爪电机（列表第 7 个元素），关节部分�
 import argparse
 import time
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+from _demo_helpers import add_port_argument, beauty_print, beauty_print_array
 
 # MIT 默认阻抗参数（逐电机: M0~M5 关节, M6 夹爪）
 MIT_KP = [150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]

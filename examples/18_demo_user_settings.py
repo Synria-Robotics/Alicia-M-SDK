@@ -3,14 +3,14 @@
 import argparse
 
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument
-from alicia_m_sdk.user_settings import (
+from _demo_helpers import (
     SETTING_NAMES,
+    add_port_argument,
+    beauty_print,
     gripper_type_label,
     gripper_type_option_label,
     normalize_gripper_type,
 )
-from alicia_m_sdk.utils.beauty_logger import beauty_print
 
 
 def main():

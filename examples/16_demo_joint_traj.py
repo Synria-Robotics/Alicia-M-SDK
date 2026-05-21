@@ -19,13 +19,15 @@ import time
 
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk.utils.cli import add_port_argument, select_waypoint_mode
-from alicia_m_sdk.utils.trajectory_plot import (
+from _demo_helpers import (
+    add_port_argument,
+    beauty_print,
+    beauty_print_array,
     plot_joint_tracking,
     plot_joint_velocity_tracking,
     plot_trajectory,
+    select_waypoint_mode,
 )
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 # Console limits when loading dense CSV (e.g. saved trajectory as waypoints)
 _MAX_WAYPOINT_PRINT = 24

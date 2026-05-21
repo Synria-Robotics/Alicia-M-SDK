@@ -26,6 +26,9 @@ from .types.state import JointState, MitParams, RobotStatus, VersionInfo
 from .diagnostics import DiagnosticResult, DiagnosticArmSnapshot
 from .user_settings import UserSettings
 from .gripper_params import GripperParamResult, GripperParamSpec
+
+# @note 兼容旧版高级脚本的别名。新用户代码应使用 create_robot(...)
+# 和 SynriaRobotAPI 实例方法，不推荐直接导入这些执行层类。
 from .execution import JointController, Teleoperation, TrajectoryExecutor
 from .types.config import RobotConfig
 from .types.enums import ControlAim, ControlMode, GripperType
@@ -145,8 +148,6 @@ __all__ = [
     'ControlAim', 'ControlMode', 'GripperType',
     'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
     'GripperParamResult', 'GripperParamSpec',
-    # 高级控制入口
-    'JointController', 'Teleoperation', 'TrajectoryExecutor',
     # 异常
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',

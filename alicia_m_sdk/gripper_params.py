@@ -1,4 +1,6 @@
-"""夹爪夹持参数命令 0x17 辅助工具。"""
+"""@file gripper_params.py
+@brief 夹爪夹持参数命令 0x17 辅助工具。
+"""
 
 from __future__ import annotations
 
@@ -215,13 +217,16 @@ def make_write_gripper_params_frame(
     values: Mapping[Union[str, int], float],
     aim: Union[str, int] = "follower",
     gripper_type: Optional[Union[str, int, GripperType]] = None,
+    save: bool = False,
 ) -> Frame:
     """@brief 构造 0x17 写入帧。
 
     @param values 待写入参数值。
     @param aim 目标部位。
     @param gripper_type 夹爪类型；None 表示按大小夹爪合并后的协议范围校验。
+    @param save True 时在数据区末尾追加保存标志，请求设备掉电保存当前完整夹爪参数配置。
     @return 协议帧。
+    @note save 默认为 False，保持旧协议写入后立即生效但不主动掉电保存的行为。
     """
     normalized = validate_gripper_param_values(values, gripper_type=gripper_type)
     mask = 0
@@ -232,6 +237,8 @@ def make_write_gripper_params_frame(
     for spec in GRIPPER_PARAM_SPECS:
         if spec.mask & mask:
             data.extend(struct.pack("<f", normalized[spec.mask]))
+    if save:
+        data.append(0x01)
     return Frame(
         cmd_id=CMD_GRIPPER_PARAM,
         func_code=FUNC_WRITE_BIT | aim_code(aim),

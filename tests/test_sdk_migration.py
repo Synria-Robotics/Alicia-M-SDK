@@ -27,7 +27,9 @@ from alicia_m_sdk.hardware.constants import (
     AIM_FOLLOWER,
     CMD_DIAGNOSTIC,
     CMD_ERROR,
+    CMD_GRIPPER_PARAM,
     CMD_USER_SETTINGS,
+    EXACT_ZERO_12BIT,
     FUNC_READ_ALL_SETTINGS,
     FUNC_WRITE_GRIPPER_TYPE,
     NUM_MOTORS,
@@ -55,6 +57,7 @@ from alicia_m_sdk.user_settings import (
 )
 from alicia_m_sdk.utils.version import parse_firmware_version, supports_min_version
 from alicia_m_sdk.utils.model_resolver import resolve_model_version
+from alicia_m_sdk.utils.conversion import encode_torque, encode_velocity
 
 
 class VersionHelpersTest(unittest.TestCase):
@@ -197,6 +200,42 @@ class GripperParamsProtocolTest(unittest.TestCase):
             "AA 17 82 09 09 00 00 0C 42 00 00 20 40 B3 FF",
         )
 
+    def test_write_saved_frame_matches_protocol_example(self):
+        frame = make_write_gripper_params_frame(
+            {"target_force": 2.0},
+            aim="follower",
+            save=True,
+        )
+        self.assertEqual(
+            frame.encode().hex(" ").upper(),
+            "AA 17 82 06 01 00 00 00 40 01 BD FF",
+        )
+
+    def test_robot_set_gripper_params_passes_save_flag(self):
+        robot = SynriaRobotAPI(RobotConfig(auto_connect=False))
+        response = Frame.decode(bytes.fromhex("AA 17 82 03 01 01 01 7C FF"))
+        robot.send_gripper_param_frame = Mock(return_value=response)
+        with patch("alicia_m_sdk.api.synria_robot_api.make_write_gripper_params_frame") as build_frame:
+            build_frame.return_value = Frame(cmd_id=0x17, func_code=0x82, data=b"\x01\x00\x00\x00\x40\x01")
+            result = robot.set_gripper_params(
+                {"target_force": 2.0},
+                aim="follower",
+                save=True,
+                gripper_type=None,
+            )
+
+        build_frame.assert_called_once_with(
+            {"target_force": 2.0},
+            aim="follower",
+            gripper_type=None,
+            save=True,
+        )
+        robot.send_gripper_param_frame.assert_called_once_with(
+            build_frame.return_value,
+            timeout=3.0,
+        )
+        self.assertTrue(result.write_ok)
+
     def test_parse_write_ack_matches_protocol_example(self):
         frame = Frame.decode(bytes.fromhex("AA 17 82 03 01 09 01 74 FF"))
         result = parse_gripper_params_response(frame)
@@ -295,6 +334,126 @@ class DeviceCommandTest(unittest.TestCase):
 
         codec.encode_linear_velocity_control.assert_called_once_with(AIM_FOLLOWER, velocities)
         device.send_frame.assert_called_once_with(frame)
+
+    def test_send_and_wait_pauses_polling_until_response(self):
+        port = Mock()
+        codec = Mock()
+        device = Device(port, codec)
+        request = Frame(cmd_id=CMD_GRIPPER_PARAM, func_code=0x82, data=b"\x01\x00\x00\x00\x40\x01")
+        response = Frame(cmd_id=CMD_GRIPPER_PARAM, func_code=0x82, data=b"\x01\x01\x01")
+
+        def complete_pending(_frame):
+            device._state_cache.resolve_pending(CMD_GRIPPER_PARAM, response)
+
+        device.send_frame = Mock(side_effect=complete_pending)
+
+        with patch.object(device, "pause_polling", wraps=device.pause_polling) as pause:
+            with patch.object(device, "resume_polling", wraps=device.resume_polling) as resume:
+                result = device.send_and_wait(request, CMD_GRIPPER_PARAM, timeout=0.1)
+
+        self.assertIs(result, response)
+        pause.assert_called_once()
+        resume.assert_called_once()
+        self.assertFalse(device._poll_paused.is_set())
+
+    def test_send_and_wait_keeps_preexisting_poll_pause(self):
+        port = Mock()
+        codec = Mock()
+        device = Device(port, codec)
+        device.pause_polling()
+        request = Frame(cmd_id=CMD_GRIPPER_PARAM, func_code=0x82, data=b"\x01\x00\x00\x00\x40\x01")
+        response = Frame(cmd_id=CMD_GRIPPER_PARAM, func_code=0x82, data=b"\x01\x01\x01")
+
+        def complete_pending(_frame):
+            device._state_cache.resolve_pending(CMD_GRIPPER_PARAM, response)
+
+        device.send_frame = Mock(side_effect=complete_pending)
+
+        with patch.object(device, "resume_polling", wraps=device.resume_polling) as resume:
+            result = device.send_and_wait(request, CMD_GRIPPER_PARAM, timeout=0.1)
+
+        self.assertIs(result, response)
+        resume.assert_not_called()
+        self.assertTrue(device._poll_paused.is_set())
+
+
+class MessageCodecExactZeroTest(unittest.TestCase):
+    def test_pv_zero_velocity_uses_exact_zero_12bit(self):
+        codec = MessageCodec()
+        frame = codec.encode_pv_control(
+            AIM_FOLLOWER,
+            [0.0] * NUM_MOTORS,
+            [0.0] * NUM_MOTORS,
+        )
+
+        for motor_index in range(NUM_MOTORS):
+            velocity_raw = struct.unpack_from("<H", frame.data, 2 + motor_index * 4 + 2)[0]
+            self.assertEqual(velocity_raw, EXACT_ZERO_12BIT)
+
+    def test_pv_nonzero_velocity_uses_standard_mapping(self):
+        codec = MessageCodec()
+        frame = codec.encode_pv_control(
+            AIM_FOLLOWER,
+            [0.0] * NUM_MOTORS,
+            [1.0] * NUM_MOTORS,
+        )
+
+        for motor_index in range(NUM_MOTORS):
+            velocity_raw = struct.unpack_from("<H", frame.data, 2 + motor_index * 4 + 2)[0]
+            self.assertEqual(velocity_raw, encode_velocity(1.0))
+
+    def test_mit_zero_velocity_and_torque_use_exact_zero_12bit(self):
+        codec = MessageCodec()
+        frame = codec.encode_mit_control(
+            AIM_FOLLOWER,
+            [0.0] * NUM_MOTORS,
+            [0.0] * NUM_MOTORS,
+            [0.0] * NUM_MOTORS,
+            [150.0] * NUM_MOTORS,
+            [2.0] * NUM_MOTORS,
+            linear_velocities=[0.0] * NUM_MOTORS,
+        )
+
+        for motor_index in range(NUM_MOTORS):
+            base = 2 + motor_index * 12
+            velocity_raw = struct.unpack_from("<H", frame.data, base + 2)[0]
+            torque_raw = struct.unpack_from("<H", frame.data, base + 4)[0]
+            linear_velocity_raw = struct.unpack_from("<H", frame.data, base + 10)[0]
+            self.assertEqual(velocity_raw, EXACT_ZERO_12BIT)
+            self.assertEqual(torque_raw, EXACT_ZERO_12BIT)
+            self.assertEqual(linear_velocity_raw, EXACT_ZERO_12BIT)
+
+    def test_mit_nonzero_velocity_and_torque_use_standard_mapping(self):
+        codec = MessageCodec()
+        frame = codec.encode_mit_control(
+            AIM_FOLLOWER,
+            [0.0] * NUM_MOTORS,
+            [1.0] * NUM_MOTORS,
+            [1.0] * NUM_MOTORS,
+            [150.0] * NUM_MOTORS,
+            [2.0] * NUM_MOTORS,
+            linear_velocities=[1.0] * NUM_MOTORS,
+        )
+
+        for motor_index in range(NUM_MOTORS):
+            base = 2 + motor_index * 12
+            velocity_raw = struct.unpack_from("<H", frame.data, base + 2)[0]
+            torque_raw = struct.unpack_from("<H", frame.data, base + 4)[0]
+            linear_velocity_raw = struct.unpack_from("<H", frame.data, base + 10)[0]
+            self.assertEqual(velocity_raw, encode_velocity(1.0))
+            self.assertEqual(torque_raw, encode_torque(1.0, motor_index))
+            self.assertNotEqual(linear_velocity_raw, EXACT_ZERO_12BIT)
+
+    def test_linear_velocity_zero_uses_exact_zero_12bit(self):
+        codec = MessageCodec()
+        frame = codec.encode_linear_velocity_control(
+            AIM_FOLLOWER,
+            [0.0] * NUM_MOTORS,
+        )
+
+        for motor_index in range(NUM_MOTORS):
+            linear_velocity_raw = struct.unpack_from("<H", frame.data, 2 + motor_index * 2)[0]
+            self.assertEqual(linear_velocity_raw, EXACT_ZERO_12BIT)
 
 
 class SynriaRobotAPILifecycleTest(unittest.TestCase):
