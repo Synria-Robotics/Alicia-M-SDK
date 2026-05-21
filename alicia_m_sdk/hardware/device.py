@@ -102,6 +102,15 @@ class StateCache:
             self._pending_events.pop(cmd_id, None)
             self._pending_responses.pop(cmd_id, None)
 
+    def has_pending(self, cmd_id: int) -> bool:
+        """@brief 判断某个指令是否正在等待同步响应。
+
+        @param cmd_id 指令 ID。
+        @return True 表示有 send_and_wait 调用正在等待该指令响应。
+        """
+        with self._lock:
+            return cmd_id in self._pending_events
+
 
 class Device:
     """机器人设备抽象：非阻塞通信、异步状态更新
@@ -251,12 +260,15 @@ class Device:
 
         仅用于低频操作：版本查询、模式切换等。
         通过 Event 机制等待读线程收到匹配响应，不阻塞串口。
+        等待期间暂停状态轮询，避免轮询帧干扰需要 ACK 的低频命令。
 
         :param frame, 要发送的请求帧
         :param expected_cmd, 期望响应的指令 ID
         :param timeout, 等待超时（秒）
         :return, 匹配的响应帧，超时返回 None
         """
+        was_polling_paused = self._poll_paused.is_set()
+        self.pause_polling()
         event = self._state_cache.register_pending(expected_cmd)
         try:
             self.send_frame(frame)
@@ -265,6 +277,8 @@ class Device:
             return None
         finally:
             self._state_cache.clear_pending(expected_cmd)
+            if not was_polling_paused:
+                self.resume_polling()
 
     def send_and_wait_first(
         self,
@@ -276,12 +290,15 @@ class Device:
 
         用于需要同时监听正常响应与错误帧 (0xEE) 的场景。
         返回最先收到的那个帧，超时后清理所有注册的 pending。
+        等待期间暂停状态轮询，避免轮询帧干扰需要 ACK 的低频命令。
 
         :param frame, 要发送的请求帧
         :param cmd_ids, 期望响应的指令 ID 列表
         :param timeout, 等待超时（秒）
         :return, 最先到达的响应帧，超时返回 None
         """
+        was_polling_paused = self._poll_paused.is_set()
+        self.pause_polling()
         events = {cmd_id: self._state_cache.register_pending(cmd_id)
                   for cmd_id in cmd_ids}
         self.send_frame(frame)
@@ -296,6 +313,8 @@ class Device:
         finally:
             for cmd_id in cmd_ids:
                 self._state_cache.clear_pending(cmd_id)
+            if not was_polling_paused:
+                self.resume_polling()
 
     # ========== 一次性查询 ==========
 
@@ -349,6 +368,10 @@ class Device:
             if raw:
                 try:
                     parsed = Frame.decode(raw)
+                    if self._state_cache.has_pending(parsed.cmd_id):
+                        logger.debug(
+                            f"RX pending cmd=0x{parsed.cmd_id:02X}: {raw.hex(' ').upper()}"
+                        )
                     self._dispatch_response(parsed)
                 except Exception as e:
                     logger.debug(f"帧解析失败: {e}")

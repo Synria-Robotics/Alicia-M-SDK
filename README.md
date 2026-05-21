@@ -72,7 +72,7 @@ python examples/03_demo_read_states.py --port COM37
 python examples/07_demo_move_joint.py --port COM37 --speed 15
 ```
 
-`15_demo_gripper_params.py` 写入 0x17 夹爪力矩和力控参数时，会按协议范围做 SDK 侧校验；默认 `--gripper-type auto` 会尝试读取当前夹爪类型，并按小夹爪或大夹爪的精确范围限制。
+`15_demo_gripper_params.py` 写入 0x17 夹爪力矩和力控参数时，会按协议范围做 SDK 侧校验；默认 `--gripper-type auto` 会尝试读取当前夹爪类型，并按小夹爪或大夹爪的精确范围限制。写入默认只立即生效，需要掉电保存时显式添加 `--save`。
 
 完整示例列表：
 

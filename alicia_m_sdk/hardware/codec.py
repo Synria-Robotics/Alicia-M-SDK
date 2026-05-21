@@ -4,11 +4,12 @@ MessageCodec 是无状态的纯函数集合，负责将结构化消息对象转�
 以及将 Frame 解析回消息对象。所有物理量到协议值的映射委托给 utils/conversion.py。
 
 字节序: 所有多字节数据使用小端序（Little-Endian）。
-12bit 数据存储方式: 2 字节，高 4 位保留置零，低 12 位为有效数据。
+12bit 数据存储方式: 2 字节，常规值高 4 位保留置零，低 12 位为有效数据。
+写入速度、力矩、线性插补速度的零值时，使用 0xFFFF 表示底层精确零。
 """
 
 import struct
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from .constants import (
     CMD_VERSION, CMD_ZERO_RESET, CMD_TORQUE, CMD_JOINT_STATE,
@@ -17,7 +18,7 @@ from .constants import (
     FUNC_VERSION_REQ, FUNC_VERSION_RESP,
     AIM_LEADER, AIM_FOLLOWER,
     ADDR_POSITION, ADDR_VELOCITY, ADDR_TORQUE, ADDR_KP, ADDR_KD,
-    ADDR_LINEAR_VEL, ADDR_TEMPERATURE, LINEAR_VEL_CLEAR,
+    ADDR_LINEAR_VEL, ADDR_TEMPERATURE, EXACT_ZERO_12BIT, LINEAR_VEL_CLEAR,
     PLACEHOLDER, ENABLE_ON, ENABLE_OFF, FEEDBACK_BIT,
     NUM_MOTORS,
     VERSION_SERIAL_LEN, VERSION_HARDWARE_LEN, VERSION_FIRMWARE_LEN,
@@ -45,6 +46,19 @@ from alicia_m_sdk.utils.conversion import (
 
 # 夹爪电机索引
 _GRIPPER_INDEX = NUM_MOTORS - 1  # M6 = index 6
+
+
+def _encode_12bit_write_value(value: float, encoder: Callable[[float], int]) -> int:
+    """@brief 编码 0x06 写入用 12bit 字段，零值使用底层精确零特殊值。
+
+    @param value 待写入的物理量。
+    @param encoder 非零物理量到 12bit 协议值的编码函数。
+    @return 可直接写入 2 字节槽位的协议整数。
+    @note 仅用于写入速度、力矩和线性插补速度；位置、Kp、Kd、温度和读回解码不使用该规则。
+    """
+    if float(value) == 0.0:
+        return EXACT_ZERO_12BIT
+    return encoder(value)
 
 
 class MessageCodec:
@@ -200,7 +214,7 @@ class MessageCodec:
         for motor_values in msg.motor_data:
             for value in motor_values:
                 # 所有值统一按 2 字节小端序写入
-                # 12bit 数据的高 4 位已由调用方保证置零
+                # 12bit 常规值高 4 位由调用方保证置零；0xFFFF 是写入零值特殊协议值
                 data.extend(struct.pack('<H', value & 0xFFFF))
 
         return Frame(
@@ -404,7 +418,7 @@ class MessageCodec:
                 pos_raw = encode_gripper(positions[i])
             else:
                 pos_raw = encode_position(positions[i])
-            vel_raw = encode_velocity(velocities[i])
+            vel_raw = _encode_12bit_write_value(velocities[i], encode_velocity)
             motor_data.append([pos_raw, vel_raw])
 
         return self.encode_joint_control(JointControlRequest(
@@ -435,7 +449,9 @@ class MessageCodec:
 
         motor_data: List[List[int]] = []
         for velocity in linear_velocities:
-            motor_data.append([encode_linear_velocity(velocity)])
+            motor_data.append([
+                _encode_12bit_write_value(velocity, encode_linear_velocity)
+            ])
 
         return self.encode_joint_control(JointControlRequest(
             aim=aim,
@@ -484,13 +500,19 @@ class MessageCodec:
                 pos_raw = encode_gripper(positions[i])
             else:
                 pos_raw = encode_position(positions[i])
-            vel_raw = encode_velocity(velocities[i])
-            tor_raw = encode_torque(torques[i], motor_index=i)
+            vel_raw = _encode_12bit_write_value(velocities[i], encode_velocity)
+            tor_raw = _encode_12bit_write_value(
+                torques[i],
+                lambda value, motor_index=i: encode_torque(value, motor_index=motor_index),
+            )
             kp_raw = encode_kp(kps[i])
             kd_raw = encode_kd(kds[i])
             # 线性轨迹速度: 有值时编码 [0, 10] rad/s，无值时填充 0xFFFF 清零信号
             if linear_velocities is not None:
-                lv_raw = encode_linear_velocity(linear_velocities[i])
+                lv_raw = _encode_12bit_write_value(
+                    linear_velocities[i],
+                    encode_linear_velocity,
+                )
             else:
                 lv_raw = LINEAR_VEL_CLEAR
             motor_data.append([pos_raw, vel_raw, tor_raw, kp_raw, kd_raw, lv_raw])

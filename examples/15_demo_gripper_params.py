@@ -4,7 +4,8 @@
 @details
 本示例通过公开 API `robot.get_gripper_params()` 和
 `robot.set_gripper_params()` 读写夹爪夹持参数。运行
-`python examples/15_demo_gripper_params.py --help` 可查看全部可修改参数。
+`python 15_demo_gripper_params.py --help` 可查看全部可修改参数；
+写入时可显式添加 `--save` 请求设备掉电保存当前完整夹爪参数配置。
 """
 
 import argparse
@@ -36,11 +37,13 @@ def main():
             "",
             "示例:",
             "  读取全部参数:",
-            "    python examples/15_demo_gripper_params.py --port COM37",
+            "    python e15_demo_gripper_params.py --port COM37",
             "  修改目标夹持力为 30 N:",
-            "    python examples/15_demo_gripper_params.py --port COM37 --target-force 30 --gripper-type small",
+            "    python 15_demo_gripper_params.py --target-force 30 --gripper-type small",
             "  同时修改夹持力和最大保持力矩，并跳过确认:",
-            "    python examples/15_demo_gripper_params.py --port COM37 --target-force 30 --hold-torque 2.5 --gripper-type small --yes",
+            "    python 15_demo_gripper_params.py --port COM37 --target-force 30 --hold-torque 2.5 --gripper-type small --yes",
+            "  修改目标夹持力并请求掉电保存:",
+            "    python 15_demo_gripper_params.py --target-force 30 --gripper-type small --save",
         ]
     )
 
@@ -60,6 +63,8 @@ def main():
                         help="Skip interactive confirmation before writing.")
     parser.add_argument("--skip-readback", action="store_true",
                         help="Do not read all parameters after writing.")
+    parser.add_argument("--save", action="store_true",
+                        help="When writing, request persistent save of the full gripper parameter configuration; write wait is at least 3s.")
     parser.add_argument("--gripper-type", choices=["auto", "small", "large", "50mm", "100mm"],
                         default="auto",
                         help="Validate write values with a gripper-specific range; default auto reads user settings.")
@@ -96,6 +101,8 @@ def main():
         parser.error("写入参数必须是有限数字，不能是 NaN 或 inf")
     if write_values and args.mask != 0:
         parser.error("--mask 仅用于读取；写入时请使用具体参数选项，掩码会自动生成")
+    if args.save and not write_values:
+        parser.error("--save 仅用于写入夹爪参数；读取参数时不要使用 --save")
 
     robot = alicia_m_sdk.create_robot(port=args.port)
     beauty_print("机器人连接成功", type="success")
@@ -106,6 +113,10 @@ def main():
                 mask = gripper_param_mask(write_values)
                 beauty_print(f"即将写入 0x17 参数，掩码 0x{mask:02X}", type="warning")
                 beauty_print("写入不会主动闭合夹爪，但会影响后续夹爪动作。SDK 会按夹爪类型校验参数范围。", type="warning")
+                if args.save:
+                    beauty_print("本次写入会请求设备掉电保存当前完整夹爪参数配置。", type="warning")
+                    if args.timeout < 3.0:
+                        beauty_print("保存操作可能较慢，本次写入响应等待时间会提升到 3.0 秒。", type="info")
                 beauty_print(f"夹爪类型校验: {args.gripper_type}", type="info")
                 for spec in GRIPPER_PARAM_SPECS:
                     if spec.name in write_values:
@@ -122,6 +133,7 @@ def main():
                     timeout=args.timeout,
                     readback=not args.skip_readback,
                     gripper_type=args.gripper_type,
+                    save=args.save,
                 )
             except ValueError as exc:
                 beauty_print(f"设置失败，值不属于指定范围：{exc}", type="warning")

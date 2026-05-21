@@ -137,8 +137,10 @@ MitParams(
 | `get_user_settings(timeout)` | 读取个性化设置 |
 | `set_gripper_type(gripper_type)` | 写入夹爪类型，支持 GripperType / 0/2 / 10/40 / 字符串 |
 | `get_gripper_params(mask, aim, timeout)` | 读取夹爪夹持参数，普通用户优先使用 |
-| `set_gripper_params(values, aim, timeout, readback, gripper_type)` | 写入夹爪夹持参数，带 SDK 侧范围校验 |
+| `set_gripper_params(values, aim, timeout, readback, gripper_type, save=False)` | 写入夹爪夹持参数，带 SDK 侧范围校验；`save=True` 请求掉电保存 |
 | `send_gripper_param_frame(frame, timeout)` | 发送 0x17 夹爪参数帧，高级调试用途；普通用户优先使用 `get_gripper_params` / `set_gripper_params` |
+
+`set_gripper_params(..., save=False)` 默认只让参数立即生效；需要写入后掉电保存时，显式传 `save=True`。保存写入可能比普通写入慢，`save=True` 时 SDK 会使用至少 3 秒的响应等待时间。
 
 ### 运动学
 

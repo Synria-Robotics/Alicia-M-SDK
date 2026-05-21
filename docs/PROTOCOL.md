@@ -74,12 +74,25 @@ CRC32(cmd_id + func_code + length + data) & 0xFF
 | MIT 线性插补 | 6 | `pos + vel + torque + kp + kd + linear_vel` |
 | 扩展状态轮询 | 7 | `pos + vel + torque + kp + kd + linear_vel + temperature` |
 
-写入速度、力矩、线性插补速度时，原始值 `FF FF` 会被下位机按精确 `0` 处理。
+写入速度、力矩、线性插补速度时，原始值 `FF FF` 会被下位机按精确 `0` 处理；该特殊值不用于位置、Kp、Kd 或温度字段。
+
+## 0x17 夹爪夹持参数
+
+`0x17` 用于读取或设置夹爪力矩和力控相关参数，一帧只选择一条机械臂。
+
+| 场景 | 数据区 |
+|------|--------|
+| 读取全部参数 | 空 |
+| 读取部分参数 | `mask` 1 字节 |
+| 写入参数 | `mask` 1 字节 + 按掩码低位到高位排列的 `float32` |
+| 写入并请求保存 | 写入参数数据区末尾追加 1 字节保存标志 |
+
+保存标志为 `0x00` 时仅立即生效；保存标志为非 `0` 时，设备会保存写入后的完整夹爪参数配置。SDK 默认不保存，用户需要显式使用 `set_gripper_params(..., save=True)` 或 15 号 demo 的 `--save`。
 
 ## SDK 维护注意
 
 - `0x02` 仅在 SDK 中用于读取用户设置和写入夹爪类型；普通用户不要手写该帧。
-- `0x17` 的 8 个夹爪参数、范围和示例以完整协议和 `alicia_m_sdk/gripper_params.py` 为准。
+- `0x17` 的 8 个夹爪参数、范围、保存标志和示例以完整协议和 `alicia_m_sdk/gripper_params.py` 为准。
 - `0x11` 普通入口主要是 `switch_mode()`；加速度、减速度和电机环路参数属于高级调试。
 - `0xEE` 错误反馈由 SDK 自动解析；排查时再参考完整协议的错误表。
 - 协议常量变更时，同步检查 `alicia_m_sdk/hardware/constants.py`、`alicia_m_sdk/hardware/codec.py` 和本文档。
