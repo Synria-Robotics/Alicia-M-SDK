@@ -137,6 +137,9 @@ def create_robot(
     return robot
 
 
+from .sop import SopConfig, SopReport, SopRunner, SopStepResult, run_sop
+
+
 __all__ = [
     # 工厂函数
     'create_robot',
@@ -148,6 +151,7 @@ __all__ = [
     'ControlAim', 'ControlMode', 'GripperType',
     'DiagnosticResult', 'DiagnosticArmSnapshot', 'UserSettings',
     'GripperParamResult', 'GripperParamSpec',
+    'SopConfig', 'SopReport', 'SopRunner', 'SopStepResult', 'run_sop',
     # 异常
     'AliciaSDKError', 'ConnectionError', 'TimeoutError',
     'ProtocolError', 'ValidationError', 'RobotStateError',
