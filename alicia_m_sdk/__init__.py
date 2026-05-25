@@ -18,7 +18,7 @@
 
 from typing import Literal, Optional
 
-__version__ = "1.1.1rc1"
+__version__ = "1.1.1rc2"
 
 # === 核心类型 ===
 from .api.synria_robot_api import SynriaRobotAPI
