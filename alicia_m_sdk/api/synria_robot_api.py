@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Mapping
 
 import numpy as np
 
@@ -18,24 +18,48 @@ from ..types.exceptions import (
 )
 from ..hardware.codec import MessageCodec
 from ..hardware.constants import (
-    AIM_LEADER, AIM_FOLLOWER, CMD_VERSION,
-    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES, CTRL_MODE_MIT, CTRL_MODE_PV,
+    CMD_VERSION,
+    MOTOR_PARAM_CTRL_MODE, CTRL_MODE_NAMES,
     CMD_GRIPPER_PARAM,
-    NUM_JOINTS,
     POLL_ADDR_BASIC, POLL_ADDR_EXTENDED,
 )
 from ..hardware.serial_port import SerialPort
 from ..hardware.device import Device
 from ..execution.joint_control import JointController
-from ..execution.trajectory_executor import TrajectoryExecutor
+from ..execution.trajectory_executor import (
+    TrajectoryExecutor,
+    execute_joint_trajectory as _execute_joint_trajectory,
+    resolve_default_traj_save_dir as _resolve_default_traj_save_dir,
+    save_trajectory_csv as _save_trajectory_csv,
+)
+from ..execution.joint_mapping import convert_joints_rad_from_alicia_d_to_alicia_m
+from ..execution.teleoperation import Teleoperation
 from ..diagnostics import DiagnosticResult, run_diagnostic as _run_diagnostic
 from ..user_settings import UserSettings
 from ..user_settings import get_user_settings as _get_user_settings
 from ..user_settings import set_gripper_type as _set_gripper_type
+from ..user_settings import gripper_type_config_value
+from ..gripper_params import (
+    GripperParamResult,
+    make_read_gripper_params_frame,
+    make_write_gripper_params_frame,
+    parse_gripper_params_response,
+)
 from ..integrations.robocore import kinematics as kin_module
 from ..integrations.robocore import planning as plan_module
 from ..utils.beauty_logger import logger
 from ..utils.version import supports_min_version
+from ..utils.demo_runtime import (
+    auto_generate_waypoints as _auto_generate_waypoints,
+    load_waypoints_interactive as _load_waypoints_interactive,
+    make_mapped_teleop_state_printer as _make_mapped_teleop_state_printer,
+    manual_record_waypoints as _manual_record_waypoints,
+    manual_record_waypoints_with_torque_off as _manual_record_waypoints_with_torque_off,
+    print_diagnostic_response as _print_diagnostic_response,
+    print_joint_state as _print_joint_state,
+    print_robot_state as _print_robot_state,
+)
+from .._internal import connection as _connection
 
 
 class SynriaRobotAPI:
@@ -62,6 +86,16 @@ class SynriaRobotAPI:
         self._traj_executor = TrajectoryExecutor(self._device)
         self._robot_model = robot_model
         self._connected = False
+        # Tracks whether the caller requested automatic version detection.
+        # "auto" means we must resolve the URDF version after the handshake;
+        # any other value means the model was already loaded (or deliberately
+        # skipped) before connect() was called.
+        self._model_version_mode: str = config.version
+        # Resolved synriard version string, e.g. "v1_1".  Set after a
+        # successful auto-detection or when an explicit version is used.
+        self._resolved_model_version: Optional[str] = (
+            None if config.version == "auto" else config.version
+        )
 
     def __enter__(self) -> "SynriaRobotAPI":
         """Enter a managed robot session, connecting if needed."""
@@ -84,6 +118,16 @@ class SynriaRobotAPI:
     def robot_model(self):
         """获取 RoboCore 机器人模型实例"""
         return self._robot_model
+
+    @property
+    def resolved_model_version(self) -> Optional[str]:
+        """实际加载的 URDF 版本字符串，例如 ``'v1_1'``。
+
+        * 当 ``version="auto"`` 时，连接成功后由固件硬件版本自动填充。
+        * 当 ``version`` 为显式值时，等同于 ``config.version``。
+        * 连接前或自动检测失败时返回 ``None``。
+        """
+        return self._resolved_model_version
 
     @property
     def control_mode(self) -> ControlMode:
@@ -137,46 +181,22 @@ class SynriaRobotAPI:
 
     def _connect_once(self, timeout: float) -> bool:
         """在当前 SerialPort.port_name 上完成一次 Alicia-M 握手。"""
-        deadline = time.time() + timeout
-
-        # 1. 打开串口。
-        if not self._serial_port.connect():
-            raise ConnectionError("Failed to open serial port; check device connection and permissions")
-
         try:
-            # 2. 启动后台读线程和状态轮询线程。
-            self._device.start()
-
-            # 3. 设置或自动检测控制目标。
-            if self._config.control_aim:
-                aim_str = self._config.control_aim.lower()
-                aim = AIM_LEADER if aim_str == "leader" else AIM_FOLLOWER
-                self._device.set_aim(aim)
-            else:
-                self._auto_detect_aim(max(deadline - time.time(), 0.5))
-
-            # 4. 先验证版本响应；没有响应就跳过当前串口。
-            remaining = max(deadline - time.time(), 0.5)
-            firmware_version = self.get_firmware_version(timeout=remaining)
-            if firmware_version is None:
-                raise ConnectionError("No Alicia-M firmware version response received")
-
-            # 5. 等待首次状态缓存填充。
-            poll_deadline = min(deadline, time.time() + 2.0)
-            while time.time() < poll_deadline:
-                if self._device.joint_state is not None:
-                    break
-                time.sleep(0.05)
-
-            # 6. 检测固件控制模式并同步 SDK 内部状态。
-            self._sync_control_mode()
-
-            self._connected = True
-            logger.info(f"Robot connected: {self.connected_port}")
-            return True
+            robot_model, resolved_version = _connection.connect_once(
+                self._serial_port, self._device, self._codec,
+                self._joint_ctrl, self._config,
+                model_version_mode=self._model_version_mode,
+                timeout=timeout,
+            )
         except Exception:
             self.disconnect()
             raise
+        if robot_model is not None:
+            self._robot_model = robot_model
+            self._resolved_model_version = resolved_version
+        self._connected = True
+        logger.info(f"Robot connected: {self.connected_port}")
+        return True
 
     def disconnect(self) -> None:
         """断开连接：停止后台线程 → 关闭串口"""
@@ -258,6 +278,22 @@ class SynriaRobotAPI:
         return kin_module.compute_forward_kinematics(
             self._robot_model, list(state.angles)
         )
+
+    def compute_forward_kinematics(
+        self,
+        joints: List[float],
+        joint_format: str = "rad",
+    ) -> Dict:
+        """@brief 对指定关节角计算正运动学。
+
+        @param joints 关节角列表。
+        @param joint_format 关节角单位，支持 "rad" 或 "deg"。
+        @return 位姿字典。
+        """
+        if self._robot_model is None:
+            raise RobotStateError("未加载机器人模型")
+        q = [math.radians(a) for a in joints] if joint_format == "deg" else list(joints)
+        return kin_module.compute_forward_kinematics(self._robot_model, q)
 
     def get_firmware_version(self, timeout: float = 5.0) -> Optional[str]:
         """获取固件版本
@@ -507,6 +543,14 @@ class SynriaRobotAPI:
         """运行自检并返回结构化结果。"""
         return _run_diagnostic(self._device, timeout=timeout)
 
+    def print_diagnostic_response(self, result: DiagnosticResult) -> bool:
+        """@brief 打印自检响应快照。
+
+        @param result run_diagnostic 返回的结构化结果。
+        @return True 表示响应正常，False 表示超时或错误响应。
+        """
+        return _print_diagnostic_response(result)
+
     def get_user_settings(self, timeout: float = 1.0) -> Optional[UserSettings]:
         """读取全部个性化设置。"""
         return _get_user_settings(self._device, timeout=timeout)
@@ -529,12 +573,92 @@ class SynriaRobotAPI:
             readback=readback,
         )
 
+    def confirm_gripper_type(self, settings: UserSettings, expected_value: int) -> bool:
+        """@brief 判断读回的个性化设置是否确认夹爪类型。
+
+        @param settings 读回的个性化设置。
+        @param expected_value 期望夹爪类型配置值。
+        @return True 表示读回值与期望值一致。
+        """
+        if len(settings.values) < 2:
+            return False
+        actual_value = settings.values[1]
+        return gripper_type_config_value(actual_value) == gripper_type_config_value(expected_value)
+
     def send_gripper_param_frame(self, frame, timeout: float = 1.0):
         """发送 0x17 夹爪夹持参数帧并等待响应。
 
         这是为低层夹爪参数 demo 保留的过渡 API，避免示例直接访问内部 Device。
         """
         return self._device.send_and_wait(frame, CMD_GRIPPER_PARAM, timeout=timeout)
+
+    def get_gripper_params(
+        self,
+        mask: int = 0,
+        aim: Union[str, int] = "follower",
+        timeout: float = 1.0,
+    ) -> Optional[GripperParamResult]:
+        """@brief 通过 0x17 读取夹爪夹持参数。
+
+        @param mask 参数掩码，0 表示读取全部参数。
+        @param aim "follower"、"leader"、AIM_FOLLOWER 或 AIM_LEADER。
+        @param timeout 响应超时时间，单位秒。
+        @return 解析后的响应；超时时返回 None。
+        """
+        frame = make_read_gripper_params_frame(aim=aim, mask=mask)
+        response = self.send_gripper_param_frame(frame, timeout=timeout)
+        if response is None:
+            return None
+        return parse_gripper_params_response(response)
+
+    def set_gripper_params(
+        self,
+        values: Mapping[Union[str, int], float],
+        aim: Union[str, int] = "follower",
+        timeout: float = 1.0,
+        readback: bool = False,
+        readback_delay: float = 0.2,
+        gripper_type=None,
+        save: bool = False,
+    ) -> Optional[Union[GripperParamResult, Dict[str, GripperParamResult]]]:
+        """@brief 通过 0x17 写入夹爪夹持参数。
+
+        @param values 参数值，键可以是公开名称或协议掩码位。
+        @param aim "follower"、"leader"、AIM_FOLLOWER 或 AIM_LEADER。
+        @param timeout 响应超时时间，单位秒。
+        @param readback 写入后是否读回全部夹爪参数。
+        @param readback_delay 写入响应与读回之间的等待时间，单位秒。
+        @param gripper_type 夹爪类型；None 表示按大小夹爪合并范围校验，
+            "auto" 表示先读取用户设置中的夹爪类型再按精确范围校验。
+        @param save True 时请求设备掉电保存当前完整夹爪参数配置。
+        @return 写入响应；启用读回时返回包含 write/readback 的字典；超时时返回 None。
+        @note save 默认为 False，避免用户误触掉电保存；写入参数仍会立即生效。
+        @note save=True 时设备可能需要写入非易失存储，SDK 会使用至少 3 秒的响应等待时间。
+        """
+        resolved_gripper_type = gripper_type
+        if isinstance(gripper_type, str) and gripper_type.lower() == "auto":
+            settings = self.get_user_settings(timeout=timeout)
+            resolved_gripper_type = settings.gripper_type if settings and settings.gripper_type is not None else None
+        effective_timeout = max(timeout, 3.0) if save else timeout
+        frame = make_write_gripper_params_frame(
+            values,
+            aim=aim,
+            gripper_type=resolved_gripper_type,
+            save=save,
+        )
+        response = self.send_gripper_param_frame(frame, timeout=effective_timeout)
+        if response is None:
+            return None
+        write_result = parse_gripper_params_response(response)
+        if not readback:
+            return write_result
+
+        if readback_delay > 0:
+            time.sleep(readback_delay)
+        readback_result = self.get_gripper_params(mask=0, aim=aim, timeout=effective_timeout)
+        if readback_result is None:
+            return {"write": write_result}
+        return {"write": write_result, "readback": readback_result}
 
     # ========== 运动学 ==========
 
@@ -614,6 +738,74 @@ class SynriaRobotAPI:
             traj['timestamps'], traj['positions'], traj['velocities']
         )
 
+    def execute_planned_joint_trajectory(
+        self,
+        traj,
+        speed: float = 100.0,
+        track_hz: Optional[float] = None,
+    ):
+        """@brief 执行已经规划好的关节轨迹。
+
+        @param traj plan_joint_trajectory 返回的轨迹字典。
+        @param speed 执行显示和控制使用的速度参数。
+        @param track_hz 关节反馈记录频率；None 表示不记录。
+        @return (ok, tracking)，ok 表示执行是否完成，tracking 为可选反馈记录。
+        """
+        return _execute_joint_trajectory(self, traj, speed, track_hz=track_hz)
+
+    def save_joint_trajectory_csv(self, traj, output_dir=None):
+        """@brief 保存轨迹 CSV 文件。
+
+        @param traj 轨迹字典。
+        @param output_dir 输出目录；None 时使用工具默认目录。
+        @return 保存后的 CSV 路径。
+        """
+        return _save_trajectory_csv(traj, output_dir=output_dir)
+
+    def default_trajectory_save_dir(self, anchor_file):
+        """@brief 获取默认轨迹保存目录。
+
+        @param anchor_file 用于定位项目根目录的文件路径。
+        @return 默认保存目录。
+        """
+        return _resolve_default_traj_save_dir(anchor_file)
+
+    def create_mapped_teleoperation(
+        self,
+        leader,
+        frequency_hz: float = 100.0,
+        follower_speed: float = 200.0,
+        use_interpolation: bool = False,
+        kp=None,
+        kd=None,
+        torque=None,
+        vel_ref=None,
+    ) -> Teleoperation:
+        """@brief 创建 Alicia-D 到 Alicia-M 的 URDF 限位映射遥操作控制器。
+
+        @param leader Alicia-D 示教臂实例。
+        @param frequency_hz 控制循环频率。
+        @param follower_speed 操作臂运动速度参数。
+        @param use_interpolation MIT 模式是否启用线性轨迹插值。
+        @param kp MIT 位置增益。
+        @param kd MIT 速度增益。
+        @param torque MIT 前馈力矩。
+        @param vel_ref MIT 速度参考。
+        @return Teleoperation 控制器实例。
+        """
+        return Teleoperation(
+            leader=leader,
+            follower=self,
+            frequency_hz=frequency_hz,
+            follower_speed=follower_speed,
+            joint_mapper=convert_joints_rad_from_alicia_d_to_alicia_m,
+            use_interpolation=use_interpolation,
+            kp=kp,
+            kd=kd,
+            torque=torque,
+            vel_ref=vel_ref,
+        )
+
     def move_cartesian_linear(
         self, target_pose, duration: float = 2.0, **kwargs
     ) -> bool:
@@ -652,60 +844,68 @@ class SynriaRobotAPI:
                 q_current = r['q'].tolist()
         return {'results': results, 'num_solved': sum(1 for r in results if r.get('success'))}
 
+    def manual_record_waypoints(self):
+        """@brief 交互式记录当前机械臂关节路点。
+
+        @return 路点数组 [N, 6]，取消或路点不足时返回 None。
+        """
+        return _manual_record_waypoints(self)
+
+    def manual_record_waypoints_with_torque_off(self):
+        """@brief 切换到 MIT 并卸力后，交互式拖动示教记录路点。
+
+        @return 路点数组 [N, 6]，取消或路点不足时返回 None。
+        """
+        return _manual_record_waypoints_with_torque_off(self)
+
+    def auto_generate_waypoints(
+        self,
+        num_waypoints: int = 5,
+        joint_scale: float = 0.6,
+        use_current_joints: bool = False,
+        seed: Optional[int] = 666,
+    ):
+        """@brief 自动生成关节空间路点。
+
+        @param num_waypoints 路点数量，至少为 2。
+        @param joint_scale robot_model.random_q 的缩放系数。
+        @param use_current_joints 是否使用当前关节角作为首个路点。
+        @param seed 随机种子。
+        @return 路点数组 [N, 6]。
+        """
+        return _auto_generate_waypoints(
+            self, self._robot_model,
+            num_waypoints=num_waypoints,
+            joint_scale=joint_scale,
+            use_current_joints=use_current_joints,
+            seed=seed,
+        )
+
+    def load_waypoints(self, path: str):
+        """@brief 从文件加载关节路点。
+
+        @param path 路点文件路径；为空时会交互式询问。
+        @return (waypoints, meta) 或 None。
+        """
+        return _load_waypoints_interactive(path)
+
+    def make_mapped_teleop_state_printer(self, frequency_hz: float):
+        """@brief 创建遥操作映射状态打印回调。
+
+        @param frequency_hz 遥操作循环频率。
+        @return 可传入 Teleoperation.set_state_callback 的回调。
+        """
+        return _make_mapped_teleop_state_printer(frequency_hz)
+
+    def print_compact_state(self) -> None:
+        """@brief 按 pos/vel/tor 紧凑格式打印当前状态。"""
+        _print_robot_state(self)
+
     # ========== 状态打印 ==========
 
     def print_state(self, continuous: bool = False, output_format: str = "deg") -> None:
         """打印当前状态"""
-        try:
-            from robocore.utils.beauty_logger import beauty_print as _rc_beauty_print
-            from robocore.utils.beauty_logger import beauty_print_array
-
-            def beauty_print(content: Any, type: Optional[str] = None):
-                if type is None:
-                    _rc_beauty_print(content)
-                else:
-                    _rc_beauty_print(content, type=type)
-
-        except ImportError:
-            def beauty_print(content: Any, type: Optional[str] = None):
-                print(content)
-
-            def beauty_print_array(arr, **kw):
-                return str(arr)
-
-        def _print_once():
-            state = self._device.joint_state
-            if state is None:
-                beauty_print("未获取到状态数据", type="warning")
-                return
-            angles = list(state.angles)
-            if output_format == "deg":
-                angles_display = [math.degrees(a) for a in angles]
-                unit = "deg"
-            else:
-                angles_display = list(angles)
-                unit = "rad"
-
-            beauty_print(f"关节角度 ({unit}):")
-            print(f"  {beauty_print_array(angles_display, precision=2)}")
-            beauty_print(f"夹爪: {state.gripper:.0f}")
-            if state.velocities:
-                beauty_print("速度 (rad/s):")
-                print(f"  {beauty_print_array(state.velocities, precision=3)}")
-            if state.torques:
-                beauty_print("力矩 (N·m):")
-                print(f"  {beauty_print_array(state.torques, precision=3)}")
-
-        if continuous:
-            try:
-                while True:
-                    _print_once()
-                    print("---")
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                pass
-        else:
-            _print_once()
+        _print_joint_state(self._device, continuous=continuous, output_format=output_format)
 
     # ========== 内部方法 ==========
 
@@ -719,117 +919,8 @@ class SynriaRobotAPI:
             for v in values
         ]
 
-    def _detect_firmware_mode(self) -> Optional[ControlMode]:
-        """通过 0x11 查询固件实际控制模式
-
-        仅检查关节电机 M0-M5 的模式一致性（夹爪 M6 固件锁定 MIT，不参与判断）。
-        若关节电机模式不一致，返回 None 以触发后续强制切换。
-        内部重试多次，容忍连接初期的短暂通信不稳定。
-
-        :return, 关节电机一致时返回该模式，不一致或查询失败返回 None
-        """
-        _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
-        for attempt in range(3):
-            self._device.flush()
-            values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
-            if values is not None and len(values) >= NUM_JOINTS:
-                break
-            logger.debug(f"模式检测第 {attempt + 1} 次查询未获得有效响应")
-            time.sleep(0.5)
-        else:
-            return None
-        # 仅检查关节电机 M0-M5（夹爪 M6 固件锁定 MIT，不参与一致性判断）
-        joint_values = values[:NUM_JOINTS]
-        if any(v != joint_values[0] for v in joint_values):
-            logger.warning(f"检测到关节电机混合控制模式: {joint_values}，将强制同步")
-            return None
-        return _MODE_MAP.get(joint_values[0])
-
-    def _sync_control_mode(self) -> None:
-        """检测固件控制模式并同步 SDK 内部状态
-
-        仅检测和同步关节电机 M0-M5 的模式（夹爪 M6 固件锁定 MIT）。
-
-        根据 config.control_mode:
-        - None: 跟随固件当前模式（不发送切换指令）
-        - "pv"/"mit": 若与固件不一致则自动切换关节电机
-        """
-        firmware_mode = self._detect_firmware_mode()
-        requested = self._config.control_mode
-        desired = ControlMode(requested.lower()) if requested else firmware_mode
-
-        if desired is None:
-            raise ConnectionError(
-                "无法检测固件控制模式，请检查串口连接和固件状态"
-            )
-
-        if firmware_mode == desired:
-            # 固件已是目标模式，同步 SDK 状态即可（固件侧已处理目标位置初始化）
-            self._joint_ctrl.mode = desired
-            logger.info(f"固件控制模式: {desired.value.upper()}")
-        else:
-            # 不一致（含 firmware_mode=None 即查询失败/混合模式）→ 强制切换
-            # 设为对端模式确保 switch_mode 不会因 mode == desired 而跳过
-            opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
-            self._joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
-            logger.info(f"切换固件模式 → {desired.value.upper()}")
-            self._joint_ctrl.switch_mode(desired)
-
-    def _auto_detect_aim(self, timeout: float) -> None:
-        """自动检测控制目标（示教臂/操作臂）
-
-        安全策略: 自动检测到 Leader 时强制回退为 Follower 并发出警告。
-        Alicia-M SDK 的控制指令（模式切换、使能等）不应发往示教臂，
-        否则可能导致示教臂固件异常。如确需连接 Leader，
-        请通过 create_robot(control_aim="leader") 显式指定。
-        """
-        frame = self._codec.encode_version_request()
-        self._device.send_and_wait(frame, CMD_VERSION, timeout=timeout)
-        info = self._device.version_info
-        if info and info.device_type:
-            dt = info.device_type.upper()
-            if dt in ('L', 'LEADER'):
-                logger.warning(
-                    "检测到示教臂 (Leader)，但未显式指定 control_aim='leader'。"
-                    "为防止误操作示教臂固件，已强制设为 Follower 模式。"
-                    "如确需连接 Leader，请通过 create_robot(control_aim='leader') 显式指定"
-                )
-                self._device.set_aim(AIM_FOLLOWER)
-            else:
-                self._device.set_aim(AIM_FOLLOWER)
-                logger.info("检测到操作臂 (Follower)")
-        else:
-            self._device.set_aim(AIM_FOLLOWER)
-            logger.info("未检测到设备类型，默认操作臂")
-
     def _execute_cartesian_traj(self, traj: Dict) -> bool:
         """执行笛卡尔轨迹（逐点 IK → PV 轨迹执行）"""
-        if self._robot_model is None:
-            return False
-        poses = traj.get('poses', [])
-        if len(poses) == 0:
-            return False
-
-        state = self._device.joint_state
-        q_current = list(state.angles) if state else None
-        joint_positions = []
-
-        for pose in poses:
-            r = kin_module.compute_inverse_kinematics(
-                self._robot_model, pose, q_init=q_current
-            )
-            if not r.get('success'):
-                logger.warning("笛卡尔轨迹 IK 求解失败")
-                return False
-            q = r['q'].tolist()
-            joint_positions.append(q + [state.gripper if state else 0.0])
-            q_current = q
-
-        positions = np.array(joint_positions)
-        timestamps = traj['timestamps']
-        # 数值微分计算速度
-        dt = np.diff(timestamps)
-        velocities = np.zeros_like(positions)
-        velocities[1:] = np.diff(positions, axis=0) / dt[:, np.newaxis]
-
-        return self._traj_executor.execute_pv(timestamps, positions, velocities)
+        return plan_module.execute_cartesian_trajectory(
+            self._robot_model, traj, self._device.joint_state, self._traj_executor
+        )

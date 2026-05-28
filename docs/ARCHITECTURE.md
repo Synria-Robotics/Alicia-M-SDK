@@ -1,6 +1,12 @@
-# Alicia-M-SDK v1.0.0 重构架构设计
+# Alicia-M-SDK 历史架构设计（旧版参考）
 
-> 本文档描述 Alicia-M-SDK 的完整重构方案，目标是构建一个**规范、优雅、易用、可扩展**的机器人 SDK。
+> 状态：历史重构方案 / 旧版参考文档。
+>
+> 本文主要记录 2026-04-01 重构方案中的设计目标、分层思路和协议分析。2026-05-06 后，项目为对齐 Alicia-D 目录风格，已将旧设计中的 `protocol/`、`control/` 等结构演进为当前的 `hardware/`、`execution/` 等实现。
+>
+> 当前目录边界、API 收口、demo 规则和公开入口以 `docs/API_MAINTENANCE.md`、`docs/API_REFERENCE.md` 和当前代码为准；本文不再作为当前实现的强制规范。
+>
+> 原始目标：构建一个**规范、优雅、易用、可扩展**的机器人 SDK。
 
 ---
 
@@ -2075,7 +2081,7 @@ executor.execute_mit(timestamps, positions,
 |------|-------|--------|
 | 帧头 | 0xAA | 0xAA |
 | 指令 ID | 0x06 | 0x06 |
-| 功能码 | aim \| 0x80 | aim \| 0x80 |
+| 功能码 | `aim` 按位或 `0x80` | `aim` 按位或 `0x80` |
 | 数据长度 | **0x1E** (30) | **0x48** (72) |
 | start_addr | 0x00 | 0x00 |
 | addr_count | **0x02** | **0x05** |

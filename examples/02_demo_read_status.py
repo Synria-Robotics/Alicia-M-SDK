@@ -6,8 +6,7 @@
 import argparse
 
 import alicia_m_sdk
-from _common import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+from _demo_helpers import add_port_argument, beauty_print, beauty_print_array
 
 
 def main():
@@ -18,8 +17,8 @@ def main():
     args = parser.parse_args()
 
     # 创建并连接机器人
-    robot = alicia_m_sdk.create_robot(port=args.port)
-    beauty_print(f"机器人连接成功（{robot.control_mode.value.upper()} 模式）", type="success")
+    robot = alicia_m_sdk.create_robot(port=args.port, sync_control_mode=False)
+    beauty_print("机器人连接成功", type="success")
 
     try:
         # --- 查询各电机控制模式 (0x11, addr=0x0B) ---

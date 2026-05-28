@@ -9,9 +9,7 @@ import argparse
 import time
 import numpy as np
 import alicia_m_sdk
-from alicia_m_sdk.integrations.robocore import compute_forward_kinematics, compute_inverse_kinematics
-from _common import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
+from _demo_helpers import add_port_argument, beauty_print, beauty_print_array
 # robocore.transform.conversions 在 2.5.0rc2 已合并至顶层 robocore.transform
 try:
     from robocore.transform.conversions import quaternion_to_matrix
@@ -23,7 +21,7 @@ from robocore.utils.backend import to_numpy
 # 默认目标位姿: 位置 (m) + 四元数 (xyzw)
 # DEFAULT_TARGET_POSE = [0.32,  -0.07, 0.37, 0.0,0.74, 0.0, 0.68]
 # DEFAULT_TARGET_POSE = [0.33, - 0.21, 0.33, 0.0, 0.85, 0.0, 0.53]
-DEFAULT_TARGET_POSE = [0.4279, -0.0946, 0.1384, -0.6645, 0.7321, 0.1010, 0.1106]
+DEFAULT_TARGET_POSE = [0.3279, -0.0946, 0.1384, -0.6645, 0.7321, 0.1010, 0.1106]
 
 def main():
     beauty_print("Demo: 逆运动学 (IK)", type="module")
@@ -44,8 +42,6 @@ def main():
         beauty_print("已切换到 PV 模式", type="success")
 
     try:
-        robot_model = robot.robot_model
-
         # === 1. 读取当前位姿 -> IK -> 打印关节角度 ===
         beauty_print("1. 当前位姿的逆运动学验证", type="module")
 
@@ -64,15 +60,14 @@ def main():
             # 以当前关节角度为初始猜测求解 IK
             q_current = robot.get_robot_state("joint")
             start_time = time.time()
-            ik_result = compute_inverse_kinematics(
-                robot_model,
+            ik_result = robot.set_pose(
                 T_current,
-                q_current,
                 method='dls',
-                max_iters=5000,
+                execute=False,
+                max_iters=1000,
                 pos_tol=1e-2,
                 ori_tol=1e-2,
-                num_initial_guesses=5,
+                num_initial_guesses=12,
                 use_analytic_jacobian=True,
             )
             elapsed = (time.time() - start_time) * 1000.0
@@ -108,18 +103,20 @@ def main():
             beauty_print("  无法获取当前关节角，使用零位作为初始猜测", type="warning")
 
         start_time = time.time()
-        ik_result = compute_inverse_kinematics(
-            robot_model,
+        target_ik_params = {
+            "max_iters": 1000,
+            "pos_tol": 1e-2,
+            "ori_tol": 1e-2,
+            "num_initial_guesses": 24,
+            "initial_guess_scale": 1.0,
+            "initial_guess_strategy": "current",
+            "use_analytic_jacobian": True,
+        }
+        ik_result = robot.set_pose(
             T_target,
-            q_current,
             method='dls',
-            max_iters=5000,
-            pos_tol=1e-2,
-            ori_tol=1e-2,
-            num_initial_guesses=10,
-            initial_guess_scale=1.0,
-            initial_guess_strategy='current',
-            use_analytic_jacobian=True,
+            execute=False,
+            **target_ik_params,
         )
         elapsed = (time.time() - start_time) * 1000.0
 
@@ -137,7 +134,7 @@ def main():
 
         # === 3. 目标位姿 vs 最终 FK 偏差 ===
         beauty_print("3. 目标位姿 vs 最终 FK 偏差", type="module")
-        fk_final = compute_forward_kinematics(robot_model, q_ik.tolist())
+        fk_final = robot.compute_forward_kinematics(q_ik.tolist(), joint_format="rad")
         final_position = fk_final["position"]
         final_rotation = fk_final["rotation"]
         target_position = np.asarray(target[:3], dtype=float)
@@ -167,13 +164,17 @@ def main():
                 user_input = input("  > ")
                 if user_input.strip().lower() == 'y':
                     beauty_print("正在移动到目标位姿...", type="info")
-                    robot.set_robot_state(
-                        target_joints=q_ik.tolist(),
-                        joint_format='rad',
+                    move_result = robot.set_pose(
+                        T_target,
+                        method='dls',
+                        execute=True,
                         speed=7,
-                        wait_for_completion=True,
+                        **target_ik_params,
                     )
-                    beauty_print("已到达目标位姿", type="success")
+                    if move_result.get("motion_executed"):
+                        beauty_print("已到达目标位姿", type="success")
+                    else:
+                        beauty_print("目标位姿未执行", type="warning")
                 else:
                     beauty_print("跳过运动执行", type="info")
             except EOFError:

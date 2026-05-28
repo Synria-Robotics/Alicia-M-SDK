@@ -9,28 +9,10 @@
 """
 
 import argparse
-import math
 import time
 
 import alicia_m_sdk
-from _common import add_port_argument
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
-
-
-def _print_joints(robot, label):
-    """Print current joint angles in deg/rad.
-
-    :param robot: Connected robot instance
-    :param label: Prefix label for log message
-    :return: None
-    """
-    joints = robot.get_robot_state("joint")
-    if joints is None:
-        beauty_print(f"{label}: 无法读取关节角度", type="warning")
-        return
-    joints_deg = [a * 180.0 / math.pi for a in joints]
-    beauty_print(f"{label} (deg): {beauty_print_array(joints_deg, precision=2)}", type="info")
-    beauty_print(f"{label} (rad): {beauty_print_array(joints, precision=4)}", type="info")
+from _demo_helpers import add_port_argument, beauty_print
 
 
 def main(args):
@@ -45,7 +27,8 @@ def main(args):
             robot.switch_mode("mit")
             beauty_print("已切换到 MIT 模式", type="success")
 
-        _print_joints(robot, "当前关节")
+        beauty_print("当前关节", type="module")
+        robot.print_state(output_format="deg")
         beauty_print("即将 torque off（使用新实现），机械臂将可自由拖动。", type="warning")
         input("确认安全后按 Enter 执行 torque off...")
         if robot.torque_control("off"):
@@ -55,7 +38,8 @@ def main(args):
             return
 
         input("\n拖动完成后按 Enter 读取当前位置...")
-        _print_joints(robot, "拖动后关节")
+        beauty_print("拖动后关节", type="module")
+        robot.print_state(output_format="deg")
 
         beauty_print("即将 torque on，机械臂将恢复力矩锁定。", type="warning")
         input("确认安全后按 Enter 执行 torque on...")
@@ -66,7 +50,8 @@ def main(args):
             return
 
         time.sleep(0.2)
-        _print_joints(robot, "恢复后关节")
+        beauty_print("恢复后关节", type="module")
+        robot.print_state(output_format="deg")
 
     except KeyboardInterrupt:
         beauty_print("\n用户中断", type="warning")

@@ -19,137 +19,18 @@ import time
 
 import numpy as np
 import alicia_m_sdk
-from _common import add_port_argument
-from alicia_m_sdk.execution.trajectory_executor import (
-    execute_joint_trajectory,
-    load_waypoints_from_file,
-    resolve_default_traj_save_dir,
-    save_trajectory_csv,
-)
-from alicia_m_sdk.utils.trajectory_plot import (
+from _demo_helpers import (
+    add_port_argument,
+    beauty_print,
+    beauty_print_array,
     plot_joint_tracking,
     plot_joint_velocity_tracking,
     plot_trajectory,
+    select_waypoint_mode,
 )
-from alicia_m_sdk.utils.beauty_logger import beauty_print, beauty_print_array
 
 # Console limits when loading dense CSV (e.g. saved trajectory as waypoints)
 _MAX_WAYPOINT_PRINT = 24
-
-
-def select_mode():
-    """Select waypoint input mode.
-
-    :return: Selected mode id ('1'/'2'/'3')
-    """
-    beauty_print("请选择路点来源：", type="module")
-    print("  1) 手动录点")
-    print("  2) 自动生成")
-    print("  3) 从文件加载")
-    while True:
-        mode = input("输入模式编号 [1/2/3]: ").strip()
-        if mode in {"1", "2", "3"}:
-            return mode
-        beauty_print("输入无效，请重新输入。", type="warning")
-
-
-def manual_record_waypoints(robot):
-    """Record joint waypoints from current robot state.
-
-    :param robot: Connected robot instance
-    :return: Waypoints array [N, 6], or None
-    """
-    beauty_print("手动录点模式：移动机械臂后按 Enter 采样，输入 q 结束。", type="module")
-    waypoints = []
-    idx = 1
-    while True:
-        cmd = input(f"[路点 {idx}] Enter=采样, q=结束: ").strip().lower()
-        if cmd == "q":
-            break
-        joints = robot.get_robot_state("joint")
-        if joints is None:
-            beauty_print("读取关节状态失败，跳过本次采样。", type="warning")
-            continue
-        waypoints.append(np.asarray(joints, dtype=np.float64))
-        beauty_print(f"  已记录路点 {idx}: {beauty_print_array(np.rad2deg(joints), precision=2)} deg")
-        idx += 1
-
-    if len(waypoints) < 2:
-        beauty_print("路点不足（至少 2 个），取消。", type="warning")
-        return None
-    return np.asarray(waypoints, dtype=np.float64)
-
-
-def manual_record_waypoints_with_torque_off(robot):
-    """Record waypoints with torque disabled for drag-teach.
-
-    :param robot: Connected robot instance
-    :return: Waypoints array [N, 6], or None
-    """
-    switched_to_mit = False
-    torque_disabled = False
-    try:
-        if robot.control_mode.value != "mit":
-            beauty_print("手动录点将临时切到 MIT 并卸力，结束后恢复 PV。", type="warning")
-            input("按 Enter 开始切换...")
-            robot.switch_mode("mit")
-            switched_to_mit = True
-            beauty_print("已切换到 MIT 模式。", type="success")
-
-        if not robot.torque_control("off"):
-            beauty_print("卸力失败，无法进入拖动示教。", type="error")
-            return None
-        torque_disabled = True
-        beauty_print("已卸力（新 torque off 实现），可手动拖动采点。", type="success")
-
-        return manual_record_waypoints(robot)
-    finally:
-        if torque_disabled:
-            if robot.torque_control("on"):
-                beauty_print("已恢复力矩。", type="info")
-            else:
-                beauty_print("恢复力矩失败，请手动检查。", type="warning")
-        if switched_to_mit:
-            robot.switch_mode("pv")
-            beauty_print("已切回 PV 模式。", type="info")
-
-
-def auto_generate_waypoints(robot, robot_model, args):
-    """Generate random joint waypoints.
-
-    :param robot: Connected robot instance
-    :param robot_model: Robot model instance
-    :param args: CLI arguments
-    :return: Waypoints array [N, 6]
-    """
-    beauty_print("自动生成模式", type="module")
-    num_waypoints = max(2, args.num_waypoints)
-    beauty_print(f"生成路点数: {num_waypoints}", type="info")
-
-    waypoints = []
-    if args.use_current_joints:
-        current = robot.get_robot_state("joint")
-        if current is not None:
-            waypoints.append(np.asarray(current, dtype=np.float64))
-            beauty_print("首个路点使用当前关节角。", type="info")
-
-    seed = args.seed
-    while len(waypoints) < num_waypoints:
-        if hasattr(robot_model, "random_q"):
-            q = robot_model.random_q(seed=seed, scale=args.joint_scale)
-            q = np.asarray(q, dtype=np.float64)
-        else:
-            rng = np.random.default_rng(seed)
-            q = rng.uniform(
-                low=np.deg2rad([-120, -120, -120, -170, -120, -170]),
-                high=np.deg2rad([120, 120, 120, 170, 120, 170]),
-                size=(6,),
-            ).astype(np.float64)
-        waypoints.append(q)
-        if seed is not None:
-            seed += 1
-
-    return np.asarray(waypoints, dtype=np.float64)
 
 
 def main(args):
@@ -164,15 +45,19 @@ def main(args):
         beauty_print("已切换到 PV 模式", type="success")
 
     try:
-        mode = select_mode()
+        mode = select_waypoint_mode()
         wp_meta = {}
         if mode == "1":
-            waypoints = manual_record_waypoints_with_torque_off(robot)
+            waypoints = robot.manual_record_waypoints_with_torque_off()
         elif mode == "2":
-            waypoints = auto_generate_waypoints(robot, robot.robot_model, args)
+            waypoints = robot.auto_generate_waypoints(
+                num_waypoints=args.num_waypoints,
+                joint_scale=args.joint_scale,
+                use_current_joints=args.use_current_joints,
+                seed=args.seed,
+            )
         else:
-            file_path = args.waypoint_file or input("请输入路点文件路径: ").strip()
-            loaded = load_waypoints_from_file(file_path)
+            loaded = robot.load_waypoints(args.waypoint_file)
             if loaded is None:
                 return
             waypoints, wp_meta = loaded
@@ -217,8 +102,8 @@ def main(args):
         beauty_print(f"  起点(deg): {beauty_print_array(np.rad2deg(traj['positions'][0]), precision=2)}", type="info")
         beauty_print(f"  终点(deg): {beauty_print_array(np.rad2deg(traj['positions'][-1]), precision=2)}", type="info")
 
-        save_dir = args.traj_save_dir if args.traj_save_dir else resolve_default_traj_save_dir(__file__)
-        traj_csv = save_trajectory_csv(traj, output_dir=save_dir)
+        save_dir = args.traj_save_dir if args.traj_save_dir else robot.default_trajectory_save_dir(__file__)
+        traj_csv = robot.save_joint_trajectory_csv(traj, output_dir=save_dir)
         beauty_print(f"轨迹已保存: {traj_csv}", type="success")
 
         plot_block = not args.plot_noblock
@@ -235,7 +120,7 @@ def main(args):
             input("\n按 Enter 执行轨迹，Ctrl+C 取消...")
 
         track_hz = args.track_hz if args.track_joints else None
-        ok, tracking = execute_joint_trajectory(robot, traj, args.speed, track_hz=track_hz)
+        ok, tracking = robot.execute_planned_joint_trajectory(traj, args.speed, track_hz=track_hz)
         beauty_print("轨迹执行完成" if ok else "轨迹执行中断", type="success" if ok else "warning")
         if tracking is not None:
             beauty_print("绘制目标 vs 实测关节角（时间轴与 PV 回放一致）...", type="module")
@@ -258,42 +143,42 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Alicia-M 关节空间轨迹规划与执行")
+    parser = argparse.ArgumentParser(description="Plan and execute Alicia-M joint-space trajectories.")
     add_port_argument(parser)
     parser.add_argument("--planner", type=str, default="b_spline", choices=["b_spline", "multi_segment"])
-    parser.add_argument("--duration", type=float, default=10.0, help="轨迹总时长（秒）")
-    parser.add_argument("--frequency", type=float, default=500.0, help="采样频率（Hz）")
-    parser.add_argument("--order", type=int, default=5, help="B-Spline 阶数")
+    parser.add_argument("--duration", type=float, default=10.0, help="Total trajectory duration in seconds.")
+    parser.add_argument("--frequency", type=float, default=500.0, help="Trajectory sampling frequency in Hz.")
+    parser.add_argument("--order", type=int, default=5, help="B-Spline order.")
     parser.add_argument("--segment-type", type=str, default="quintic", choices=["cubic", "quintic"])
-    parser.add_argument("--num-waypoints", type=int, default=5, help="自动生成路点数")
-    parser.add_argument("--joint-scale", type=float, default=0.6, help="random_q 缩放系数")
-    parser.add_argument("--use-current-joints", action="store_true", help="自动模式首个路点使用当前关节角")
-    parser.add_argument("--seed", type=int, default=666, help="随机种子")
-    parser.add_argument("--waypoint-file", type=str, default="", help="文件模式路点文件路径（csv/txt/npy）")
-    parser.add_argument("--execute", action="store_true", help="规划后直接执行")
-    parser.add_argument("--speed", type=float, default=100.0, help="执行信息显示速度参数")
-    parser.add_argument("--plot", action="store_true", help="显示规划轨迹可视化")
+    parser.add_argument("--num-waypoints", type=int, default=5, help="Number of automatically generated waypoints.")
+    parser.add_argument("--joint-scale", type=float, default=0.6, help="Scale factor for random_q.")
+    parser.add_argument("--use-current-joints", action="store_true", help="Use current joint angles as the first waypoint in automatic mode.")
+    parser.add_argument("--seed", type=int, default=666, help="Random seed.")
+    parser.add_argument("--waypoint-file", type=str, default="", help="Waypoint file path for file mode: csv, txt, or npy.")
+    parser.add_argument("--execute", action="store_true", help="Execute immediately after planning.")
+    parser.add_argument("--speed", type=float, default=100.0, help="Speed parameter shown and used during execution.")
+    parser.add_argument("--plot", action="store_true", help="Show planned trajectory plot.")
     parser.add_argument(
         "--plot-noblock",
         action="store_true",
-        help="图表非阻塞显示（脚本结束前须按 Enter，便于在无 GUI 阻塞环境下查看）",
+        help="Show plots without blocking; press Enter before exit to keep windows open.",
     )
     parser.add_argument(
         "--track-joints",
         action="store_true",
-        help="执行时记录关节反馈，结束后绘制与目标轨迹同一时间轴的角度/速度对比图",
+        help="Record joint feedback during execution and plot target-vs-measured angle and velocity.",
     )
     parser.add_argument(
         "--track-hz",
         type=float,
         default=200.0,
-        help="跟踪曲线目标显示频率 Hz（对每帧 PV 后的反馈下采样；设大如 5000 可接近全帧）",
+        help="Display frequency for tracking curves in Hz; high values approach full-frame feedback.",
     )
     parser.add_argument(
         "--traj-save-dir",
         type=str,
         default="",
-        help="轨迹 CSV 保存目录（默认自动定位 Alicia-M-SDK/logs）",
+        help="Directory for saved trajectory CSV files; default is Alicia-M-SDK/logs.",
     )
     args = parser.parse_args()
     

@@ -5,97 +5,20 @@ P 键强调零；固件版本 1.0.6 及以上时开放 Q 键弱调零。
 """
 
 import argparse
-import sys
 import time
 
 import alicia_m_sdk
-from alicia_m_sdk.utils.beauty_logger import beauty_print
-from alicia_m_sdk.utils.version import supports_min_version
-from _common import add_port_argument
+from _demo_helpers import NonBlockingKeyReader, add_port_argument, beauty_print, supports_min_version
 
 
 PRINT_INTERVAL = 0.2
 MIN_WEAK_ZERO_VERSION = (1, 0, 6)
 
-try:
-    import msvcrt
-except ImportError:
-    msvcrt = None
-
-if msvcrt is None:
-    import select
-    import termios
-    import tty
-else:
-    select = None
-    termios = None
-    tty = None
-
-
-class NonBlockingKeyReader:
-    """跨平台非阻塞单键读取器。"""
-
-    def __init__(self):
-        self._original_termios = None
-
-    def __enter__(self):
-        if msvcrt is None and sys.stdin.isatty():
-            self._original_termios = termios.tcgetattr(sys.stdin)
-            tty.setcbreak(sys.stdin.fileno())
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        if msvcrt is None and self._original_termios is not None:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._original_termios)
-        return False
-
-    def read_key(self):
-        """非阻塞读取一个按键；没有按键时返回 None。"""
-        if msvcrt is not None:
-            if not msvcrt.kbhit():
-                return None
-            key = msvcrt.getwch()
-            if key in ("\x00", "\xe0"):
-                if msvcrt.kbhit():
-                    msvcrt.getwch()
-                return None
-            return key.lower()
-
-        if not sys.stdin.isatty():
-            return None
-        readable, _, _ = select.select([sys.stdin], [], [], 0)
-        if not readable:
-            return None
-        return sys.stdin.read(1).lower()
-
-
-def print_robot_state(robot):
-    """打印当前关节位置、速度和力矩。"""
-    state = robot.get_robot_state("all")
-    if state is None:
-        print("pos=N/A vel=N/A tor=N/A", flush=True)
-        return
-
-    pos = list(state.angles) + [state.gripper]
-    print(
-        f"pos={format_values(pos)} "
-        f"vel={format_values(state.velocities)} "
-        f"tor={format_values(state.torques)}",
-        flush=True,
-    )
-
-
-def format_values(values, precision=4):
-    """格式化状态数组，便于连续打印。"""
-    if values is None:
-        return "N/A"
-    return "[" + ", ".join(f"{value:.{precision}f}" for value in values) + "]"
-
 
 def main():
     beauty_print("Demo: 零位标定", type="module")
 
-    parser = argparse.ArgumentParser(description="Alicia-M 零位标定示例")
+    parser = argparse.ArgumentParser(description="Calibrate Alicia-M zero position.")
     add_port_argument(parser)
     args = parser.parse_args()
 
@@ -138,7 +61,7 @@ def main():
 
                 now = time.perf_counter()
                 if now - last_print >= PRINT_INTERVAL:
-                    print_robot_state(robot)
+                    robot.print_compact_state()
                     last_print = now
 
                 time.sleep(0.02)

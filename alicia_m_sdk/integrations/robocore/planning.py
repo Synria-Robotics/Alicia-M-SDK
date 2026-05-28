@@ -286,3 +286,43 @@ def plan_cartesian_trajectory(
         'duration': float(timestamps[-1] - timestamps[0]) if len(timestamps) > 0 else 0.0,
         'num_points': len(timestamps),
     }
+
+
+def execute_cartesian_trajectory(robot_model, traj: Dict, joint_state, traj_executor) -> bool:
+    """逐点 IK 求解后执行笛卡尔空间轨迹（PV 模式）。
+
+    :param robot_model, RoboCore RobotModel 实例
+    :param traj, ``plan_cartesian_trajectory`` 返回的轨迹字典
+    :param joint_state, 当前关节状态（提供初始 q_init 和夹爪值）
+    :param traj_executor, TrajectoryExecutor 实例
+    :return, 执行成功返回 True，IK 失败或无位姿时返回 False
+    """
+    from ..kinematics import compute_inverse_kinematics
+
+    if robot_model is None:
+        return False
+    poses = traj.get('poses', [])
+    if len(poses) == 0:
+        return False
+
+    q_current = list(joint_state.angles) if joint_state else None
+    gripper_val = joint_state.gripper if joint_state else 0.0
+    joint_positions = []
+
+    for pose in poses:
+        r = compute_inverse_kinematics(robot_model, pose, q_init=q_current)
+        if not r.get('success'):
+            from ...utils.beauty_logger import logger as _logger
+            _logger.warning("笛卡尔轨迹 IK 求解失败")
+            return False
+        q = r['q'].tolist()
+        joint_positions.append(q + [gripper_val])
+        q_current = q
+
+    positions = np.array(joint_positions)
+    timestamps = traj['timestamps']
+    dt = np.diff(timestamps)
+    velocities = np.zeros_like(positions)
+    velocities[1:] = np.diff(positions, axis=0) / dt[:, np.newaxis]
+
+    return traj_executor.execute_pv(timestamps, positions, velocities)

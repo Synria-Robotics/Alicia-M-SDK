@@ -1,8 +1,8 @@
 # API 参考 / API Reference
 
-推荐入口是 `alicia_m_sdk.create_robot()` 和 `SynriaRobotAPI`。高级用户可以从包顶层或 `alicia_m_sdk.execution` 导入 `JointController`、`TrajectoryExecutor`、`Teleoperation`。
+推荐入口是 `import alicia_m_sdk`、`alicia_m_sdk.create_robot()` 和返回对象上的 `robot.xxx(...)` 方法。`SynriaRobotAPI` 是 `create_robot()` 返回的用户 API 门面。
 
-Recommended entry points are `alicia_m_sdk.create_robot()` and `SynriaRobotAPI`. Advanced users may import `JointController`, `TrajectoryExecutor`, and `Teleoperation` from the package root or `alicia_m_sdk.execution`.
+Recommended usage is `import alicia_m_sdk`, `alicia_m_sdk.create_robot()`, and methods on the returned `robot` object. `SynriaRobotAPI` is the user-facing facade returned by `create_robot()`.
 
 ## 工厂函数
 
@@ -11,10 +11,11 @@ Recommended entry points are `alicia_m_sdk.create_robot()` and `SynriaRobotAPI`.
 ```python
 alicia_m_sdk.create_robot(
     port: str = "",              # 串口路径，空=自动发现
-    version: str = "v1_1",       # 硬件版本
+    version: str = "auto",       # 硬件版本；默认连接后自动识别
     variant: str = None,         # 变体（自动检测）
     control_aim: str = None,     # "leader"/"follower"（自动检测）
     control_mode: str = None,    # "pv" / "mit" / None=检测固件当前模式
+    sync_control_mode: bool = True,  # 连接时是否同步固件控制模式
     baudrate: int = 1_000_000,   # 波特率
     backend: str = "cpp",        # RoboCore 后端: "numpy" / "torch" / "cpp"
     debug_mode: bool = False,    # DEBUG 日志
@@ -72,8 +73,8 @@ with alicia_m_sdk.create_robot() as robot:
 
 | 方法 | 说明 |
 |------|------|
-| `set_robot_state(target_joints, gripper_value, speed=15, ...)` | 点位运动（自动适配 PV/MIT） |
-| `go_home(speed=15)` | 回零位 |
+| `set_robot_state(target_joints, gripper_value, speed=40, gripper_speed=100, ...)` | 点位运动（自动适配 PV/MIT） |
+| `go_home(speed=40, gripper_speed=100)` | 回零位 |
 | `set_gripper_target(command, value, wait_for_completion)` | 控制夹爪 |
 
 **set_robot_state 参数**：
@@ -83,8 +84,8 @@ robot.set_robot_state(
     target_joints=[0, 30, 0, 0, -30, 0],  # 目标角度 (deg)
     gripper_value=500,                      # 夹爪 [0, 1000]
     joint_format='deg',                     # 'deg' / 'rad'
-    speed=15,                               # 速度 [0, 400]
-    gripper_speed=40,                       # 夹爪速度 [0, 400]
+    speed=40,                               # 速度 [0, 400]
+    gripper_speed=100,                      # 夹爪速度 [0, 400]
     wait_for_completion=True,               # 是否等待到达
     use_interpolation=True,                  # MIT 模式是否使用固件线性插值
     kp=None, kd=None,                        # MIT 增益: None=默认，0=零增益
@@ -120,7 +121,7 @@ MitParams(
 | 电机组 | 编号 | Kp | Kd |
 |--------|------|----|----|
 | 大关节 | M0~M2 | 150 | 2.0 |
-| 小关节 | M3~M6 | 20 | 1.0 |
+| 小关节 | M3~M6 | 150 | 2.0 |
 
 ### 系统控制
 
@@ -135,7 +136,11 @@ MitParams(
 | `run_diagnostic(timeout)` | 运行自检并返回 DiagnosticResult |
 | `get_user_settings(timeout)` | 读取个性化设置 |
 | `set_gripper_type(gripper_type)` | 写入夹爪类型，支持 GripperType / 0/2 / 10/40 / 字符串 |
-| `send_gripper_param_frame(frame, timeout)` | 发送 0x17 夹爪参数帧，供低层示例使用 |
+| `get_gripper_params(mask, aim, timeout)` | 读取夹爪夹持参数，普通用户优先使用 |
+| `set_gripper_params(values, aim, timeout, readback, gripper_type, save=False)` | 写入夹爪夹持参数，带 SDK 侧范围校验；`save=True` 请求掉电保存 |
+| `send_gripper_param_frame(frame, timeout)` | 发送 0x17 夹爪参数帧，高级调试用途；普通用户优先使用 `get_gripper_params` / `set_gripper_params` |
+
+`set_gripper_params(..., save=False)` 默认只让参数立即生效；需要写入后掉电保存时，显式传 `save=True`。保存写入可能比普通写入慢，`save=True` 时 SDK 会使用至少 3 秒的响应等待时间。
 
 ### 运动学
 
@@ -186,27 +191,18 @@ class GripperType(Enum):
 
 夹爪类型输入兼容：`GripperType.MM_50/MM_100`、固件值 `0/2`、示例选项 `10/40`、字符串 `"small"/"large"/"50mm"/"100mm"`。
 
-## 高级 API / Advanced API
+## 高级能力 / Advanced Capabilities
+
+高级能力仍通过 `robot.xxx(...)` 访问，普通用户不需要直接导入 `execution`、`hardware`、`utils` 或 `integrations` 模块。
 
 ```python
-from alicia_m_sdk import JointController, TrajectoryExecutor, Teleoperation
+pose = robot.compute_forward_kinematics(joints, joint_format="rad")
+ik_result = robot.set_pose(target_pose, execute=False)
+traj = robot.plan_joint_trajectory(waypoints)
+teleop = robot.create_mapped_teleoperation(leader_robot)
 ```
 
-这些入口面向扩展和集成场景。普通用户优先使用 `SynriaRobotAPI`，高级入口仍按公开 API 保留，但内部硬件层 `alicia_m_sdk.hardware` 不建议直接依赖。
-
-RoboCore 的低层 FK/IK/规划适配入口位于集成层，不再从包根导出：
-
-```python
-from alicia_m_sdk.integrations.robocore import (
-    compute_forward_kinematics,
-    compute_inverse_kinematics,
-    compute_jacobian,
-    plan_joint_trajectory,
-    plan_cartesian_trajectory,
-)
-```
-
-`Teleoperation` 用于 Alicia-D 示教臂到 Alicia-M 操作臂的遥操作场景，安装时需要可选依赖：
+`JointController`、`TrajectoryExecutor`、`Teleoperation` 等类作为兼容过渡仍可被旧脚本直接导入，但不再作为新用户代码的推荐入口。`Teleoperation` 相关能力需要可选依赖：
 
 ```bash
 pip install alicia_m_sdk[teleop]
