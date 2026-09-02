@@ -12,8 +12,8 @@ from _demo_helpers import add_port_argument, beauty_print, beauty_print_array
 
 
 # 预设安全关节位置 (度)
-POSE_A = [0, -120.0, -90.0, 80.0, 0.0, 0.0]
-POSE_B = [0, -30.0, -60.0, 45.0, 0.0, 45.0]
+POSE_A = [-0.0, -120.0, -90.0, -30.0, -0.0, -0.0]
+POSE_B = [-0.0, -30.0, -60.0, -0.0, -0.0, 45.0]
 
 
 def main():

@@ -28,9 +28,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-logs/
+# Project-local generated files and private test workspace
 /logs/
 /examples/logs/
+/20_demo_src/
+/tests/
+/gripper_diagnostics.csv
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

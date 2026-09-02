@@ -54,28 +54,53 @@ def auto_detect_aim(device, codec, timeout: float) -> None:
 
 # ─── Control-mode detection & sync ────────────────────────────────────────────
 
-def detect_firmware_mode(device) -> Optional[ControlMode]:
-    """带重试地查询固件实际控制模式。
-
-    仅检查关节电机 M0-M5 的一致性；夹爪 M6 在固件侧锁定为 MIT，不参与判断。
-    超时或混合模式时返回 ``None``。
-    """
-    _MODE_MAP = {CTRL_MODE_MIT: ControlMode.MIT, CTRL_MODE_PV: ControlMode.PV}
+def _query_joint_control_modes(device) -> Optional[list[int]]:
+    """带重试地读取 M0-M5 的控制模式。"""
     for attempt in range(3):
         device.flush()
         values = device.query_motor_params(MOTOR_PARAM_CTRL_MODE, timeout=2.0)
         if values is not None and len(values) >= NUM_JOINTS:
-            break
+            return values[:NUM_JOINTS]
         logger.debug(f"模式检测第 {attempt + 1} 次查询未获得有效响应")
         time.sleep(0.5)
-    else:
+    return None
+
+
+def _uniform_control_mode(joint_values: list[int]) -> Optional[ControlMode]:
+    """将一致的底层模式值转换为 SDK 模式，混合或未知时返回 None。"""
+    if any(value != joint_values[0] for value in joint_values):
+        return None
+    return {
+        CTRL_MODE_MIT: ControlMode.MIT,
+        CTRL_MODE_PV: ControlMode.PV,
+    }.get(joint_values[0])
+
+
+def _format_joint_modes(joint_values: list[int]) -> str:
+    names = {
+        CTRL_MODE_MIT: "MIT",
+        CTRL_MODE_PV: "PV",
+    }
+    return ", ".join(
+        f"M{index}={names.get(value, f'UNKNOWN(0x{value:02X})')}"
+        for index, value in enumerate(joint_values)
+    )
+
+
+def detect_firmware_mode(device) -> Optional[ControlMode]:
+    """带重试地查询固件实际控制模式。
+
+    仅检查关节电机 M0-M5 的一致性；夹爪 M6 在固件侧锁定为 MIT，不参与判断。
+    超时、混合模式或未知模式时返回 ``None``。
+    """
+    joint_values = _query_joint_control_modes(device)
+    if joint_values is None:
         return None
 
-    joint_values = values[:NUM_JOINTS]
     if any(v != joint_values[0] for v in joint_values):
-        logger.warning(f"检测到关节电机混合控制模式: {joint_values}，将强制同步")
+        logger.warning(f"检测到关节电机混合控制模式: {joint_values}")
         return None
-    return _MODE_MAP.get(joint_values[0])
+    return _uniform_control_mode(joint_values)
 
 
 def sync_control_mode(device, joint_ctrl, config: RobotConfig) -> None:
@@ -84,12 +109,22 @@ def sync_control_mode(device, joint_ctrl, config: RobotConfig) -> None:
     当 ``config.control_mode`` 为空时跟随固件当前模式；否则若固件与期望不一致则强制切换。
     查询完全失败时抛出 ``ConnectionError``。
     """
-    firmware_mode = detect_firmware_mode(device)
-    requested = config.control_mode
-    desired = ControlMode(requested.lower()) if requested else firmware_mode
+    joint_values = _query_joint_control_modes(device)
+    if joint_values is None:
+        raise ConnectionError("固件控制模式查询超时，请检查串口连接和固件状态")
 
-    if desired is None:
-        raise ConnectionError("无法检测固件控制模式，请检查串口连接和固件状态")
+    firmware_mode = _uniform_control_mode(joint_values)
+    requested = config.control_mode
+    if firmware_mode is None and not requested:
+        details = _format_joint_modes(joint_values)
+        if any(value != joint_values[0] for value in joint_values):
+            raise ConnectionError(
+                f"检测到关节电机混合控制模式: {details}；"
+                "请显式指定 control_mode='pv' 或 control_mode='mit' 后重新连接"
+            )
+        raise ConnectionError(f"检测到不支持的固件控制模式: {details}")
+
+    desired = ControlMode(requested.lower()) if requested else firmware_mode
 
     if firmware_mode == desired:
         joint_ctrl.mode = desired
@@ -98,7 +133,8 @@ def sync_control_mode(device, joint_ctrl, config: RobotConfig) -> None:
         opposite = ControlMode.MIT if desired == ControlMode.PV else ControlMode.PV
         joint_ctrl.mode = firmware_mode if firmware_mode is not None else opposite
         logger.info(f"切换固件模式 → {desired.value.upper()}")
-        joint_ctrl.switch_mode(desired)
+        if not joint_ctrl.switch_mode(desired):
+            raise ConnectionError(f"固件控制模式切换到 {desired.value.upper()} 失败")
 
 
 def print_connection_diagnostic(device, reason: str = "") -> None:

@@ -602,10 +602,16 @@ class JointController:
             kd=gripper_kd,
         ))
 
-        # 线性轨迹插值：所有电机始终设正值速度，禁止设 0（防止阶段切换抖动）
+        # 夹爪单独控速：MIT 全帧必须带 7 个 linear_velocities，避免把夹爪速度
+        # 广播到前 6 个关节，否则低速夹持会拖慢后续关节运动。
         g_speeds = validate_speed(speed, 1)
         g_vel = speed_user_to_firmware(g_speeds[0])
-        linear_vels = [g_vel] * NUM_JOINTS + [g_vel]
+        state = self._device.joint_state
+        if state is not None and state.linear_vels and len(state.linear_vels) >= NUM_MOTORS:
+            linear_vels = list(state.linear_vels[:NUM_MOTORS])
+        else:
+            linear_vels = [10.0] * NUM_MOTORS
+        linear_vels[NUM_JOINTS] = g_vel
 
         self._device.send_mit(
             self._device.aim, mit_params, linear_velocities=linear_vels,
@@ -824,65 +830,91 @@ class JointController:
         logger.info("失能完成")
         return True
 
-    def switch_mode(self, mode: Union[str, ControlMode]) -> bool:
+    def switch_mode(
+        self,
+        mode: Union[str, ControlMode],
+        *,
+        disable_before_switch: bool = True,
+        save_to_flash: bool = False,
+    ) -> bool:
         """切换控制模式（发送 0x11 指令, addr=0x0B）
 
         仅切换关节电机 M0-M5，夹爪电机 M6 固件锁定为 MIT 模式不可切换。
 
-        切换流程:
-        1. 失能所有电机
+        默认切换流程:
+        1. 失能所有电机（可通过 disable_before_switch=False 跳过）
         2. 发送模式切换指令
         3. 读回验证（失败重试一次）
-        4. 使能所有电机
+        4. 若步骤 1 执行过，则使能所有电机
 
         :param mode, 目标控制模式 ('pv' / 'mit' 或 ControlMode 枚举)
+        :param disable_before_switch, 是否在模式写入前由 SDK 统一失能
+        :param save_to_flash, 是否请求固件将模式保存到 ESC Flash
         :return, True=切换成功
         """
         if isinstance(mode, str):
             mode = ControlMode(mode.lower())
 
-        if mode == self._mode:
-            logger.debug(f"已处于 {mode.value} 模式，无需切换")
-            return True
+        ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
+        if mode == self._mode and not save_to_flash:
+            if self._verify_mode_switch(ctrl_mode_value):
+                logger.debug(f"已处于 {mode.value} 模式，无需切换")
+                return True
+            logger.warning("SDK 模式记录与电机实际模式不一致，将重新写入目标模式")
 
         logger.warning(f"即将切换控制模式: {self._mode.value} → {mode.value}")
 
-        # 步骤1: 失能所有电机
-        self.disable()
+        if disable_before_switch:
+            self.disable()
 
         # 暂停轮询，避免与模式切换指令交叉
         self._device.pause_polling()
 
+        switched = False
         try:
-            ctrl_mode_value = CTRL_MODE_MIT if mode == ControlMode.MIT else CTRL_MODE_PV
-
             # 清空串口缓冲区，防止残留帧干扰模式切换验证
             self._device.flush()
 
             # 步骤2: 发送模式切换指令（M0-M5，夹爪 M6 固件锁定 MIT 不参与）
-            self._send_mode_switch_command(ctrl_mode_value)
+            self._send_mode_switch_command(
+                ctrl_mode_value,
+                save_to_flash=save_to_flash,
+            )
             time.sleep(0.5)
 
             # 步骤3: 读回验证
             if not self._verify_mode_switch(ctrl_mode_value):
                 logger.warning("模式切换未完全生效，重试一次")
-                self._send_mode_switch_command(ctrl_mode_value)
+                self._send_mode_switch_command(
+                    ctrl_mode_value,
+                    save_to_flash=save_to_flash,
+                )
                 time.sleep(0.5)
-
-            # 更新内部模式
-            old_mode = self._mode
-            self._mode = mode
+                switched = self._verify_mode_switch(ctrl_mode_value)
+            else:
+                switched = True
         finally:
             self._device.resume_polling()
 
-        # 步骤4: 使能所有电机，等待轮询获取使能后的新鲜状态
-        self.enable()
-        time.sleep(0.2)
+            if disable_before_switch:
+                self.enable()
+                time.sleep(0.2)
 
+        if not switched:
+            logger.warning("模式切换失败: 重试后仍有电机未进入目标模式")
+            return False
+
+        old_mode = self._mode
+        self._mode = mode
         logger.info(f"控制模式已切换: {old_mode.value} → {mode.value}")
         return True
 
-    def _send_mode_switch_command(self, ctrl_mode_value: int) -> None:
+    def _send_mode_switch_command(
+        self,
+        ctrl_mode_value: int,
+        *,
+        save_to_flash: bool = False,
+    ) -> None:
         """发送模式切换指令（仅切换关节 M0-M5，夹爪 M6 固件锁定 MIT）"""
         frame = self._device.codec.encode_motor_param_request(MotorParamRequest(
             aim=self._device.aim,
@@ -890,6 +922,7 @@ class JointController:
             motor_count=NUM_JOINTS,
             param_addr=MOTOR_PARAM_CTRL_MODE,
             param_value=ctrl_mode_value,
+            save_to_flash=save_to_flash,
         ))
         self._device.send_frame(frame)
 

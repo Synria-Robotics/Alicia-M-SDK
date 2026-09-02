@@ -16,10 +16,16 @@ def main():
     beauty_print("Demo: 读取关节状态（循环打印）", type="module")
 
     parser = argparse.ArgumentParser(description="Read Alicia-M joint state.")
-    parser.add_argument(
-        "--extend", action="store_true",
-        help="Enable extended polling for interpolation velocity and coil temperature; requires newer firmware."
+    extended_group = parser.add_mutually_exclusive_group()
+    extended_group.add_argument(
+        "--extend", dest="extend", action="store_true",
+        help="Enable extended polling for interpolation velocity and coil temperature (default)."
     )
+    extended_group.add_argument(
+        "--no-extend", dest="extend", action="store_false",
+        help="Disable extended polling when using firmware without extended-state support."
+    )
+    parser.set_defaults(extend=True)
     add_port_argument(parser)
     args = parser.parse_args()
 
@@ -74,6 +80,8 @@ def main():
 
             if state.temperatures is not None:
                 beauty_print(f"  线圈温度 (°C):    {beauty_print_array(state.temperatures, precision=1)}", type="info")
+                if len(state.temperatures) >= 7:
+                    beauty_print(f"  J7 夹爪线圈温度 (°C): {state.temperatures[6]:.1f}", type="info")
 
             # 控制打印频率，约 5Hz
             time.sleep(0.2)

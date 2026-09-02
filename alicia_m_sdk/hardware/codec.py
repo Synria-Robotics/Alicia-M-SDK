@@ -314,7 +314,7 @@ class MessageCodec:
     def encode_motor_param_request(self, msg: MotorParamRequest) -> Frame:
         """编码电机参数写入请求
 
-        帧格式: [start_motor][motor_count][param_addr][param_value(4字节LE)]
+        帧格式: [start_motor][motor_count][param_addr][param_value(4字节LE)][save?]
 
         常见用法 — 模式切换:
             param_addr=0x0B, param_value=0x01(MIT) 或 0x02(PV)
@@ -328,6 +328,8 @@ class MessageCodec:
         data.append(msg.param_addr)
         # 参数值: 4 字节小端序
         data.extend(struct.pack('<I', msg.param_value))
+        if msg.save_to_flash:
+            data.append(0x01)
         return Frame(
             cmd_id=CMD_MOTOR_PARAM,
             func_code=FUNC_WRITE_BIT | msg.aim,

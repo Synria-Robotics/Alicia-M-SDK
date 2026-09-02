@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -40,6 +41,10 @@ DEFAULT_JOINT_LIMITS_RAD: tuple[tuple[float, float], ...] = (
 DEFAULT_LIMIT_SOURCE = "Alicia-M v1.1 follower defaults"
 # @brief 夹爪滑块和发送前裁剪范围。
 GRIPPER_LIMIT = (0.0, 1000.0)
+GRIPPER_DIAGNOSTIC_DURATION_S = 2.0
+GRIPPER_DIAGNOSTIC_INTERVAL_MS = 50
+GRIPPER_INDEX = 6
+GRIPPER_ABORT_MASK = 1 << 6
 
 
 @dataclass(frozen=True)
@@ -188,6 +193,7 @@ class SliderControlWindow:
         speed: float,
         gripper_speed: float,
         send_interval_ms: int,
+        diagnostic_output: Optional[Path] = None,
     ) -> None:
         """@brief 初始化滑块窗口。
 
@@ -199,6 +205,7 @@ class SliderControlWindow:
         @param speed 关节运动速度参数。
         @param gripper_speed 夹爪运动速度参数。
         @param send_interval_ms 滑块目标最小发送间隔，单位 ms。
+        @param diagnostic_output 夹爪诊断 CSV 路径；为 None 时关闭诊断。
         """
         self.root = root
         self.robot = robot
@@ -210,9 +217,13 @@ class SliderControlWindow:
         self.gripper_speed = gripper_speed
         # @brief tkinter.after 节流周期。
         self.send_interval_ms = send_interval_ms
+        self.diagnostic_output = diagnostic_output
         self._tk = __import__("tkinter")
         # @brief 当前已注册但尚未触发的 after 回调 id。
         self._pending_after_id: Optional[str] = None
+        self._diagnostic_after_id: Optional[str] = None
+        self._diagnostic_deadline = 0.0
+        self._diagnostic_target = 0.0
         # @brief 待发送的最新 6 轴角度目标，单位 deg。
         self._pending_joint_target: Optional[list[float]] = None
         # @brief 待发送的最新夹爪目标。
@@ -390,6 +401,8 @@ class SliderControlWindow:
                     wait_for_completion=False,
                 )
                 self._set_status(ok, "gripper", gripper_target)
+                if ok:
+                    self._start_gripper_diagnostics(gripper_target)
         except Exception as exc:  # Keep the UI alive so the user can close safely.
             self.status_var.set(f"Send failed: {exc}")
 
@@ -406,6 +419,59 @@ class SliderControlWindow:
         else:
             self.status_var.set(f"{timestamp} send failed: {target_name}")
 
+    @staticmethod
+    def _sequence_value(values: Any, index: int) -> Optional[float]:
+        if values is None or len(values) <= index:
+            return None
+        return float(values[index])
+
+    def _start_gripper_diagnostics(self, target: float) -> None:
+        if self.diagnostic_output is None:
+            return
+        self._diagnostic_target = float(target)
+        self._diagnostic_deadline = time.monotonic() + GRIPPER_DIAGNOSTIC_DURATION_S
+        if self._diagnostic_after_id is None:
+            self._diagnostic_after_id = self.root.after(0, self._sample_gripper_diagnostics)
+
+    def _sample_gripper_diagnostics(self) -> None:
+        self._diagnostic_after_id = None
+        if self._closed or self.diagnostic_output is None:
+            return
+
+        state = self.robot.get_robot_state("all")
+        if state is not None:
+            run_status = int(getattr(state, "run_status", 0) or 0)
+            row = {
+                "timestamp_s": f"{time.time():.6f}",
+                "target": f"{self._diagnostic_target:.3f}",
+                "position": getattr(state, "gripper", ""),
+                "velocity_rad_s": self._sequence_value(getattr(state, "velocities", None), GRIPPER_INDEX),
+                "torque_nm": self._sequence_value(getattr(state, "torques", None), GRIPPER_INDEX),
+                "run_status": run_status,
+                "abort": 1 if (run_status & GRIPPER_ABORT_MASK) else 0,
+            }
+            self._append_gripper_diagnostic(row)
+            self.status_var.set(
+                f"J7 pos={row['position']} vel={row['velocity_rad_s']} "
+                f"tau={row['torque_nm']} abort={row['abort']}"
+            )
+
+        if time.monotonic() < self._diagnostic_deadline:
+            self._diagnostic_after_id = self.root.after(
+                GRIPPER_DIAGNOSTIC_INTERVAL_MS,
+                self._sample_gripper_diagnostics,
+            )
+
+    def _append_gripper_diagnostic(self, row: dict[str, Any]) -> None:
+        assert self.diagnostic_output is not None
+        self.diagnostic_output.parent.mkdir(parents=True, exist_ok=True)
+        write_header = not self.diagnostic_output.exists() or self.diagnostic_output.stat().st_size == 0
+        with self.diagnostic_output.open("a", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(row))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+
     def close(self) -> None:
         """@brief 关闭窗口并断开机械臂连接。"""
         if self._closed:
@@ -417,6 +483,12 @@ class SliderControlWindow:
             except Exception:
                 pass
             self._pending_after_id = None
+        if self._diagnostic_after_id is not None:
+            try:
+                self.root.after_cancel(self._diagnostic_after_id)
+            except Exception:
+                pass
+            self._diagnostic_after_id = None
         try:
             self.robot.disconnect()
             beauty_print("Robot disconnected", type="info")
@@ -518,6 +590,7 @@ def run(args: argparse.Namespace) -> None:
             speed=args.speed,
             gripper_speed=args.gripper_speed,
             send_interval_ms=args.send_interval_ms,
+            diagnostic_output=Path(args.diagnostic_output).expanduser() if args.gripper_diagnostics else None,
         )
         root.mainloop()
     except KeyboardInterrupt:
@@ -544,6 +617,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum interval between slider command flushes; default 120 ms.",
     )
     parser.add_argument("--urdf-path", type=str, default="", help="Optional URDF path for joint limits.")
+    parser.add_argument(
+        "--gripper-diagnostics",
+        action="store_true",
+        help="Record two seconds of cached J7 feedback after each gripper command.",
+    )
+    parser.add_argument(
+        "--diagnostic-output",
+        type=str,
+        default="gripper_diagnostics.csv",
+        help="CSV path used with --gripper-diagnostics.",
+    )
     parser.add_argument("--yes", action="store_true", help="Skip the startup safety confirmation.")
     return parser
 

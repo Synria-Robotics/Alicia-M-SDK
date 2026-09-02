@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple, Union
@@ -29,6 +30,8 @@ class GripperParamSpec:
     range_text: str = ""
     small_range: Optional[Tuple[float, float]] = None
     large_range: Optional[Tuple[float, float]] = None
+    small_positive_min: Optional[float] = None
+    large_positive_min: Optional[float] = None
     aliases: Tuple[str, ...] = ()
 
     def allowed_range(self, gripper_type: Optional[Union[str, int, GripperType]] = None) -> Optional[Tuple[float, float]]:
@@ -48,6 +51,15 @@ class GripperParamSpec:
         parsed = GripperType.parse(gripper_type)
         return self.large_range if parsed is GripperType.MM_100 else self.small_range
 
+    def positive_min(self, gripper_type: Optional[Union[str, int, GripperType]] = None) -> Optional[float]:
+        """Return the minimum allowed positive value for a disjoint range."""
+        if self.small_positive_min is None or self.large_positive_min is None:
+            return None
+        if gripper_type is None:
+            return min(self.small_positive_min, self.large_positive_min)
+        parsed = GripperType.parse(gripper_type)
+        return self.large_positive_min if parsed is GripperType.MM_100 else self.small_positive_min
+
 
 GRIPPER_PARAM_SPECS = (
     GripperParamSpec(
@@ -55,18 +67,20 @@ GRIPPER_PARAM_SPECS = (
         0x01,
         "目标夹持力",
         "N",
-        "小夹爪[1,80]；大夹爪[1,120]",
-        small_range=(1.0, 80.0),
-        large_range=(1.0, 120.0),
+        "小夹爪{0}或[28,138.9]；大夹爪{0}或[35,388.9]；0=零保持力",
+        small_range=(0.0, 138.9),
+        large_range=(0.0, 388.9),
+        small_positive_min=28.0,
+        large_positive_min=35.0,
     ),
     GripperParamSpec(
         "open_feedforward",
         0x02,
         "张开前馈力矩",
         "N*m",
-        "小夹爪[0.2,3.0]；大夹爪[0.2,5.0]",
-        small_range=(0.2, 3.0),
-        large_range=(0.2, 5.0),
+        "小夹爪[0,2.5]；大夹爪[0,7.0]",
+        small_range=(0.0, 2.5),
+        large_range=(0.0, 7.0),
         aliases=("open_feedforward_torque",),
     ),
     GripperParamSpec(
@@ -74,9 +88,9 @@ GRIPPER_PARAM_SPECS = (
         0x04,
         "闭合前馈力矩",
         "N*m",
-        "小夹爪[-5.0,-0.2]；大夹爪[-8.0,-0.2]",
-        small_range=(-5.0, -0.2),
-        large_range=(-8.0, -0.2),
+        "小夹爪[-2.5,0]；大夹爪[-7.0,0]",
+        small_range=(-2.5, 0.0),
+        large_range=(-7.0, 0.0),
         aliases=("close_feedforward_torque",),
     ),
     GripperParamSpec(
@@ -84,9 +98,9 @@ GRIPPER_PARAM_SPECS = (
         0x08,
         "最大保持力矩",
         "N*m",
-        "小夹爪[0.5,5.0]；大夹爪[0.5,10.0]",
-        small_range=(0.5, 5.0),
-        large_range=(0.5, 10.0),
+        "小夹爪[0,2.5]；大夹爪[0,7.0]",
+        small_range=(0.0, 2.5),
+        large_range=(0.0, 7.0),
         aliases=("max_hold_torque",),
     ),
     GripperParamSpec("force_kp", 0x10, "力控比例", "", "[0,2.0]", small_range=(0.0, 2.0), large_range=(0.0, 2.0)),
@@ -170,16 +184,25 @@ def validate_gripper_param_values(
     parsed_type = None if gripper_type is None else GripperType.parse(gripper_type)
     for mask, value in normalized.items():
         spec = GRIPPER_PARAM_BY_MASK[mask]
+        if not math.isfinite(value):
+            raise ValueError(f"{spec.label}必须是有限数字，不能是 NaN 或 inf")
         allowed = spec.allowed_range(parsed_type)
         if allowed is None:
             continue
         lower, upper = allowed
-        if value < lower or value > upper:
+        positive_min = spec.positive_min(parsed_type)
+        positive_gap = positive_min is not None and value != 0.0 and value < positive_min
+        if value < lower or value > upper or positive_gap:
             type_text = "协议允许范围" if parsed_type is None else parsed_type.label
             unit = f" {spec.unit}" if spec.unit else ""
+            allowed_text = (
+                f"{{0}} 或 [{positive_min:g}, {upper:g}]"
+                if positive_min is not None
+                else f"[{lower:g}, {upper:g}]"
+            )
             raise ValueError(
                 f"{spec.label}={value:g}{unit}，{type_text}为 "
-                f"[{lower:g}, {upper:g}]{unit}"
+                f"{allowed_text}{unit}"
             )
     return normalized
 

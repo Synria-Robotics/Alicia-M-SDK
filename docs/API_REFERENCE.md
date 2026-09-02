@@ -129,7 +129,7 @@ MitParams(
 |------|------|
 | `enable_robot()` | 使能 |
 | `disable_robot()` | 失能 |
-| `switch_mode(mode)` | 切换模式 `"pv"` / `"mit"`（失能→切换→使能） |
+| `switch_mode(mode, disable_before_switch=True, save_to_flash=False)` | 切换 `"pv"` / `"mit"`；默认失能后临时切换，可选择跳过 SDK 失能或保存到 ESC Flash |
 | `torque_control(command, joints)` | 力矩开关，`"off"` / `"on"`（仅 MIT） |
 | `set_extended_polling(enabled)` | 开关扩展轮询；扩展字段需固件支持 |
 | `set_zero_position()` | 设置当前位姿为零位 |

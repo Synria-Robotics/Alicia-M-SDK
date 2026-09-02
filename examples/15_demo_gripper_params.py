@@ -37,11 +37,11 @@ def main():
             "",
             "示例:",
             "  读取全部参数:",
-            "    python e15_demo_gripper_params.py --port COM37",
+            "    python 15_demo_gripper_params.py --port COM37",
             "  修改目标夹持力为 30 N:",
             "    python 15_demo_gripper_params.py --target-force 30 --gripper-type small",
             "  同时修改夹持力和最大保持力矩，并跳过确认:",
-            "    python 15_demo_gripper_params.py --port COM37 --target-force 30 --hold-torque 2.5 --gripper-type small --yes",
+            "    python 15_demo_gripper_params.py --port COM37 --target-force 30 --hold-torque 1.8 --gripper-type small --yes",
             "  修改目标夹持力并请求掉电保存:",
             "    python 15_demo_gripper_params.py --target-force 30 --gripper-type small --save",
         ]
@@ -113,6 +113,7 @@ def main():
                 mask = gripper_param_mask(write_values)
                 beauty_print(f"即将写入 0x17 参数，掩码 0x{mask:02X}", type="warning")
                 beauty_print("写入不会主动闭合夹爪，但会影响后续夹爪动作。SDK 会按夹爪类型校验参数范围。", type="warning")
+                beauty_print("固件会保证目标力 * 0.018 m 不超过最大保持力矩；必要时会自动下调目标力。", type="info")
                 if args.save:
                     beauty_print("本次写入会请求设备掉电保存当前完整夹爪参数配置。", type="warning")
                     if args.timeout < 3.0:

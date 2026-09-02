@@ -182,12 +182,14 @@ class MotorParamRequest:
         motor_count: 电机数量
         param_addr: 参数地址（如 MOTOR_PARAM_CTRL_MODE=0x0B）
         param_value: 参数值（4 字节，小端序写入）
+        save_to_flash: 是否在参数值后追加掉电保存标志
     """
     aim: int
     start_motor: int
     motor_count: int
     param_addr: int
     param_value: int
+    save_to_flash: bool = False
 
 
 @dataclass

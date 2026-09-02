@@ -501,17 +501,29 @@ class SynriaRobotAPI:
         """失能机器人"""
         return self._joint_ctrl.disable()
 
-    def switch_mode(self, mode: str) -> bool:
+    def switch_mode(
+        self,
+        mode: str,
+        *,
+        disable_before_switch: bool = True,
+        save_to_flash: bool = False,
+    ) -> bool:
         """切换控制模式（仅关节 M0-M5，夹爪 M6 固件锁定 MIT）
 
-        流程: 失能 → 切换模式 → 使能。
+        默认流程: 失能 → 切换模式 → 使能。
         切到 MIT 后关节可自由活动；切回 PV 后关节锁定在当前位置。
         夹爪电机始终保持 MIT 模式，不受模式切换影响。
 
         :param mode, "pv" / "mit"
+        :param disable_before_switch, 是否在切换前由 SDK 统一失能
+        :param save_to_flash, 是否请求固件将模式保存到 ESC Flash
         """
         ctrl_mode = ControlMode.PV if mode.lower() == "pv" else ControlMode.MIT
-        return self._joint_ctrl.switch_mode(ctrl_mode)
+        return self._joint_ctrl.switch_mode(
+            ctrl_mode,
+            disable_before_switch=disable_before_switch,
+            save_to_flash=save_to_flash,
+        )
 
     def set_extended_polling(self, enabled: bool) -> None:
         """切换状态轮询模式
