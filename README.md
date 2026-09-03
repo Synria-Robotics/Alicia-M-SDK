@@ -97,6 +97,46 @@ python examples/07_demo_move_joint.py --port COM37 --speed 15
 | 轨迹规划 | `16_demo_joint_traj.py` | 关节空间轨迹规划与执行 |
 | 维护设置 | `17_demo_mit_torque_switch.py` | MIT 力矩开关测试 |
 | 维护设置 | `18_demo_user_settings.py` | 用户设置读写 |
+| 交互工具 | `20_demo_pose_slider_recorder.py` | 6+1 滑块控制、实际姿态记录和 TXT 精确回放 |
+
+### 6+1 滑块姿态记录与精确回放
+
+`20_demo_pose_slider_recorder.py` 提供一个固定为 720x480 的控制窗口。J1~J6
+使用弧度显示并保留三位小数，目标既可以通过滑块调整，也可以在输入框中
+精确输入；夹爪使用 `0~1000` 数值。关节速度、夹爪速度和发送间隔均可在
+窗口中调整。拖动滑块时命令会经过节流处理，不会为每一个界面事件写串口。
+
+记录模式：
+
+```bash
+python examples/20_demo_pose_slider_recorder.py --port COM37 --record poses.txt
+```
+
+点击“记录实际姿态”后，程序重新读取一次机械臂反馈，并向 TXT 追加一行：
+
+```text
+J1_rad J2_rad J3_rad J4_rad J5_rad J6_rad gripper
+```
+
+因此 TXT 保存的是实际关节姿态，而不是尚未到位的滑块目标。窗口还可以撤销
+最后一条记录。默认的根目录 `poses*.txt` 记录文件已加入 `.gitignore`，避免
+误提交实机数据；指定到其它目录的文件由用户自行管理。
+
+回放模式：
+
+```bash
+python examples/20_demo_pose_slider_recorder.py --port COM37 --execute poses.txt
+```
+
+程序会在运动前完整检查字段数量、数值、URDF 关节限位和夹爪范围。回放期间
+终端使用同一行显示六轴目标、夹爪目标、最大关节误差、夹爪误差、到位计数
+和耗时，避免持续刷屏。每个姿态默认需要连续三次满足 `0.008 rad` 关节误差
+和 `10` 的夹爪误差才算到位。
+
+Demo 会读取固件中的实际控制模式，而不是只相信 SDK 的模式缓存。MIT 模式下
+禁止目标发送，滑块跟随机械臂实际姿态；重新进入 PV 后，先同步当前位置并将
+七个电机的线性插补速度写为协议精确零，再等待用户下一次操作，不会自动跳回
+旧目标。切换控制模式和运动前仍需清空工作空间、扶稳机械臂并确认线缆安全。
 
 ## 安装
 
