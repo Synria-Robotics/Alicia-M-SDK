@@ -576,8 +576,9 @@ class MessageCodec:
         if frame.cmd_id == CMD_VERSION:
             return self.decode_version_response(frame)
         elif frame.cmd_id == CMD_JOINT_STATE:
-            # 区分状态响应和控制响应：检查 start_addr 的 bit7
-            if len(frame.data) >= 1 and (frame.data[0] & FEEDBACK_BIT):
+            # A write ACK is exactly three bytes. Full telemetry may also
+            # carry the feedback bit; never discard its motor measurements.
+            if len(frame.data) == 3 and (frame.data[0] & FEEDBACK_BIT):
                 return self.decode_joint_control_response(frame)
             else:
                 return self.decode_joint_state_response(frame)

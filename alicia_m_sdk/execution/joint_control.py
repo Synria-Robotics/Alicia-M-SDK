@@ -170,6 +170,17 @@ class JointController:
 
     # ========== PV 模式 ==========
 
+    def get_motion_contract(self) -> dict:
+        """Read active bounds and existing wait defaults; performs no I/O."""
+        from inspect import signature
+        default = lambda fn, name: float(signature(fn).parameters[name].default)
+        return {"source": "alicia_m_sdk", "joint_limits_lower_rad": list(self._joint_limits_lower),
+            "joint_limits_upper_rad": list(self._joint_limits_upper),
+            "arm_arrival_tolerance_rad": default(self._wait_for_target, "tolerance"),
+            "gripper_arrival_tolerance_count": default(self._wait_for_gripper, "tolerance"),
+            "arm_timeout_s": default(self.move_pv, "timeout"),
+            "gripper_timeout_s": default(self.move_gripper, "timeout")}
+
     def move_pv(
         self,
         target_joints: List[float],

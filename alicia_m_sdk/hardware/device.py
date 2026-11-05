@@ -15,7 +15,7 @@ from typing import Optional, List, Dict, Any
 from .serial_port import SerialPort
 from .frame import Frame
 from .codec import MessageCodec
-from .messages import JointStateRequest, MotorParamReadRequest
+from .messages import JointStateRequest, MotorParamReadRequest, JointControlResponse
 from .constants import (
     CMD_VERSION, CMD_JOINT_STATE, CMD_ERROR, CMD_MOTOR_PARAM,
     AIM_FOLLOWER, NUM_MOTORS,
@@ -429,7 +429,13 @@ class Device:
     def _handle_joint_state(self, frame: Frame) -> None:
         """处理 0x06 关节状态响应"""
         try:
-            response = self._codec.decode_joint_state_response(frame)
+            # 0x06 includes both telemetry and the three-byte write ACK.
+            # The codec already distinguishes them by the feedback bit.
+            response = self._codec.decode_frame(frame)
+            if isinstance(response, JointControlResponse):
+                if response.result != 1:
+                    logger.warning(f"关节控制写入被固件拒绝: addr={response.start_addr}, count={response.addr_count}, result={response.result}")
+                return  # An ACK is never joint feedback or a fresh sample.
             if response is None:
                 return
 

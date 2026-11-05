@@ -909,6 +909,10 @@ class SynriaRobotAPI:
 
     # ========== 内部方法 ==========
 
+    def get_motion_contract(self) -> dict:
+        """Return current SDK joint bounds and arrival defaults without I/O."""
+        return self._joint_ctrl.get_motion_contract()
+
     def _query_control_modes(self) -> Optional[List[dict]]:
         """读取各电机控制模式 (0x11 addr=0x0B)"""
         values = self._device.query_motor_params(MOTOR_PARAM_CTRL_MODE)
